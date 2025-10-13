@@ -1,0 +1,9 @@
+NuGet packages needed to compile the following code:
+
+Selenium.WebDriver
+Selenium.Support
+DotNetSeleniumExtras.WaitHelpers
+Selenium.WebDriver.ChromeDriver
+Selenium.WebDriver.GeckoDriver
+Selenium.WebDriver.MSEdgeDriver
+Selenium.Firefox.WebDriver;

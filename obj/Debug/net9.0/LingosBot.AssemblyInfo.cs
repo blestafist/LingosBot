@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("LingosBot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+04efbc566c1f65322a34967a2c2ab314be0a01d9")]
 [assembly: System.Reflection.AssemblyProductAttribute("LingosBot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("LingosBot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
