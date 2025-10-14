@@ -7,3 +7,4 @@ Selenium.WebDriver.ChromeDriver
 Selenium.WebDriver.GeckoDriver
 Selenium.WebDriver.MSEdgeDriver
 Selenium.Firefox.WebDriver;
+Newtonsoft.Json

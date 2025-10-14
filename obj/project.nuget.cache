@@ -1,10 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "hD4lsMoydMY=",
+  "dgSpecHash": "xJX5Nt+XeIE=",
   "success": true,
   "projectFilePath": "/home/pestit/VSCode/LingosBot/LingosBot.csproj",
   "expectedPackageFiles": [
     "/home/pestit/.nuget/packages/dotnetseleniumextras.waithelpers/3.11.0/dotnetseleniumextras.waithelpers.3.11.0.nupkg.sha512",
+    "/home/pestit/.nuget/packages/newtonsoft.json/13.0.4/newtonsoft.json.13.0.4.nupkg.sha512",
     "/home/pestit/.nuget/packages/selenium.firefox.webdriver/0.27.0/selenium.firefox.webdriver.0.27.0.nupkg.sha512",
     "/home/pestit/.nuget/packages/selenium.support/4.36.0/selenium.support.4.36.0.nupkg.sha512",
     "/home/pestit/.nuget/packages/selenium.webdriver/4.36.0/selenium.webdriver.4.36.0.nupkg.sha512",
