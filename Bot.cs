@@ -19,9 +19,47 @@ namespace LingosBot
         public static IWebDriver webDriver = Helpers.GetWebDriver();
         public static void Main(string[] args)
         {
-            Console.WriteLine(config.email);
+            webDriver.Navigate().GoToUrl("https://lingos.pl/h/login");
+            SeleniumMethods.Login();  // logging in
 
-            Console.WriteLine("Entry point");
+            Console.ReadLine();
+        }
+    }
+
+    internal static class SeleniumMethods
+    {
+        public static void Login()
+        {
+            if (Bot.config.automaticLogin)
+            {
+                try
+                {
+                    string login = Bot.config.email;
+                    string password = Bot.config.password;
+
+                    var declineCookies = Helpers.WaitForElement(By.Id("CybotCookiebotDialogBodyButtonDecline"), 15, ExpectedConditions.ElementToBeClickable(By.Id("CybotCookiebotDialogBodyButtonDecline")));
+                    declineCookies.Click();
+
+                    var loginBox = Helpers.WaitForElement(By.Name("login"), 10, ExpectedConditions.ElementToBeClickable(By.Name("login")));
+                    var passwordBox = Bot.webDriver.FindElement(By.Name("password"));
+                    var submitButton = Bot.webDriver.FindElement(By.Id("submit-login-button"));
+
+                    loginBox.SendKeys(login);
+                    passwordBox.SendKeys(password);
+                    ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", submitButton);
+                }
+
+                catch (Exception e)
+                {
+                    Console.WriteLine("Error while logging in: " + e.Message);
+                }
+            }
+            
+            else
+            {
+                Console.WriteLine("Login to Lingos and press enter...");
+                Console.ReadLine();
+            }
         }
     }
 

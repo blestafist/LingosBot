@@ -6,5 +6,5 @@ DotNetSeleniumExtras.WaitHelpers
 Selenium.WebDriver.ChromeDriver
 Selenium.WebDriver.GeckoDriver
 Selenium.WebDriver.MSEdgeDriver
-Selenium.Firefox.WebDriver;
+Selenium.Firefox.WebDriver
 Newtonsoft.Json
