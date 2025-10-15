@@ -17,18 +17,23 @@ namespace LingosBot
     {
         public static Config config = ConfigDataBaseTweaks.GetConfig(); // getting user config
         public static IWebDriver webDriver = Helpers.GetWebDriver();
-        public static void Main(string[] args)
+        public static void Main(string[] args)  // program entry point
         {
-            webDriver.Navigate().GoToUrl("https://lingos.pl/h/login");
+            webDriver.Navigate().GoToUrl("https://lingos.pl/h/login"); // go to lingos url
             SeleniumMethods.Login();  // logging in
+
+            for (int i = 0; i < config.numberOfLessons; i++)
+            {
+                // do lesson
+            }
 
             Console.ReadLine();
         }
     }
 
-    internal static class SeleniumMethods
+    internal static class SeleniumMethods // a static class for selenium methods, such as Login(), DoLesson() and others
     {
-        public static void Login()
+        public static void Login() // login to Lingos
         {
             if (Bot.config.automaticLogin)
             {
@@ -65,7 +70,7 @@ namespace LingosBot
 
     public static class Helpers
     {
-        public static IWebElement WaitForElement(By by, short timeout = 10, Func<IWebDriver, IWebElement>? function = null)
+        public static IWebElement WaitForElement(By by, short timeout = 10, Func<IWebDriver, IWebElement>? function = null) // wait for element with set timeout and function (ExpectedConditions)
         {
             WebDriverWait wait = new(Bot.webDriver, TimeSpan.FromSeconds(timeout));
             if (function != null)
@@ -76,7 +81,7 @@ namespace LingosBot
             return wait.Until(ExpectedConditions.ElementIsVisible(by));
         }
         
-        public static IWebDriver GetWebDriver()
+        public static IWebDriver GetWebDriver() // just a switch case expression that returns correct web driver for your browser
         {
             return Enum.Parse<AvailibleDrivers>(Bot.config.browser) switch
             {
@@ -90,7 +95,7 @@ namespace LingosBot
     }
 
 
-    enum AvailibleDrivers : byte
+    enum AvailibleDrivers : byte // availible drivers (Browsers)
     {
         Firefox,
         Edge,
