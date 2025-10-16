@@ -16,7 +16,8 @@ namespace LingosBot
 
             for (int i = 0; i < config.numberOfLessons; i++)
             {
-                // do lesson
+                SeleniumMethods.LaunchLesson();
+                SeleniumMethods.DoLesson();
             }
 
             Console.ReadLine();
@@ -27,6 +28,7 @@ namespace LingosBot
 
     internal static class SeleniumMethods // a static class for selenium methods, such as Login(), DoLesson() and others
     {
+        
         public static void Login() // login to Lingos
         {
             if (Bot.config.automaticLogin)
@@ -53,11 +55,33 @@ namespace LingosBot
                     Console.WriteLine("Error while logging in: " + e.Message);
                 }
             }
-            
+
             else
             {
                 Console.WriteLine("Login to Lingos and press enter...");
                 Console.ReadLine();
+            }
+        }
+
+        public static void LaunchLesson()
+        {
+            try
+            {
+                var launchLessonButton = Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"));  // find element by part. name
+                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton); // clicking with JavaScript
+            }
+
+            catch (Exception e)
+            {
+                Console.WriteLine("Error while starting lesson. Message: " + e.Message);
+            }
+        }
+        
+        public static void DoLesson()
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                
             }
         }
     }

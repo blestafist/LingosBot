@@ -32,6 +32,22 @@ namespace LingosBot
                 _ => new ChromeDriver(),
             };
         }
+
+        public static void ClickEnter()
+        {
+            try
+            {
+                var enterButton = WaitForElement(By.Id("enterBtn"), 5, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn")));
+                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", enterButton);
+            }
+
+            catch (Exception e)
+            {
+                Console.WriteLine("Error while clicking enter: " + e.Message);
+            }
+
+            
+        }
     }
     
     enum AvailibleDrivers : byte // availible drivers (Browsers)
