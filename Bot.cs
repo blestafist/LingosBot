@@ -17,6 +17,7 @@ namespace LingosBot
             for (int i = 0; i < config.numberOfLessons; i++)
             {
                 SeleniumMethods.LaunchLesson();
+
                 SeleniumMethods.DoLesson();
             }
 
@@ -81,10 +82,14 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; }
-                else if (Bot.webDriver.PageSource.Contains("Przetłumacz:"))
+                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; } // if page contains UCZ SIE, end lesson
+                else if (Bot.webDriver.PageSource.Contains("Przetłumacz:")) // not completed yet
                 {
-                    // do translation
+                    var wordToTranslate = Helpers.WaitForElement(By.Id("flashcard_main_text")).Text;
+                    var inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"), 15, ExpectedConditions.ElementToBeClickable(By.Id("flashcard_answer_input")));
+
+                    inputField.SendKeys("test");
+                    Helpers.ClickEnter();
                 }
 
                 else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
