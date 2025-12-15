@@ -35,43 +35,43 @@ namespace LingosBot
             {
                 try
                 {
-                    string login = Bot.config.email;
-                    string password = Bot.config.password;
+                    string login = Bot.config.email; // reading config login
+                    string password = Bot.config.password;  // and password
 
                     var declineCookies = Helpers.WaitForElement(By.Id("CybotCookiebotDialogBodyButtonDecline"), 15, ExpectedConditions.ElementToBeClickable(By.Id("CybotCookiebotDialogBodyButtonDecline")));
-                    declineCookies.Click();
+                    declineCookies.Click(); // decline fucking cookies
 
                     var loginBox = Helpers.WaitForElement(By.Name("login"), 10, ExpectedConditions.ElementToBeClickable(By.Name("login")));
                     var passwordBox = Bot.webDriver.FindElement(By.Name("password"));
-                    var submitButton = Bot.webDriver.FindElement(By.Id("submit-login-button"));
+                    var submitButton = Bot.webDriver.FindElement(By.Id("submit-login-button")); // find elemets of login
 
-                    loginBox.SendKeys(login);
-                    passwordBox.SendKeys(password);
-                    ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", submitButton);
+                    loginBox.SendKeys(login); // enter login
+                    passwordBox.SendKeys(password); // enter password
+                    ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", submitButton); // click button via JS (element to be clickable)
                 }
 
-                catch (Exception e)
+                catch (Exception e) // exc
                 {
                     Console.WriteLine("Error while logging in: " + e.Message);
                 }
             }
 
-            else
+            else // if user wants no auto login
             {
                 Console.WriteLine("Login to Lingos and press enter...");
                 Console.ReadLine();
             }
         }
 
-        public static void LaunchLesson()
+        public static void LaunchLesson() // launch lesson
         {
             try
             {
-                var launchLessonButton = Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"));  // find element by part. name
+                var launchLessonButton = Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"));  // find element by part. name (button UCZ SIE)
                 ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton); // clicking with JavaScript
             }
 
-            catch (Exception e)
+            catch (Exception e) // handling exc
             {
                 Console.WriteLine("Error while starting lesson. Message: " + e.Message);
             }
