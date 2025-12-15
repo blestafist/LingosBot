@@ -37,11 +37,11 @@ namespace LingosBot
         {
             try
             {
-                var enterButton = WaitForElement(By.Id("enterBtn"), 5, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn")));
-                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", enterButton);
+                var enterButton = WaitForElement(By.Id("enterBtn"), 5, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn")));  // click enter button func (with JS)
+                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", enterButton); // clicking
             }
 
-            catch (Exception e)
+            catch (Exception e) // handle exc
             {
                 Console.WriteLine("Error while clicking enter: " + e.Message);
             }
