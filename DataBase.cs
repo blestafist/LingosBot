@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using OpenQA.Selenium.Support.Events;
 
 namespace LingosBot
 {
@@ -17,6 +18,26 @@ namespace LingosBot
     public class WordsDataBase
     {
         public Dictionary<string, string> words = []; // key is an original word, value is a translated word
+    }
+
+    public class WordsDataBaseTweaks 
+    {
+        private readonly WordsDataBase dataBase = (WordsDataBase)JsonConvert.DeserializeObject(File.ReadAllText(Bot.config.wordsDataBasePath)) ?? new WordsDataBase();
+        public bool ExistsInDatabase(string word)
+        {
+            return dataBase.words.ContainsKey(word);
+        }
+
+        public string ReturnTranslation(string key)
+        {
+            return dataBase.words[key];
+        }
+
+        public void WriteToDB(string key, string value)
+        {
+            dataBase.words.Add(key, value);
+            File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(dataBase.words));
+        }
     }
     
     public static class ConfigDataBaseTweaks

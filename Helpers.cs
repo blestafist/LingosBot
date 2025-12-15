@@ -45,8 +45,6 @@ namespace LingosBot
             {
                 Console.WriteLine("Error while clicking enter: " + e.Message);
             }
-
-            
         }
     }
     

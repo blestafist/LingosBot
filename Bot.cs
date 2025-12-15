@@ -79,9 +79,18 @@ namespace LingosBot
         
         public static void DoLesson()
         {
-            for (int i = 0; i < 20; i++)
+            while (true)
             {
-                
+                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; }
+                else if (Bot.webDriver.PageSource.Contains("Przetłumacz:"))
+                {
+                    // do translation
+                }
+
+                else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
+                {
+                    // write new word in DB
+                }
             }
         }
     }
