@@ -86,7 +86,7 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("ukończona")) { return; } // if page contains UCZ SIE, end lesson
+                if (Bot.webDriver.PageSource.Contains("Lekcja wykonana")) { return; } // if page contains UCZ SIE, end lesson
                 else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
                 {
                     Console.WriteLine("2nd");
