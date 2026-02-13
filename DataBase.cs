@@ -22,7 +22,19 @@ namespace LingosBot
 
     public class WordsDataBaseTweaks 
     {
-        private readonly WordsDataBase dataBase = (WordsDataBase)JsonConvert.DeserializeObject(File.ReadAllText(Bot.config.wordsDataBasePath)) ?? new WordsDataBase();
+        private WordsDataBase dataBase;
+        public void InitDB()
+        {
+            if (!File.Exists(Bot.config.wordsDataBasePath))
+            {
+                Console.WriteLine("Could not find database path, creating a new file");
+
+                WordsDataBase empty = new();
+                File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(empty));
+            }
+
+            dataBase = JsonConvert.DeserializeObject<WordsDataBase>(File.ReadAllText(Bot.config.wordsDataBasePath));
+        }
         public bool ExistsInDatabase(string word)
         {
             return dataBase.words.ContainsKey(word);
