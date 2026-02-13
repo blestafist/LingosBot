@@ -1,4 +1,5 @@
 using OpenQA.Selenium;
+using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
 
 
@@ -82,9 +83,10 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; } // if page contains UCZ SIE, end lesson
-                else if (Bot.webDriver.PageSource.Contains("Przetłumacz:")) // not completed yet
+                if (Bot.webDriver.PageSource.Contains("ukończona")) { return; } // if page contains UCZ SIE, end lesson
+                else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
                 {
+                    Console.WriteLine("2nd");
                     var wordToTranslate = Helpers.WaitForElement(By.Id("flashcard_main_text")).Text;
                     var inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"), 15, ExpectedConditions.ElementToBeClickable(By.Id("flashcard_answer_input")));
 
@@ -95,6 +97,12 @@ namespace LingosBot
                 else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
                 {
                     // write new word in DB
+                }
+
+                else if (Bot.webDriver.PageSource.Contains("flashcard_error_correct"))
+                {
+                    Console.WriteLine("Found an error!"); // Here you need to write a word to a database
+                    Helpers.ClickEnter();
                 }
             }
         }

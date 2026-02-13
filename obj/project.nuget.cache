@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "5qC/QW8UFuE=",
+  "dgSpecHash": "OimR3IoGunA=",
   "success": true,
-  "projectFilePath": "/home/pestit/VSCode/LingosBot/LingosBot.csproj",
+  "projectFilePath": "/home/pestit/code/LingosBot/LingosBot.csproj",
   "expectedPackageFiles": [
     "/home/pestit/.nuget/packages/dotnetseleniumextras.waithelpers/3.11.0/dotnetseleniumextras.waithelpers.3.11.0.nupkg.sha512",
     "/home/pestit/.nuget/packages/newtonsoft.json/13.0.4/newtonsoft.json.13.0.4.nupkg.sha512",
@@ -11,7 +11,8 @@
     "/home/pestit/.nuget/packages/selenium.webdriver/4.36.0/selenium.webdriver.4.36.0.nupkg.sha512",
     "/home/pestit/.nuget/packages/selenium.webdriver.chromedriver/142.0.7444.2300-beta/selenium.webdriver.chromedriver.142.0.7444.2300-beta.nupkg.sha512",
     "/home/pestit/.nuget/packages/selenium.webdriver.geckodriver/0.36.0/selenium.webdriver.geckodriver.0.36.0.nupkg.sha512",
-    "/home/pestit/.nuget/packages/selenium.webdriver.msedgedriver/141.0.3537.44-pre/selenium.webdriver.msedgedriver.141.0.3537.44-pre.nupkg.sha512"
+    "/home/pestit/.nuget/packages/selenium.webdriver.msedgedriver/141.0.3537.44-pre/selenium.webdriver.msedgedriver.141.0.3537.44-pre.nupkg.sha512",
+    "/home/pestit/.nuget/packages/microsoft.aspnetcore.app.ref/10.0.3/microsoft.aspnetcore.app.ref.10.0.3.nupkg.sha512"
   ],
   "logs": []
 }
