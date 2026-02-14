@@ -74,6 +74,8 @@ namespace LingosBot
             {
                 var launchLessonButton = Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"));  // find element by part. name (button UCZ SIE)
                 ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton); // clicking with JavaScript
+
+                Helpers.WaitForElement(By.Id("flashcard_main_text"));
             }
 
             catch (Exception e) // handling exc
