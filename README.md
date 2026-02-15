@@ -5,10 +5,10 @@
 **Fast automation tool for lingos.pl**  
 Selenium + C# · .NET · Cross-platform
 
-[![C#](https://img.shields.io/badge/language-C%23-239120?style=flat-square&logo=c-sharp&logoColor=white)](https://dotnet.microsoft.com/)
-[![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=flat-square&logo=selenium&logoColor=white)](https://www.selenium.dev/)
-[![.NET](https://img.shields.io/badge/.NET-8C2D91?style=flat-square&logo=.net&logoColor=white)](https://dotnet.microsoft.com/)
-[![MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+[![C#](https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=c-sharp&logoColor=white)](https://dotnet.microsoft.com/)
+[![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=for-the-badge&logo=selenium&logoColor=white)](https://www.selenium.dev/)
+[![.NET](https://img.shields.io/badge/.NET-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 </div>
 
