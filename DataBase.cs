@@ -48,7 +48,7 @@ namespace LingosBot
         public void WriteToDB(string key, string value)
         {
             dataBase.words.Add(key, value);
-            File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(dataBase.words));
+            File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(dataBase, Formatting.Indented));
         }
     }
     
