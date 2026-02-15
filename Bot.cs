@@ -12,13 +12,14 @@ namespace LingosBot
         public static Config config = ConfigDataBaseTweaks.GetConfig(); // getting user config
         public static WordsDataBaseTweaks dataBase = new();
         public static IWebDriver webDriver = Helpers.GetWebDriver();
+
+
         public static void Main(string[] args)  // program entry point
         {
-            if (OperatingSystem.IsWindows()) { Console.WriteLine("GO AND INSTALL LINUX!"); }
+            if (OperatingSystem.IsWindows()) { Console.WriteLine("INSTALL LINUX!"); }
             else if (OperatingSystem.IsLinux()) { Console.WriteLine("LINUX USER :)))"); }
 
 
-            
             webDriver.Navigate().GoToUrl("https://lingos.pl/h/login"); // go to lingos url
             SeleniumMethods.Login();  // logging in
             dataBase.InitDB(); // Initialising words DB
