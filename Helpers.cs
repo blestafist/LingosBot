@@ -5,6 +5,7 @@ using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Edge;
 using OpenQA.Selenium.Firefox;
 using OpenQA.Selenium.Safari;
+using OpenQA.Selenium.Chromium;
 
 namespace LingosBot
 {
@@ -25,11 +26,11 @@ namespace LingosBot
         {
             return Enum.Parse<AvailibleDrivers>(Bot.config.browser) switch
             {
-                AvailibleDrivers.Chrome => new ChromeDriver(),
-                AvailibleDrivers.Edge => new EdgeDriver(),
-                AvailibleDrivers.Firefox => new FirefoxDriver(),
-                AvailibleDrivers.Safari => new SafariDriver(),
-                _ => new ChromeDriver(),
+                AvailibleDrivers.Chrome => new ChromeDriver(BrowsersOptions.GetChromeOptions()),
+                AvailibleDrivers.Edge => new EdgeDriver(BrowsersOptions.GetEdgeOptions()),
+                AvailibleDrivers.Firefox => new FirefoxDriver(BrowsersOptions.GetFirefoxOptions()),
+                AvailibleDrivers.Safari => new SafariDriver(),                
+                _ => new ChromeDriver(BrowsersOptions.GetChromeOptions()),
             };
         }
 
@@ -45,6 +46,49 @@ namespace LingosBot
             {
                 Console.WriteLine("Error while clicking enter: " + e.Message);
             }
+        }
+    }
+
+    internal static class BrowsersOptions
+    {
+        public static ChromeOptions GetChromeOptions()
+        {
+            ChromeOptions options = new();
+            
+            options.AddArgument("--mute-audio");
+            options.AddArgument("--autoplay-policy=no-user-gesture-required");
+
+            options.AddArgument("--no-sandbox");
+            options.AddArgument("--disable-dev-shm-usage");
+            options.AddArgument("--log-level=3");
+
+            return options;
+        }
+
+        public static EdgeOptions GetEdgeOptions()
+        {
+            EdgeOptions options = new();
+
+            options.AddArgument("--mute-audio");
+            options.AddArgument("--log-level=3");
+            options.AddArgument("--no-sandbox");
+
+            return options;
+        }
+
+        public static FirefoxOptions GetFirefoxOptions()
+        {
+            FirefoxOptions options = new();
+
+            options.SetPreference("media.volume_scale", "0.0");
+            options.SetPreference("media.default_volume", "0.0");
+            
+            // Blocking permissions
+            options.SetPreference("permissions.default.microphone", 2);
+            options.SetPreference("permissions.default.camera", 2);
+            options.SetPreference("permissions.default.desktop-notification", 2);
+
+            return options;
         }
     }
     

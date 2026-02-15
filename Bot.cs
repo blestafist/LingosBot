@@ -14,6 +14,11 @@ namespace LingosBot
         public static IWebDriver webDriver = Helpers.GetWebDriver();
         public static void Main(string[] args)  // program entry point
         {
+            if (OperatingSystem.IsWindows()) { Console.WriteLine("GO AND INSTALL LINUX!"); }
+            else if (OperatingSystem.IsLinux()) { Console.WriteLine("LINUX USER :)))"); }
+
+
+            
             webDriver.Navigate().GoToUrl("https://lingos.pl/h/login"); // go to lingos url
             SeleniumMethods.Login();  // logging in
             dataBase.InitDB(); // Initialising words DB
@@ -25,7 +30,7 @@ namespace LingosBot
                 SeleniumMethods.DoLesson();
             }
 
-            Console.ReadLine();
+            webDriver.Quit();
         }
     }
 

@@ -22,7 +22,7 @@ namespace LingosBot
 
     public class WordsDataBaseTweaks 
     {
-        private WordsDataBase dataBase;
+        private WordsDataBase dataBase = new();
         public void InitDB()
         {
             if (!File.Exists(Bot.config.wordsDataBasePath))
@@ -33,7 +33,7 @@ namespace LingosBot
                 File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(empty));
             }
 
-            dataBase = JsonConvert.DeserializeObject<WordsDataBase>(File.ReadAllText(Bot.config.wordsDataBasePath));
+            dataBase = JsonConvert.DeserializeObject<WordsDataBase>(File.ReadAllText(Bot.config.wordsDataBasePath)) ?? new WordsDataBase();
         }
         public bool ExistsInDatabase(string word)
         {
@@ -67,7 +67,7 @@ namespace LingosBot
                 Environment.Exit(0); // quit the program
             }
             
-            Config config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(filePath));
+            Config config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(filePath)) ?? new Config();
             return config ?? new Config();
         }
     }
