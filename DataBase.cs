@@ -13,6 +13,7 @@ namespace LingosBot
         public string browser = "Chrome";
 
         public string wordsDataBasePath = "words.json";
+        public int errorsPer100Words = 5; // number of errors the bot to make per 100 words (5 means 5% chance)
     }
 
     public class WordsDataBase

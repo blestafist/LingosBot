@@ -6,6 +6,7 @@ using OpenQA.Selenium.Edge;
 using OpenQA.Selenium.Firefox;
 using OpenQA.Selenium.Safari;
 using OpenQA.Selenium.Chromium;
+using OpenQA.Selenium.DevTools.V138.Cast;
 
 namespace LingosBot
 {
@@ -46,6 +47,18 @@ namespace LingosBot
             {
                 Console.WriteLine("Error while clicking enter: " + e.Message);
             }
+        }
+
+        public static bool MakeAnError()
+        {
+            int randNum = Bot.rnd.Next(0, 100);
+
+            if (randNum <= Bot.config.errorsPer100Words)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 

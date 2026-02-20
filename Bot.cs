@@ -12,6 +12,7 @@ namespace LingosBot
         public static Config config = ConfigDataBaseTweaks.GetConfig(); // getting user config
         public static WordsDataBaseTweaks dataBase = new();
         public static IWebDriver webDriver = Helpers.GetWebDriver();
+        public static Random rnd = new(); // random generator for making errors with chance
 
 
         public static void Main(string[] args)  // program entry point
@@ -103,7 +104,16 @@ namespace LingosBot
 
                     if (Bot.dataBase.ExistsInDatabase(wordToTranslate))
                     {
-                        inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
+                        if (!Helpers.MakeAnError())
+                        {
+                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
+                        }
+
+                        else
+                        {
+                            inputField.SendKeys(Bot.rnd.Next(0, 1000000).ToString()); // returning a random num
+                        }
+
                         Helpers.ClickEnter();
 
                         Helpers.WaitForElement(By.Id("flashcard_error_correct"));
