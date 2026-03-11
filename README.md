@@ -31,7 +31,8 @@ dotnet restore
 dotnet run
 ```
 
-Set your login & pass and other configuration in first, then in config.json
+Set your login & pass and other configuration in first run, then in config.json
+Headless mode is running the program without a browser window (hidden) → good for servers
 
 ## ⚠️ Important
 
