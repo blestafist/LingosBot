@@ -11,6 +11,7 @@ namespace LingosBot
         public string password = "";
         public int numberOfLessons = 3; // number of lessons to do
         public string browser = "Chrome";
+        public bool headless = true; // headless mode - run without a window
 
         public string wordsDataBasePath = "words.json";
         public int errorsPer100Words = 5; // number of errors the bot to make per 100 words (5 means 5% chance)

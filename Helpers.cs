@@ -75,13 +75,19 @@ namespace LingosBot
             options.AddArgument("--disable-dev-shm-usage");
             options.AddArgument("--log-level=3");
 
+            if (Bot.config.headless) { options.AddArgument("--headless"); }
+
+
             return options;
         }
 
         public static EdgeOptions GetEdgeOptions()
         {
+            // EdgeOptions must indicate Chromium to accept Chrome-style arguments
             EdgeOptions options = new();
 
+            // Use Selenium 4 Headless property
+            if (Bot.config.headless) { options.AddArgument("--headless=new"); }
             options.AddArgument("--mute-audio");
             options.AddArgument("--log-level=3");
             options.AddArgument("--no-sandbox");
@@ -92,6 +98,9 @@ namespace LingosBot
         public static FirefoxOptions GetFirefoxOptions()
         {
             FirefoxOptions options = new();
+
+            // Run Firefox in headless mode
+            if (Bot.config.headless) { options.AddArgument("-headless"); }
 
             options.SetPreference("media.volume_scale", "0.0");
             options.SetPreference("media.default_volume", "0.0");
