@@ -20,6 +20,7 @@ Selenium + C# · .NET · Cross-platform
 - ⚡ High speed (C# + .NET much faster than Python Selenium)
 - 🖥️ Works on Windows · Linux · macOS
 - 🧩 Easy to extend with new task scenarios
+- Headless mode
 
 ## 🚀 Quick Start
 
@@ -30,7 +31,7 @@ dotnet restore
 dotnet run
 ```
 
-Set your login, password and other settings directly in the code (for now).
+Set your login & pass and other configuration in first, then in config.json
 
 ## ⚠️ Important
 
