@@ -1,6 +1,4 @@
 using Newtonsoft.Json;
-using OpenQA.Selenium.Support.Events;
-using System.Collections.Generic;
 
 namespace LingosBot
 {

@@ -5,8 +5,7 @@ using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Edge;
 using OpenQA.Selenium.Firefox;
 using OpenQA.Selenium.Safari;
-using OpenQA.Selenium.Chromium;
-using OpenQA.Selenium.DevTools.V138.Cast;
+
 
 namespace LingosBot
 {

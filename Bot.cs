@@ -1,6 +1,4 @@
-using System.ComponentModel.DataAnnotations.Schema;
 using OpenQA.Selenium;
-using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
 
 
