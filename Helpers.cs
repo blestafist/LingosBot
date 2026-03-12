@@ -49,16 +49,92 @@ namespace LingosBot
             }
         }
 
+        // error streak state to create groups (~2 errors in a row)
+        private static int _errorStreakRemaining = 0;
+        private static readonly int _streakTarget = 2; // target streak length (will vary +-2)
+
         public static bool MakeAnError()
         {
-            int randNum = Bot.rnd.Next(0, 100);
+            // Determine average streak length for uniform [min,max]
+            int minLen = Math.Max(1, _streakTarget - 2);
+            int maxLen = _streakTarget + 2;
+            double avgLen = (minLen + maxLen) / 2.0;
 
-            if (randNum <= Bot.config.errorsPer100Words)
+            double pTarget = Bot.config.errorsPer100Words / 100.0;
+            double pStart = pTarget / avgLen; // per-word probability to start a streak
+
+            if (_errorStreakRemaining > 0)
             {
+                _errorStreakRemaining--;
+                return true;
+            }
+
+            // decide whether to start a new streak
+            double sample = Bot.rnd.NextDouble();
+            if (sample < pStart)
+            {
+                _errorStreakRemaining = Bot.rnd.Next(minLen, maxLen + 1) - 1; // -1 because we'll consume one now
                 return true;
             }
 
             return false;
+        }
+
+        public static string MakeTypo(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            char RandomLetter()
+            {
+                const string letters = "abcdefghijklmnopqrstuvwxyz";
+                return letters[Bot.rnd.Next(letters.Length)];
+            }
+
+            var sb = new System.Text.StringBuilder(text);
+            int len = sb.Length;
+            // choose typo operation
+            int op = Bot.rnd.Next(0, 4); // 0-delete,1-swap,2-substitute,3-insert
+
+            if (len == 1) op = Bot.rnd.Next(2,4); // avoid swap/delete for 1-char
+
+            switch (op)
+            {
+                case 0: // delete random char (avoid deleting spaces)
+                    {
+                        int i = Bot.rnd.Next(0, len);
+                        int tries = 0;
+                        while (tries < 5 && char.IsWhiteSpace(sb[i])) { i = Bot.rnd.Next(0, len); tries++; }
+                        if (!char.IsWhiteSpace(sb[i])) sb.Remove(i, 1);
+                        break;
+                    }
+                case 1: // swap adjacent
+                    {
+                        int i = Bot.rnd.Next(0, Math.Max(1, len - 1));
+                        char tmp = sb[i];
+                        sb[i] = sb[i + 1];
+                        sb[i + 1] = tmp;
+                        break;
+                    }
+                case 2: // substitute
+                    {
+                        int i = Bot.rnd.Next(0, len);
+                        if (!char.IsWhiteSpace(sb[i]))
+                        {
+                            char repl = RandomLetter();
+                            if (char.IsUpper(sb[i])) repl = char.ToUpper(repl);
+                            sb[i] = repl;
+                        }
+                        break;
+                    }
+                case 3: // insert
+                    {
+                        int i = Bot.rnd.Next(0, len + 1);
+                        sb.Insert(i, RandomLetter());
+                        break;
+                    }
+            }
+
+            return sb.ToString();
         }
     }
 

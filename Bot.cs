@@ -111,7 +111,7 @@ namespace LingosBot
 
                         else
                         {
-                            inputField.SendKeys(Bot.rnd.Next(0, 1000000).ToString()); // returning a random num
+                            inputField.SendKeys(Helpers.MakeTypo(Bot.dataBase.ReturnTranslation(wordToTranslate))); // send a typo of the correct translation
                         }
 
                         Helpers.ClickEnter();

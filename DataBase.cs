@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using OpenQA.Selenium.Support.Events;
+using System.Collections.Generic;
 
 namespace LingosBot
 {
@@ -14,12 +15,12 @@ namespace LingosBot
         public bool headless = true; // headless mode - run without a window
 
         public string wordsDataBasePath = "words.json";
-        public int errorsPer100Words = 5; // number of errors the bot to make per 100 words (5 means 5% chance)
+        public int errorsPer100Words = 10; // number of errors the bot to make per 100 words (10 means 10% chance)
     }
 
     public class WordsDataBase
     {
-        public Dictionary<string, string> words = []; // key is an original word, value is a translated word
+        public Dictionary<string, string> words = new Dictionary<string, string>(); // key is an original word, value is a translated word
     }
 
     public class WordsDataBaseTweaks 
