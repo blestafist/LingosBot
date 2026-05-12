@@ -23,11 +23,25 @@ namespace LingosBot
             SeleniumMethods.Login();  // logging in
             dataBase.InitDB(); // Initialising words DB
 
-            for (int i = 0; i < config.numberOfLessons; i++)
-            {
-                SeleniumMethods.LaunchLesson();
+            // Get all classes and iterate through them
+            var classes = SeleniumMethods.GetAllClasses();
+            Console.WriteLine($"Found {classes.Count} classes");
 
-                SeleniumMethods.DoLesson();
+            foreach (var className in classes)
+            {
+                Console.WriteLine($"\n=== Working on class: {className} ===");
+                SeleniumMethods.SwitchToClass(className);
+
+                // Try to activate Wyzwanie if available
+                SeleniumMethods.TryActivateWyzwanie();
+
+                // Do lessons for this class
+                for (int i = 0; i < config.numberOfLessons; i++)
+                {
+                    Console.WriteLine($"Lesson {i + 1}/{config.numberOfLessons} for class {className}");
+                    SeleniumMethods.LaunchLesson();
+                    SeleniumMethods.DoLesson();
+                }
             }
 
             webDriver.Quit();
@@ -38,7 +52,7 @@ namespace LingosBot
 
     internal static class SeleniumMethods // a static class for selenium methods, such as Login(), DoLesson() and others
     {
-        
+
         public static void Login() // login to Lingos
         {
             if (Bot.config.automaticLogin)
@@ -70,6 +84,104 @@ namespace LingosBot
             {
                 Console.WriteLine("Login to Lingos and press enter...");
                 Console.ReadLine();
+            }
+        }
+
+        public static List<string> GetAllClasses()
+        {
+            List<string> classes = new List<string>();
+
+            try
+            {
+                // Wait for main page to load
+                Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"), 15);
+
+                // Try to find class name on the page
+                var classElements = Bot.webDriver.FindElements(By.CssSelector("h5.h5.mb-0"));
+
+                foreach (var element in classElements)
+                {
+                    string className = element.Text.Trim();
+                    if (!string.IsNullOrEmpty(className) && !classes.Contains(className))
+                    {
+                        classes.Add(className);
+                        Console.WriteLine($"Found class: {className}");
+                    }
+                }
+
+                // If no classes found, add a default one
+                if (classes.Count == 0)
+                {
+                    classes.Add("default");
+                    Console.WriteLine("No classes found, using default");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error while getting classes: " + e.Message);
+                classes.Add("default");
+            }
+
+            return classes;
+        }
+
+        public static void SwitchToClass(string className)
+        {
+            try
+            {
+                // Navigate back to main page
+                Bot.webDriver.Navigate().GoToUrl("https://lingos.pl/student-confirmed/group");
+                Thread.Sleep(1000);
+
+                Console.WriteLine($"Switched to class: {className}");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error while switching class: " + e.Message);
+            }
+        }
+
+        public static void TryActivateWyzwanie()
+        {
+            try
+            {
+                // Check if Wyzwania button exists and is clickable
+                var wyzwaniaButton = Bot.webDriver.FindElements(By.CssSelector("a[data-bs-target='#wyzwaniaModal']"));
+
+                if (wyzwaniaButton.Count > 0 && wyzwaniaButton[0].Displayed)
+                {
+                    Console.WriteLine("Wyzwanie available, trying to activate...");
+                    ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", wyzwaniaButton[0]);
+                    Thread.Sleep(1000);
+
+                    // Try to find and click first challenge in the modal
+                    var challengeButtons = Bot.webDriver.FindElements(By.CssSelector("#wyzwaniaModal .btn-primary, #wyzwaniaModal button[type='submit']"));
+
+                    if (challengeButtons.Count > 0)
+                    {
+                        ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", challengeButtons[0]);
+                        Console.WriteLine("Wyzwanie activated!");
+                        Thread.Sleep(1000);
+                    }
+                    else
+                    {
+                        Console.WriteLine("No challenges found in modal");
+                        // Close modal
+                        var closeButton = Bot.webDriver.FindElements(By.CssSelector("#wyzwaniaModal .btn-close"));
+                        if (closeButton.Count > 0)
+                        {
+                            closeButton[0].Click();
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("No Wyzwanie available");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Error while activating Wyzwanie: " + e.Message);
             }
         }
 
