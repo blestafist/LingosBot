@@ -23,14 +23,17 @@ namespace LingosBot
             SeleniumMethods.Login();  // logging in
             dataBase.InitDB(); // Initialising words DB
 
-            // Get all classes and iterate through them
-            var classes = SeleniumMethods.GetAllClasses();
-            Console.WriteLine($"Found {classes.Count} classes");
+            // Get all classes from dropdown
+            var classUrls = SeleniumMethods.GetAllClassUrls();
+            Console.WriteLine($"Found {classUrls.Count} classes");
 
-            foreach (var className in classes)
+            foreach (var classUrl in classUrls)
             {
-                Console.WriteLine($"\n=== Working on class: {className} ===");
-                SeleniumMethods.SwitchToClass(className);
+                Console.WriteLine($"\n=== Working on class: {classUrl.Key} ===");
+
+                // Navigate to class
+                webDriver.Navigate().GoToUrl("https://lingos.pl" + classUrl.Value);
+                Thread.Sleep(1500);
 
                 // Try to activate Wyzwanie if available
                 SeleniumMethods.TryActivateWyzwanie();
@@ -38,12 +41,17 @@ namespace LingosBot
                 // Do lessons for this class
                 for (int i = 0; i < config.numberOfLessons; i++)
                 {
-                    Console.WriteLine($"Lesson {i + 1}/{config.numberOfLessons} for class {className}");
+                    Console.WriteLine($"Lesson {i + 1}/{config.numberOfLessons} for class {classUrl.Key}");
                     SeleniumMethods.LaunchLesson();
                     SeleniumMethods.DoLesson();
+
+                    // Return to class page after lesson
+                    webDriver.Navigate().GoToUrl("https://lingos.pl" + classUrl.Value);
+                    Thread.Sleep(1000);
                 }
             }
 
+            Console.WriteLine("\n=== All lessons completed for all classes! ===");
             webDriver.Quit();
         }
     }
@@ -87,58 +95,70 @@ namespace LingosBot
             }
         }
 
-        public static List<string> GetAllClasses()
+        public static Dictionary<string, string> GetAllClassUrls()
         {
-            List<string> classes = new List<string>();
+            Dictionary<string, string> classUrls = new Dictionary<string, string>();
 
             try
             {
-                // Wait for main page to load
-                Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"), 15);
+                // Navigate to main page
+                Bot.webDriver.Navigate().GoToUrl("https://lingos.pl/student-confirmed/group");
+                Thread.Sleep(1500);
 
-                // Try to find class name on the page
-                var classElements = Bot.webDriver.FindElements(By.CssSelector("h5.h5.mb-0"));
+                // Find all option elements with group-change URLs
+                var options = Bot.webDriver.FindElements(By.CssSelector("option[value*='group-change']"));
 
-                foreach (var element in classElements)
+                if (options.Count == 0)
                 {
-                    string className = element.Text.Trim();
-                    if (!string.IsNullOrEmpty(className) && !classes.Contains(className))
+                    // Try to find select element first
+                    var selects = Bot.webDriver.FindElements(By.TagName("select"));
+                    foreach (var select in selects)
                     {
-                        classes.Add(className);
-                        Console.WriteLine($"Found class: {className}");
+                        var selectOptions = select.FindElements(By.TagName("option"));
+                        foreach (var option in selectOptions)
+                        {
+                            string value = option.GetAttribute("value");
+                            if (!string.IsNullOrEmpty(value) && value.Contains("group-change"))
+                            {
+                                string className = option.Text.Trim();
+                                if (!string.IsNullOrEmpty(className))
+                                {
+                                    classUrls[className] = value;
+                                    Console.WriteLine($"Found class: {className} -> {value}");
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var option in options)
+                    {
+                        string value = option.GetAttribute("value");
+                        string className = option.Text.Trim();
+
+                        if (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(className))
+                        {
+                            classUrls[className] = value;
+                            Console.WriteLine($"Found class: {className} -> {value}");
+                        }
                     }
                 }
 
-                // If no classes found, add a default one
-                if (classes.Count == 0)
+                // If no classes found, use current page
+                if (classUrls.Count == 0)
                 {
-                    classes.Add("default");
-                    Console.WriteLine("No classes found, using default");
+                    Console.WriteLine("No class dropdown found, using current page");
+                    classUrls["default"] = "/student-confirmed/group";
                 }
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error while getting classes: " + e.Message);
-                classes.Add("default");
+                Console.WriteLine("Error while getting class URLs: " + e.Message);
+                classUrls["default"] = "/student-confirmed/group";
             }
 
-            return classes;
-        }
-
-        public static void SwitchToClass(string className)
-        {
-            try
-            {
-                // Navigate back to main page
-                Bot.webDriver.Navigate().GoToUrl("https://lingos.pl/student-confirmed/group");
-                Thread.Sleep(1000);
-
-                Console.WriteLine($"Switched to class: {className}");
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Error while switching class: " + e.Message);
-            }
+            return classUrls;
         }
 
         public static void TryActivateWyzwanie()
@@ -205,55 +225,171 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("Lekcja wykonana")) { return; } // if page contains UCZ SIE, end lesson
-                else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
+                // Check if lesson is finished
+                if (Bot.webDriver.Url.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine("2nd");
-                    var wordToTranslate = Helpers.WaitForElement(By.Id("flashcard_main_text")).Text;
-                    var inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"), 15, ExpectedConditions.ElementToBeClickable(By.Id("flashcard_answer_input")));
+                    Console.WriteLine("Lesson completed (URL check)!");
+                    return;
+                }
 
+                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ"))
+                {
+                    Console.WriteLine("Lesson completed!");
+                    return;
+                }
+
+                // Wait for main text element
+                IWebElement? mainEl = null;
+                try
+                {
+                    mainEl = Helpers.WaitForElement(By.Id("flashcard_main_text"), 5);
+                }
+                catch
+                {
+                    Console.WriteLine("No main text found, retrying...");
+                    Thread.Sleep(500);
+                    continue;
+                }
+
+                string wordToTranslate = mainEl.Text.Trim();
+                Console.WriteLine($"Question: {wordToTranslate}");
+
+                // Check if input field is visible and enabled
+                var inputElements = Bot.webDriver.FindElements(By.Id("flashcard_answer_input"));
+                IWebElement? inputField = Helpers.FirstVisibleEnabled(inputElements);
+                bool canType = inputField != null;
+
+                if (canType)
+                {
+                    Console.WriteLine("Input field is available, entering answer...");
+
+                    string answer = "";
                     if (Bot.dataBase.ExistsInDatabase(wordToTranslate))
                     {
                         if (!Helpers.MakeAnError())
                         {
-                            inputField.SendKeys(Bot.dataBase.ReturnRandomTranslation(wordToTranslate));
+                            answer = Bot.dataBase.ReturnRandomTranslation(wordToTranslate);
+                            Console.WriteLine($"Using translation from DB: {answer}");
                         }
-
-                        Helpers.ClickEnter();
-
-                        // Check if answer was correct or wrong
-                        Thread.Sleep(500); // wait for page to update
-                        bool isCorrect = Bot.webDriver.PageSource.Contains("btn-primary"); // success has btn-primary
-                        bool isWrong = Bot.webDriver.PageSource.Contains("btn-danger"); // fail has btn-danger
-
-                        if (isWrong)
+                        else
                         {
-                            // We got it wrong, save the correct answer
-                            var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
-                            Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
-                            Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                            Console.WriteLine("Making intentional error (leaving blank)");
                         }
-                        else if (isCorrect)
-                        {
-                            Console.WriteLine("Correct answer!");
-                        }
-
-                        Helpers.ClickEnter();
                     }
-
                     else
                     {
-                        Helpers.ClickEnter();
-                        var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
-                        Console.WriteLine("I see the correct word, it is " + correctWord);
-                        Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
-                        Helpers.ClickEnter();
+                        Console.WriteLine("Word not in database, leaving blank");
+                    }
+
+                    // Use FastSetInputValue instead of SendKeys
+                    Helpers.FastSetInputValue(inputField!, answer);
+                }
+                else
+                {
+                    Console.WriteLine("No input field (probably 'Nowe słowo' or result screen)");
+                }
+
+                // Click Enter
+                Helpers.ClickEnter();
+
+                // Wait for state to change
+                string currentWord = wordToTranslate;
+                bool currentCanType = canType;
+
+                try
+                {
+                    Helpers.WaitForCondition(() =>
+                    {
+                        // Check if finished
+                        if (Bot.webDriver.Url.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+
+                        if (Bot.webDriver.PageSource.Contains("Lekcja wykonana"))
+                        {
+                            return true;
+                        }
+
+                        // Check if word changed
+                        try
+                        {
+                            string nowText = Bot.webDriver.FindElement(By.Id("flashcard_main_text")).Text.Trim();
+                            if (nowText != currentWord)
+                            {
+                                return true;
+                            }
+                        }
+                        catch
+                        {
+                            // element not found, state changed
+                            return true;
+                        }
+
+                        // Check if input availability changed
+                        var nowInputs = Bot.webDriver.FindElements(By.Id("flashcard_answer_input"));
+                        bool nowCanType = Helpers.FirstVisibleEnabled(nowInputs) != null;
+                        if (nowCanType != currentCanType)
+                        {
+                            return true;
+                        }
+
+                        return false;
+                    }, timeoutSeconds: 2.0, pollMs: 50);
+                }
+                catch (WebDriverTimeoutException)
+                {
+                    Console.WriteLine("State didn't change, retrying click...");
+                    Helpers.ClickEnter();
+
+                    try
+                    {
+                        Helpers.WaitForCondition(() =>
+                        {
+                            if (Bot.webDriver.Url.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+
+                            try
+                            {
+                                string nowText = Bot.webDriver.FindElement(By.Id("flashcard_main_text")).Text.Trim();
+                                return nowText != currentWord;
+                            }
+                            catch
+                            {
+                                return true;
+                            }
+                        }, timeoutSeconds: 2.0, pollMs: 50);
+                    }
+                    catch
+                    {
+                        Console.WriteLine("Still stuck, continuing anyway...");
                     }
                 }
 
-                else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
+                // If we just answered and now see the result, save correct answer if wrong
+                if (canType && Bot.webDriver.PageSource.Contains("flashcard_error_correct"))
                 {
-                    Helpers.ClickEnter(); // just skip new word screen
+                    try
+                    {
+                        var correctElement = Bot.webDriver.FindElement(By.Id("flashcard_error_correct"));
+                        string correctWord = correctElement.Text.Trim();
+
+                        if (Bot.webDriver.PageSource.Contains("btn-danger"))
+                        {
+                            Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
+                            Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Correct answer: {correctWord}");
+                        }
+                    }
+                    catch
+                    {
+                        // couldn't get correct word, ignore
+                    }
                 }
             }
         }
