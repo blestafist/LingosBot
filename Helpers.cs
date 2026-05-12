@@ -22,67 +22,6 @@ namespace LingosBot
             return wait.Until(ExpectedConditions.ElementIsVisible(by));
         }
 
-        public static void WaitForCondition(Func<bool> condition, double timeoutSeconds = 2.0, int pollMs = 30)
-        {
-            DateTime end = DateTime.UtcNow.AddSeconds(timeoutSeconds);
-
-            while (DateTime.UtcNow < end)
-            {
-                try
-                {
-                    if (condition())
-                    {
-                        return;
-                    }
-                }
-                catch
-                {
-                    // ignore exceptions during polling
-                }
-
-                Thread.Sleep(pollMs);
-            }
-
-            throw new WebDriverTimeoutException($"Condition not met within {timeoutSeconds} seconds");
-        }
-
-        public static IWebElement? FirstVisibleEnabled(IReadOnlyCollection<IWebElement> elements)
-        {
-            foreach (var el in elements)
-            {
-                try
-                {
-                    if (el.Displayed && el.Enabled)
-                    {
-                        return el;
-                    }
-                }
-                catch
-                {
-                    // ignore stale elements
-                }
-            }
-            return null;
-        }
-
-        public static void FastSetInputValue(IWebElement inputEl, string value)
-        {
-            string finalValue = value ?? "";
-
-            ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript(@"
-                const el = arguments[0];
-                const val = arguments[1];
-                el.focus();
-                const setter =
-                    Object.getOwnPropertyDescriptor(el.__proto__, 'value')?.set
-                    || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-                if (setter) setter.call(el, val);
-                else el.value = val;
-                el.dispatchEvent(new Event('input',  { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            ", inputEl, finalValue);
-        }
-
         public static IWebDriver GetWebDriver() // just a switch case expression that returns correct web driver for your browser
         {
             return Enum.Parse<AvailibleDrivers>(Bot.config.browser) switch
