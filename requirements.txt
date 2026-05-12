@@ -8,3 +8,13 @@ Selenium.WebDriver.GeckoDriver
 Selenium.WebDriver.MSEdgeDriver
 Selenium.Firefox.WebDriver
 Newtonsoft.Json
+
+Build (Debug):
+→ dotnet run
+
+Build (release) (Windows):
+→ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+Build (release) (Linux):
+→ dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
+
