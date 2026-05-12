@@ -18,7 +18,7 @@ namespace LingosBot
 
     public class WordsDataBase
     {
-        public Dictionary<string, string> words = new Dictionary<string, string>(); // key is an original word, value is a translated word
+        public Dictionary<string, List<string>> words = new Dictionary<string, List<string>>(); // key is an original word, value is a list of translated words
     }
 
     public class WordsDataBaseTweaks 
@@ -41,15 +41,24 @@ namespace LingosBot
             return dataBase.words.ContainsKey(word);
         }
 
-        public string ReturnTranslation(string key)
+        public string ReturnRandomTranslation(string key)
         {
-            return dataBase.words[key];
+            var translations = dataBase.words[key];
+            return translations[Bot.rnd.Next(translations.Count)]; // return random translation from list
         }
 
         public void WriteToDB(string key, string value)
         {
-            dataBase.words.Add(key, value);
-            File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(dataBase, Formatting.Indented));
+            if (!dataBase.words.ContainsKey(key))
+            {
+                dataBase.words.Add(key, new List<string>());
+            }
+
+            if (!dataBase.words[key].Contains(value)) // avoid duplicates
+            {
+                dataBase.words[key].Add(value);
+                File.WriteAllText(Bot.config.wordsDataBasePath, JsonConvert.SerializeObject(dataBase, Formatting.Indented));
+            }
         }
     }
     

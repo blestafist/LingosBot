@@ -104,12 +104,28 @@ namespace LingosBot
                     {
                         if (!Helpers.MakeAnError())
                         {
-                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
+                            inputField.SendKeys(Bot.dataBase.ReturnRandomTranslation(wordToTranslate));
                         }
 
                         Helpers.ClickEnter();
 
-                        Helpers.WaitForElement(By.Id("flashcard_error_correct"));
+                        // Check if answer was correct or wrong
+                        Thread.Sleep(500); // wait for page to update
+                        bool isCorrect = Bot.webDriver.PageSource.Contains("btn-primary"); // success has btn-primary
+                        bool isWrong = Bot.webDriver.PageSource.Contains("btn-danger"); // fail has btn-danger
+
+                        if (isWrong)
+                        {
+                            // We got it wrong, save the correct answer
+                            var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
+                            Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
+                            Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                        }
+                        else if (isCorrect)
+                        {
+                            Console.WriteLine("Correct answer!");
+                        }
+
                         Helpers.ClickEnter();
                     }
 
@@ -125,7 +141,7 @@ namespace LingosBot
 
                 else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
                 {
-                    // write new word in DB
+                    Helpers.ClickEnter(); // just skip new word screen
                 }
             }
         }
