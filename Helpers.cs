@@ -78,63 +78,6 @@ namespace LingosBot
 
             return false;
         }
-
-        public static string MakeTypo(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return text;
-
-            char RandomLetter()
-            {
-                const string letters = "abcdefghijklmnopqrstuvwxyz";
-                return letters[Bot.rnd.Next(letters.Length)];
-            }
-
-            var sb = new System.Text.StringBuilder(text);
-            int len = sb.Length;
-            // choose typo operation
-            int op = Bot.rnd.Next(0, 4); // 0-delete,1-swap,2-substitute,3-insert
-
-            if (len == 1) op = Bot.rnd.Next(2,4); // avoid swap/delete for 1-char
-
-            switch (op)
-            {
-                case 0: // delete random char (avoid deleting spaces)
-                    {
-                        int i = Bot.rnd.Next(0, len);
-                        int tries = 0;
-                        while (tries < 5 && char.IsWhiteSpace(sb[i])) { i = Bot.rnd.Next(0, len); tries++; }
-                        if (!char.IsWhiteSpace(sb[i])) sb.Remove(i, 1);
-                        break;
-                    }
-                case 1: // swap adjacent
-                    {
-                        int i = Bot.rnd.Next(0, Math.Max(1, len - 1));
-                        char tmp = sb[i];
-                        sb[i] = sb[i + 1];
-                        sb[i + 1] = tmp;
-                        break;
-                    }
-                case 2: // substitute
-                    {
-                        int i = Bot.rnd.Next(0, len);
-                        if (!char.IsWhiteSpace(sb[i]))
-                        {
-                            char repl = RandomLetter();
-                            if (char.IsUpper(sb[i])) repl = char.ToUpper(repl);
-                            sb[i] = repl;
-                        }
-                        break;
-                    }
-                case 3: // insert
-                    {
-                        int i = Bot.rnd.Next(0, len + 1);
-                        sb.Insert(i, RandomLetter());
-                        break;
-                    }
-            }
-
-            return sb.ToString();
-        }
     }
 
     internal static class BrowsersOptions

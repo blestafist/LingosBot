@@ -107,11 +107,6 @@ namespace LingosBot
                             inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
                         }
 
-                        else
-                        {
-                            inputField.SendKeys(Helpers.MakeTypo(Bot.dataBase.ReturnTranslation(wordToTranslate))); // send a typo of the correct translation
-                        }
-
                         Helpers.ClickEnter();
 
                         Helpers.WaitForElement(By.Id("flashcard_error_correct"));
