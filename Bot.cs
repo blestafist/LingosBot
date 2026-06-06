@@ -142,7 +142,7 @@ namespace LingosBot
 
                 else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
                 {
-                    // write new word in DB
+                    Helpers.ClickEnter(); // просто кликнем ентер, потом подтянем слово позже
                 }
             }
         }
