@@ -114,12 +114,12 @@ namespace LingosBot
                         var enterBtn = Bot.webDriver.FindElement(By.Id("enterBtn")); // ищем кнопочку ентер чтобы украть у нее класс
                         bool isWrong = enterBtn.GetAttribute("class")?.Contains("btn-danger") == true; // если класс это ошибковая кнопка то мы сделали неправильно
 
-                        if (isWrong)
+                        if (isWrong && !needAnError)
                         {
-                            // We got it wrong, save the correct answer
+                            // Мы где то ошиблись (дубликат слова), значит надо переписать бд
                             var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
                             Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
-                            // Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                            Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
                         }
 
                         else
