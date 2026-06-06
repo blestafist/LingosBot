@@ -1,4 +1,5 @@
 using OpenQA.Selenium;
+using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
 
 
@@ -93,7 +94,7 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
+                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; } // if page contains UCZ SIE, end lesson
                 else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
                 {
                     Console.WriteLine("2nd");
@@ -111,15 +112,15 @@ namespace LingosBot
                         Helpers.ClickEnter(); // и кликаем ентер
                         Helpers.WaitForElement(By.Id("flashcard_error_correct")); // wait for flashcard with result
                         
-                        var enterBtn = Bot.webDriver.FindElement(By.Id("enterBtn")); // ищем кнопочку ентер чтобы украть у нее класс
+                        var enterBtn = Helpers.WaitForElement(By.Id("enterBtn"), 10, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn"))); // ищем кнопочку ентер чтобы украть у нее класс
                         bool isWrong = enterBtn.GetAttribute("class")?.Contains("btn-danger") == true; // если класс это ошибковая кнопка то мы сделали неправильно
 
-                        if (isWrong && !needAnError)
+                        if (isWrong)
                         {
                             // Мы где то ошиблись (дубликат слова), значит надо переписать бд
-                            var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
+                            var correctWord = Bot.webDriver.FindElement(By.Id("flashcard_error_correct")).Text;
                             Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
-                            Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                            // Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
                         }
 
                         else
@@ -128,6 +129,13 @@ namespace LingosBot
                         }
 
                         Helpers.ClickEnter();
+
+                        new WebDriverWait(Bot.webDriver, TimeSpan.FromSeconds(10))
+                            .Until(d =>
+                                d.FindElements(By.Id("flashcard_error_correct")).Count == 0
+                            );
+
+                        inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"));
                     }
 
                     else
