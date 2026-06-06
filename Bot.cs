@@ -93,7 +93,7 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("Lekcja wykonana")) { return; } // if page contains UCZ SIE, end lesson
+                if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
                 else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
                 {
                     Console.WriteLine("2nd");
@@ -102,14 +102,31 @@ namespace LingosBot
 
                     if (Bot.dataBase.ExistsInDatabase(wordToTranslate))
                     {
-                        if (!Helpers.MakeAnError())
+                        bool needAnError = Helpers.MakeAnError();
+                        if (!needAnError) // если не надо делать ошибку, то
                         {
-                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
+                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate)); // вписываем нормальный ответ, иначе просто ничего не вписываем
                         }
 
-                        Helpers.ClickEnter();
+                        Helpers.ClickEnter(); // и кликаем ентер
+                        Helpers.WaitForElement(By.Id("flashcard_error_correct")); // wait for flashcard with result
+                        
+                        var enterBtn = Bot.webDriver.FindElement(By.Id("enterBtn")); // ищем кнопочку ентер чтобы украть у нее класс
+                        bool isWrong = enterBtn.GetAttribute("class")?.Contains("btn-danger") == true; // если класс это ошибковая кнопка то мы сделали неправильно
 
-                        Helpers.WaitForElement(By.Id("flashcard_error_correct"));
+                        if (isWrong)
+                        {
+                            // We got it wrong, save the correct answer
+                            var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
+                            Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
+                            // Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
+                        }
+
+                        else
+                        {
+                            Console.WriteLine("Correct answer!");
+                        }
+
                         Helpers.ClickEnter();
                     }
 
