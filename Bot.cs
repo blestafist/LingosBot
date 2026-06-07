@@ -94,7 +94,7 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("UCZ SIĘ")) { return; } // if page contains UCZ SIE, end lesson
+                if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
                 else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
                 {
                     Console.WriteLine("2nd");
@@ -130,12 +130,24 @@ namespace LingosBot
 
                         Helpers.ClickEnter();
 
+
                         new WebDriverWait(Bot.webDriver, TimeSpan.FromSeconds(10))
                             .Until(d =>
                                 d.FindElements(By.Id("flashcard_error_correct")).Count == 0
                             );
 
-                        inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"));
+                        if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
+
+                        try
+                        {
+                            inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"));
+                        }
+
+                        catch
+                        {
+                            return;
+                        }
+
                     }
 
                     else
