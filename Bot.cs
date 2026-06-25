@@ -10,7 +10,7 @@ namespace LingosBot
     {
         public static Config config = ConfigDataBaseTweaks.GetConfig(); // getting user config
         public static WordsDataBaseTweaks dataBase = new();
-        public static IWebDriver webDriver = Helpers.GetWebDriver();
+        public static IWebDriver webDriver = new BrowserFactory().Create(config);
         public static Random rnd = new(); // random generator for making errors with chance
 
 
