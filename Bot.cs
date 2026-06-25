@@ -9,8 +9,9 @@ namespace LingosBot
     internal class Bot
     {
         public static Config config = ConfigDataBaseTweaks.GetConfig(); // getting user config
+        public static AppConfig appConfig = new AppConfig(config);
         public static WordsDataBaseTweaks dataBase = new();
-        public static IWebDriver webDriver = Helpers.GetWebDriver();
+        public static IWebDriver webDriver = new BrowserFactory().Create(config);
         public static Random rnd = new(); // random generator for making errors with chance
 
 
@@ -20,11 +21,12 @@ namespace LingosBot
             else if (OperatingSystem.IsLinux()) { Console.WriteLine("LINUX USER :)))"); }
 
 
-            webDriver.Navigate().GoToUrl("https://lingos.pl/h/login"); // go to lingos url
-            SeleniumMethods.Login();  // logging in
-            dataBase.InitDB(); // Initialising words DB
+            webDriver.Navigate().GoToUrl(appConfig.LoginUrl);
+            var loginService = new LoginService(webDriver, appConfig);
+            loginService.Login();
+            dataBase.InitDB();
 
-            for (int i = 0; i < config.numberOfLessons; i++)
+            for (int i = 0; i < appConfig.NumberOfLessons; i++)
             {
                 SeleniumMethods.LaunchLesson();
 
@@ -37,54 +39,19 @@ namespace LingosBot
 
 
 
-    internal static class SeleniumMethods // a static class for selenium methods, such as Login(), DoLesson() and others
+    internal static class SeleniumMethods
     {
-        
-        public static void Login() // login to Lingos
-        {
-            if (Bot.config.automaticLogin)
-            {
-                try
-                {
-                    string login = Bot.config.email; // reading config login
-                    string password = Bot.config.password;  // and password
-
-                    var declineCookies = Helpers.WaitForElement(By.Id("CybotCookiebotDialogBodyButtonDecline"), 15, ExpectedConditions.ElementToBeClickable(By.Id("CybotCookiebotDialogBodyButtonDecline")));
-                    declineCookies.Click(); // decline fucking cookies
-
-                    var loginBox = Helpers.WaitForElement(By.Name("login"), 10, ExpectedConditions.ElementToBeClickable(By.Name("login")));
-                    var passwordBox = Bot.webDriver.FindElement(By.Name("password"));
-                    var submitButton = Bot.webDriver.FindElement(By.Id("submit-login-button")); // find elemets of login
-
-                    loginBox.SendKeys(login); // enter login
-                    passwordBox.SendKeys(password); // enter password
-                    ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click();", submitButton); // click button via JS (element to be clickable)
-                }
-
-                catch (Exception e) // exc
-                {
-                    Console.WriteLine("Error while logging in: " + e.Message);
-                }
-            }
-
-            else // if user wants no auto login
-            {
-                Console.WriteLine("Login to Lingos and press enter...");
-                Console.ReadLine();
-            }
-        }
-
-        public static void LaunchLesson() // launch lesson
+        public static void LaunchLesson()
         {
             try
             {
-                var launchLessonButton = Helpers.WaitForElement(By.PartialLinkText("UCZ SIĘ"));  // find element by part. name (button UCZ SIE)
-                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton); // clicking with JavaScript
+                var launchLessonButton = Helpers.WaitForElement(Selectors.MainLearnButton.ToBy());
+                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton);
 
-                Helpers.WaitForElement(By.Id("flashcard_main_text"));
+                Helpers.WaitForElement(Selectors.LessonPrompt.ToBy());
             }
 
-            catch (Exception e) // handling exc
+            catch (Exception e)
             {
                 Console.WriteLine("Error while starting lesson. Message: " + e.Message);
             }
@@ -94,35 +61,34 @@ namespace LingosBot
         {
             while (true)
             {
-                if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
-                else if (Bot.webDriver.PageSource.Contains("Przetłumacz")) // not completed yet
+                if (Bot.webDriver.PageSource.Contains("UCZ")) { return; }
+                else if (Bot.webDriver.PageSource.Contains("Przetłumacz"))
                 {
                     Console.WriteLine("2nd");
-                    var wordToTranslate = Helpers.WaitForElement(By.Id("flashcard_main_text")).Text;
-                    var inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"), 15, ExpectedConditions.ElementToBeClickable(By.Id("flashcard_answer_input")));
+                    var wordToTranslate = Helpers.WaitForElement(Selectors.LessonPrompt.ToBy()).Text;
+                    var inputField = Helpers.WaitForElement(Selectors.LessonAnswerInput.ToBy(), 15,
+                        ExpectedConditions.ElementToBeClickable(Selectors.LessonAnswerInput.ToBy()));
 
                     if (Bot.dataBase.ExistsInDatabase(wordToTranslate))
                     {
                         bool needAnError = Helpers.MakeAnError();
-                        if (!needAnError) // если не надо делать ошибку, то
+                        if (!needAnError)
                         {
-                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate)); // вписываем нормальный ответ, иначе просто ничего не вписываем
+                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
                         }
 
-                        Helpers.ClickEnter(); // и кликаем ентер
-                        Helpers.WaitForElement(By.Id("flashcard_error_correct")); // wait for flashcard with result
-                        
-                        var enterBtn = Helpers.WaitForElement(By.Id("enterBtn"), 10, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn"))); // ищем кнопочку ентер чтобы украть у нее класс
-                        bool isWrong = enterBtn.GetAttribute("class")?.Contains("btn-danger") == true; // если класс это ошибковая кнопка то мы сделали неправильно
+                        Helpers.ClickEnter();
+                        Helpers.WaitForElement(Selectors.LessonCorrectAnswer.ToBy());
+
+                        var enterBtn = Helpers.WaitForElement(Selectors.LessonContinueButton.ToBy(), 10,
+                            ExpectedConditions.ElementToBeClickable(Selectors.LessonContinueButton.ToBy()));
+                        bool isWrong = enterBtn.GetAttribute("class")?.Contains("btn-danger") == true;
 
                         if (isWrong)
                         {
-                            // Мы где то ошиблись (дубликат слова), значит надо переписать бд
-                            var correctWord = Bot.webDriver.FindElement(By.Id("flashcard_error_correct")).Text;
+                            var correctWord = Bot.webDriver.FindElement(Selectors.LessonCorrectAnswer.ToBy()).Text;
                             Console.WriteLine($"Wrong answer! Correct word is: {correctWord}");
-                            // Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
                         }
-
                         else
                         {
                             Console.WriteLine("Correct answer!");
@@ -130,39 +96,32 @@ namespace LingosBot
 
                         Helpers.ClickEnter();
 
-
                         new WebDriverWait(Bot.webDriver, TimeSpan.FromSeconds(10))
-                            .Until(d =>
-                                d.FindElements(By.Id("flashcard_error_correct")).Count == 0
-                            );
+                            .Until(d => d.FindElements(Selectors.LessonCorrectAnswer.ToBy()).Count == 0);
 
-                        if (Bot.webDriver.PageSource.Contains("UCZ")) { return; } // if page contains UCZ SIE, end lesson
+                        if (Bot.webDriver.PageSource.Contains("UCZ")) { return; }
 
                         try
                         {
-                            inputField = Helpers.WaitForElement(By.Id("flashcard_answer_input"));
+                            inputField = Helpers.WaitForElement(Selectors.LessonAnswerInput.ToBy());
                         }
-
                         catch
                         {
                             return;
                         }
-
                     }
-
                     else
                     {
                         Helpers.ClickEnter();
-                        var correctWord = Helpers.WaitForElement(By.Id("flashcard_error_correct"), 10).Text;
+                        var correctWord = Helpers.WaitForElement(Selectors.LessonCorrectAnswer.ToBy(), 10).Text;
                         Console.WriteLine("I see the correct word, it is " + correctWord);
                         Bot.dataBase.WriteToDB(wordToTranslate, correctWord);
                         Helpers.ClickEnter();
                     }
                 }
-
                 else if (Bot.webDriver.PageSource.Contains("Nowe słowo"))
                 {
-                    Helpers.ClickEnter(); // просто кликнем ентер, потом подтянем слово позже
+                    Helpers.ClickEnter();
                 }
             }
         }
