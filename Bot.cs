@@ -82,7 +82,11 @@ namespace LingosBot
                         bool needAnError = Helpers.MakeAnError();
                         if (!needAnError)
                         {
-                            inputField.SendKeys(Bot.dataBase.ReturnTranslation(wordToTranslate));
+                            var translation = Bot.dataBase.ReturnTranslation(wordToTranslate);
+                            if (!Helpers.TryFastFillInput(inputField, translation))
+                            {
+                                inputField.SendKeys(translation);
+                            }
                         }
 
                         Helpers.ClickEnter();

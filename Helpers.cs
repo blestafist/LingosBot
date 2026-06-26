@@ -38,13 +38,49 @@ namespace LingosBot
         {
             try
             {
-                var enterButton = WaitForElement(By.Id("enterBtn"), 5, ExpectedConditions.ElementToBeClickable(By.Id("enterBtn")));  // click enter button func (with JS)
-                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", enterButton); // clicking
+                var enterButton = WaitForElement(Selectors.LessonContinueButton.ToBy(), 5,
+                    ExpectedConditions.ElementToBeClickable(Selectors.LessonContinueButton.ToBy()));
+                ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", enterButton);
             }
-
-            catch (Exception e) // handle exc
+            catch (Exception e)
             {
                 Console.WriteLine("Error while clicking enter: " + e.Message);
+            }
+        }
+
+        public static bool TryFastFillInput(IWebElement input, string value)
+        {
+            try
+            {
+                var result = ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript(
+                    """
+                    const input = arguments[0];
+                    const value = arguments[1];
+
+                    const descriptor =
+                        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value') ||
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+                    if (!descriptor || typeof descriptor.set !== 'function') {
+                        return false;
+                    }
+
+                    input.focus();
+                    descriptor.set.call(input, '');
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    descriptor.set.call(input, value);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                    """,
+                    input,
+                    value);
+
+                return result is bool populated && populated;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
