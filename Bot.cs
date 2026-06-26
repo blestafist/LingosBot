@@ -45,6 +45,14 @@ namespace LingosBot
         {
             try
             {
+                // If still on lesson page, navigate back to main page
+                var currentUrl = Bot.webDriver.Url ?? string.Empty;
+                if (currentUrl.Contains("/s/lesson/", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("Returning to main page...");
+                    Bot.webDriver.Navigate().GoToUrl(Bot.appConfig.StudentDashboardUrl);
+                }
+
                 var launchLessonButton = Helpers.WaitForElement(Selectors.MainLearnButton.ToBy());
                 ((IJavaScriptExecutor)Bot.webDriver).ExecuteScript("arguments[0].click()", launchLessonButton);
 
