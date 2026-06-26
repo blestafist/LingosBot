@@ -1,20 +1,21 @@
-NuGet packages needed to compile the following code:
+NuGet packages (автоматически установятся при dotnet restore):
 
-Selenium.WebDriver
-Selenium.Support
-DotNetSeleniumExtras.WaitHelpers
-Selenium.WebDriver.ChromeDriver
-Selenium.WebDriver.GeckoDriver
-Selenium.WebDriver.MSEdgeDriver
-Selenium.Firefox.WebDriver
-Newtonsoft.Json
+Selenium.WebDriver 4.27.0
+Selenium.Support 4.27.0
+System.Security.Cryptography.ProtectedData 8.0.0
+
+Environment Variables (опционально):
+→ LINGOS_BROWSER=Chrome|Firefox|Edge|Safari (по умолчанию: Chrome)
+→ LINGOS_HEADLESS=true|false (по умолчанию: false)
+→ LINGOS_ERRORS_PER_100=10 (по умолчанию: 10, диапазон: 0-100)
+→ LINGOS_CHROME_BINARY=/path/to/chrome (опционально, только для Chrome)
 
 Build (Debug):
 → dotnet run
 
-Build (release) (Windows):
+Build (Release) (Windows):
 → dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
-Build (release) (Linux):
+Build (Release) (Linux):
 → dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
 
