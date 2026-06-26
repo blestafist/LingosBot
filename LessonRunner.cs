@@ -155,9 +155,10 @@ internal sealed class LessonRunner
         {
             var answer = candidateAnswers[candidateIndex];
 
-            // Check if we should intentionally make an error
-            var shouldMakeError = MakeAnError();
-            var actualAnswer = shouldMakeError ? "" : answer;
+            // Only make intentional errors if there are multiple candidates or we're not on the last one
+            var isLastCandidate = candidateIndex == candidateAnswers.Count - 1;
+            var shouldMakeError = !isLastCandidate && MakeAnError();
+            var actualAnswer = shouldMakeError ? GenerateWrongAnswer(answer) : answer;
 
             if (candidateAnswers.Count > 1 || candidateIndex > 0)
             {
@@ -181,7 +182,7 @@ internal sealed class LessonRunner
                 return true;
             }
 
-            if (candidateIndex < candidateAnswers.Count - 1)
+            if (!isLastCandidate)
             {
                 Console.WriteLine(
                     $"Answer '{answer}' was rejected for '{promptText}'. Trying the next stored translation for this exact prompt only.");
@@ -846,6 +847,26 @@ internal sealed class LessonRunner
         }
 
         return false;
+    }
+
+    private string GenerateWrongAnswer(string correctAnswer)
+    {
+        if (string.IsNullOrEmpty(correctAnswer))
+        {
+            return "wrong";
+        }
+
+        if (correctAnswer.Length == 1)
+        {
+            var letters = "abcdefghijklmnopqrstuvwxyz";
+            return letters[_random.Next(letters.Length)].ToString();
+        }
+
+        var chars = correctAnswer.ToCharArray();
+        var randomIndex = _random.Next(chars.Length);
+        var randomChar = (char)('a' + _random.Next(26));
+        chars[randomIndex] = randomChar;
+        return new string(chars);
     }
 }
 
