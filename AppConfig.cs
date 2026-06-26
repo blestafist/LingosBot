@@ -1,36 +1,46 @@
-namespace LingosBot;
+using System.Text.RegularExpressions;
+
+namespace LingosBotApp;
 
 internal sealed class AppConfig
 {
-    private readonly Config _config;
-
-    public AppConfig(Config config)
-    {
-        _config = config;
-    }
-
-    // URLs
     public string BaseUrl { get; } = "https://lingos.pl";
-    public string LoginUrl { get; } = "https://lingos.pl/h/login";
+
     public string StudentDashboardUrl { get; } = "https://lingos.pl/student-confirmed/group";
 
-    // User configuration from config.json
-    public bool AutomaticLogin => _config.automaticLogin;
-    public string Email => _config.email;
-    public string Password => _config.password;
-    public int NumberOfLessons => _config.numberOfLessons;
-    public string Browser => _config.browser;
-    public bool Headless => _config.headless;
-    public string WordsDataBasePath => _config.wordsDataBasePath;
-    public int ErrorsPer100Words => _config.errorsPer100Words;
+    public string CredentialFilePath { get; } = Path.Combine(AppContext.BaseDirectory, "credentials.json");
 
-    // Timeouts
+    public string? ChromeBinaryPath { get; } = Environment.GetEnvironmentVariable("LINGOS_CHROME_BINARY");
+
     public TimeSpan DefaultWaitTimeout { get; } = TimeSpan.FromSeconds(15);
+
     public TimeSpan ShortWaitTimeout { get; } = TimeSpan.FromSeconds(4);
+
+    public TimeSpan LessonRestartReuseTimeout { get; } = TimeSpan.FromMilliseconds(1500);
+
     public TimeSpan PageLoadTimeout { get; } = TimeSpan.FromSeconds(60);
+
     public TimeSpan PollingInterval { get; } = TimeSpan.FromMilliseconds(25);
 
-    // Limits
     public int MinLessonCount { get; } = 1;
+
     public int LessonPromptSafetyCap { get; } = 30;
+
+    public int ChallengeLessonSafetyCap { get; } = 40;
+}
+
+internal static class TextNormalizer
+{
+    private static readonly Regex MultipleWhitespace = new(@"\s+", RegexOptions.Compiled);
+
+    public static string Normalize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = value.Replace('\u00A0', ' ').Trim();
+        return MultipleWhitespace.Replace(sanitized, " ");
+    }
 }

@@ -1,103 +1,50 @@
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Edge;
-using OpenQA.Selenium.Firefox;
-using OpenQA.Selenium.Safari;
 
-namespace LingosBot;
+namespace LingosBotApp;
 
 internal sealed class BrowserFactory
 {
-    public IWebDriver Create(Config config)
+    public IWebDriver Create(AppConfig config)
     {
-        IWebDriver driver = config.browser.ToLower() switch
-        {
-            "firefox" => CreateFirefox(config.headless),
-            "edge" => CreateEdge(config.headless),
-            "safari" => CreateSafari(),
-            "chrome" or _ => CreateChrome(config.headless)
-        };
+        var chromeService = ChromeDriverService.CreateDefaultService();
+        chromeService.HideCommandPromptWindow = true;
 
-        driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(60);
+        var chromeOptions = new ChromeOptions();
+        chromeOptions.AddArgument("--headless=new");
+        chromeOptions.AddArgument("--mute-audio");
+        chromeOptions.AddArgument("--start-maximized");
+        chromeOptions.AddArgument("--window-size=1600,1000");
+        chromeOptions.AddArgument("--no-first-run");
+        chromeOptions.AddArgument("--disable-default-apps");
+        chromeOptions.AddArgument("--disable-background-networking");
+        chromeOptions.AddArgument("--disable-background-timer-throttling");
+        chromeOptions.AddArgument("--disable-backgrounding-occluded-windows");
+        chromeOptions.AddArgument("--disable-component-update");
+        chromeOptions.AddArgument("--disable-extensions");
+        chromeOptions.AddArgument("--disable-features=Translate,OptimizationHints,MediaRouter,ChromeWhatsNewUI,AutofillServerCommunication");
+        chromeOptions.AddArgument("--disable-notifications");
+        chromeOptions.AddArgument("--disable-popup-blocking");
+        chromeOptions.AddArgument("--disable-renderer-backgrounding");
+        chromeOptions.AddArgument("--disable-search-engine-choice-screen");
+        chromeOptions.AddArgument("--disable-sync");
+        chromeOptions.AddArgument("--metrics-recording-only");
+        chromeOptions.AddArgument("--lang=pl-PL");
+        chromeOptions.AddUserProfilePreference("profile.default_content_setting_values.images", 2);
+        chromeOptions.AddUserProfilePreference("credentials_enable_service", false);
+        chromeOptions.AddUserProfilePreference("profile.password_manager_enabled", false);
+        chromeOptions.PageLoadStrategy = PageLoadStrategy.Eager;
+
+        if (!string.IsNullOrWhiteSpace(config.ChromeBinaryPath))
+        {
+            chromeOptions.BinaryLocation = config.ChromeBinaryPath;
+            Console.WriteLine($"Using Chrome binary from LINGOS_CHROME_BINARY: {config.ChromeBinaryPath}");
+        }
+
+        var driver = new ChromeDriver(chromeService, chromeOptions);
+        driver.Manage().Timeouts().PageLoad = config.PageLoadTimeout;
         driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
 
         return driver;
-    }
-
-    private static IWebDriver CreateChrome(bool headless)
-    {
-        var service = ChromeDriverService.CreateDefaultService();
-        service.HideCommandPromptWindow = true;
-
-        var options = new ChromeOptions();
-
-        if (headless)
-        {
-            options.AddArgument("--headless=new");
-        }
-
-        options.AddArgument("--mute-audio");
-        options.AddArgument("--start-maximized");
-        options.AddArgument("--window-size=1600,1000");
-        options.AddArgument("--no-sandbox");
-        options.AddArgument("--disable-dev-shm-usage");
-        options.AddArgument("--log-level=3");
-        options.AddArgument("--no-first-run");
-        options.AddArgument("--disable-default-apps");
-        options.AddArgument("--disable-background-networking");
-        options.AddArgument("--disable-extensions");
-        options.AddArgument("--disable-notifications");
-        options.AddArgument("--disable-popup-blocking");
-        options.AddArgument("--disable-sync");
-        options.AddArgument("--lang=pl-PL");
-
-        options.AddUserProfilePreference("profile.default_content_setting_values.images", 2);
-        options.AddUserProfilePreference("credentials_enable_service", false);
-        options.AddUserProfilePreference("profile.password_manager_enabled", false);
-        options.PageLoadStrategy = PageLoadStrategy.Eager;
-
-        var driver = new ChromeDriver(service, options);
-        driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
-
-        return driver;
-    }
-
-    private static IWebDriver CreateFirefox(bool headless)
-    {
-        var options = new FirefoxOptions();
-
-        if (headless)
-        {
-            options.AddArgument("-headless");
-        }
-
-        options.SetPreference("media.volume_scale", "0.0");
-        options.SetPreference("media.default_volume", "0.0");
-        options.SetPreference("permissions.default.microphone", 2);
-        options.SetPreference("permissions.default.camera", 2);
-        options.SetPreference("permissions.default.desktop-notification", 2);
-
-        return new FirefoxDriver(options);
-    }
-
-    private static IWebDriver CreateEdge(bool headless)
-    {
-        var options = new EdgeOptions();
-
-        if (headless)
-        {
-            options.AddArgument("--headless=new");
-        }
-
-        options.AddArgument("--mute-audio");
-        options.AddArgument("--log-level=3");
-        options.AddArgument("--no-sandbox");
-
-        return new EdgeDriver(options);
-    }
-
-    private static IWebDriver CreateSafari()
-    {
-        return new SafariDriver();
     }
 }
