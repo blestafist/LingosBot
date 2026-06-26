@@ -9,6 +9,10 @@ internal sealed class LessonRunner
     private readonly AppConfig _config;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary;
+    private readonly Random _random = new();
+
+    private int _errorStreakRemaining = 0;
+    private const int StreakTarget = 2;
 
     public LessonRunner(
         IWebDriver driver,
@@ -150,17 +154,22 @@ internal sealed class LessonRunner
         for (var candidateIndex = 0; candidateIndex < candidateAnswers.Count; candidateIndex++)
         {
             var answer = candidateAnswers[candidateIndex];
+
+            // Check if we should intentionally make an error
+            var shouldMakeError = MakeAnError();
+            var actualAnswer = shouldMakeError ? "" : answer;
+
             if (candidateAnswers.Count > 1 || candidateIndex > 0)
             {
                 Console.WriteLine(
-                    $"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}  (option {candidateIndex + 1}/{candidateAnswers.Count})");
+                    $"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}  (option {candidateIndex + 1}/{candidateAnswers.Count}){(shouldMakeError ? " [intentional error]" : "")}");
             }
             else
             {
-                Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}");
+                Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}{(shouldMakeError ? " [intentional error]" : "")}");
             }
 
-            var outcome = SubmitBestEffortAnswer(answer);
+            var outcome = SubmitBestEffortAnswer(actualAnswer);
 
             if (outcome == LessonAnswerOutcome.Accepted)
             {
@@ -812,6 +821,31 @@ internal sealed class LessonRunner
         ((IJavaScriptExecutor)_driver).ExecuteScript(
             "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
             element);
+    }
+
+    private bool MakeAnError()
+    {
+        int minLen = Math.Max(1, StreakTarget - 2);
+        int maxLen = StreakTarget + 2;
+        double avgLen = (minLen + maxLen) / 2.0;
+
+        double pTarget = _config.ErrorsPer100Words / 100.0;
+        double pStart = pTarget / avgLen;
+
+        if (_errorStreakRemaining > 0)
+        {
+            _errorStreakRemaining--;
+            return true;
+        }
+
+        double sample = _random.NextDouble();
+        if (sample < pStart)
+        {
+            _errorStreakRemaining = _random.Next(minLen, maxLen + 1) - 1;
+            return true;
+        }
+
+        return false;
     }
 }
 
