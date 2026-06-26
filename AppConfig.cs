@@ -12,6 +12,17 @@ internal sealed class AppConfig
 
     public string? ChromeBinaryPath { get; } = Environment.GetEnvironmentVariable("LINGOS_CHROME_BINARY");
 
+    public string Browser { get; } = Environment.GetEnvironmentVariable("LINGOS_BROWSER") ?? "Chrome";
+
+    public bool Headless { get; } = string.Equals(
+        Environment.GetEnvironmentVariable("LINGOS_HEADLESS"),
+        "true",
+        StringComparison.OrdinalIgnoreCase);
+
+    public int ErrorsPer100Words { get; } = int.TryParse(
+        Environment.GetEnvironmentVariable("LINGOS_ERRORS_PER_100"),
+        out var errors) ? errors : 10;
+
     public TimeSpan DefaultWaitTimeout { get; } = TimeSpan.FromSeconds(15);
 
     public TimeSpan ShortWaitTimeout { get; } = TimeSpan.FromSeconds(4);
