@@ -56,7 +56,10 @@ internal sealed class BrowserFactory
         options.AddUserProfilePreference("profile.password_manager_enabled", false);
         options.PageLoadStrategy = PageLoadStrategy.Eager;
 
-        return new ChromeDriver(service, options);
+        var driver = new ChromeDriver(service, options);
+        driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
+
+        return driver;
     }
 
     private static IWebDriver CreateFirefox(bool headless)
