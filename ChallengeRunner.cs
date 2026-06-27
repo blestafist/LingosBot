@@ -4,20 +4,15 @@ using OpenQA.Selenium.Support.UI;
 
 namespace LingosBotApp;
 
-internal sealed class ChallengeRunner
+internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
 {
-    private readonly IWebDriver _driver;
-    private readonly AppConfig _config;
+    private readonly IWebDriver _driver = driver;
+    private readonly AppConfig _config = config;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ChallengeRunner(IWebDriver driver, AppConfig config)
-    {
-        _driver = driver;
-        _config = config;
-    }
 
     // Reads the Wyzwania modal from the dashboard. Also saves the page each
     // time to diagnostics\wyzwania-latest.html so an in-progress challenge can
@@ -115,14 +110,9 @@ internal sealed record ChallengeInfo(string Title, int Points, string JoinUrl, b
     public bool IsActive => !Completed && string.IsNullOrWhiteSpace(JoinUrl);
 }
 
-internal sealed class ChallengeSnapshot
+internal sealed class ChallengeSnapshot (IReadOnlyList<ChallengeInfo> challenges)
 {
-    public ChallengeSnapshot(IReadOnlyList<ChallengeInfo> challenges)
-    {
-        Challenges = challenges;
-    }
-
-    public IReadOnlyList<ChallengeInfo> Challenges { get; }
+    public IReadOnlyList<ChallengeInfo> Challenges { get; } = challenges;
 
     public ChallengeInfo? Active => Challenges.FirstOrDefault(challenge => challenge.IsActive);
 

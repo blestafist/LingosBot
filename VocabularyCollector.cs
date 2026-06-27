@@ -5,20 +5,14 @@ using OpenQA.Selenium.Support.UI;
 
 namespace LingosBotApp;
 
-internal sealed class VocabularyCollector
+internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
 {
-    private readonly IWebDriver _driver;
-    private readonly AppConfig _config;
+    private readonly IWebDriver _driver = driver;
+    private readonly AppConfig _config = config;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
-
-    public VocabularyCollector(IWebDriver driver, AppConfig config)
-    {
-        _driver = driver;
-        _config = config;
-    }
 
     public IReadOnlyDictionary<string, IReadOnlyList<string>> CollectVocabulary()
     {

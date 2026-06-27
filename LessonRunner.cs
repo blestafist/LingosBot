@@ -3,27 +3,19 @@ using OpenQA.Selenium.Support.UI;
 
 namespace LingosBotApp;
 
-internal sealed class LessonRunner
+internal sealed class LessonRunner (
+    IWebDriver driver,
+    AppConfig config,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> vocabulary)
 {
-    private readonly IWebDriver _driver;
-    private readonly AppConfig _config;
-    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary;
-    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary;
+    private readonly IWebDriver _driver = driver;
+    private readonly AppConfig _config = config;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary = vocabulary;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
     private readonly Random _random = new();
 
     private int _errorStreakRemaining = 0;
     private const int StreakTarget = 2;
-
-    public LessonRunner(
-        IWebDriver driver,
-        AppConfig config,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> vocabulary)
-    {
-        _driver = driver;
-        _config = config;
-        _vocabulary = vocabulary;
-        _reverseVocabulary = BuildReverseVocabulary(vocabulary);
-    }
 
     public void RunLesson(int lessonNumber)
     {
@@ -632,7 +624,7 @@ internal sealed class LessonRunner
             return reverseMatches;
         }
 
-        return Array.Empty<string>();
+        return [];
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildReverseVocabulary(
@@ -896,10 +888,5 @@ internal enum LessonEntryState
 
 internal sealed record LessonStepState(LessonStepKind Kind, IWebElement? PromptElement);
 
-internal sealed class LessonLimitReachedException : Exception
-{
-    public LessonLimitReachedException(string message)
-        : base(message)
-    {
-    }
-}
+internal sealed class LessonLimitReachedException(string message)
+    : Exception(message) { }

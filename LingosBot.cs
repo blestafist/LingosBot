@@ -4,24 +4,16 @@ using OpenQA.Selenium.Support.Extensions;
 
 namespace LingosBotApp;
 
-internal sealed class LingosBot
+internal sealed class LingosBot (  
+    AppConfig config,
+    BrowserFactory browserFactory,
+    CredentialStore credentialStore,
+    Func<AppCredentials> credentialPrompt)
 {
-    private readonly AppConfig _config;
-    private readonly BrowserFactory _browserFactory;
-    private readonly CredentialStore _credentialStore;
-    private readonly Func<AppCredentials> _credentialPrompt;
-
-    public LingosBot(
-        AppConfig config,
-        BrowserFactory browserFactory,
-        CredentialStore credentialStore,
-        Func<AppCredentials> credentialPrompt)
-    {
-        _config = config;
-        _browserFactory = browserFactory;
-        _credentialStore = credentialStore;
-        _credentialPrompt = credentialPrompt;
-    }
+    private readonly AppConfig _config = config;
+    private readonly BrowserFactory _browserFactory = browserFactory;
+    private readonly CredentialStore _credentialStore = credentialStore;
+    private readonly Func<AppCredentials> _credentialPrompt = credentialPrompt;
 
     public void Run(int lessonCount)
     {

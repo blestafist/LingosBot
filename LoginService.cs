@@ -3,16 +3,11 @@ using OpenQA.Selenium.Support.UI;
 
 namespace LingosBotApp;
 
-internal sealed class LoginService
+internal sealed class LoginService ( IWebDriver driver, AppConfig config )
 {
-    private readonly IWebDriver _driver;
-    private readonly AppConfig _config;
+    private readonly IWebDriver _driver = driver;
+    private readonly AppConfig _config = config;
 
-    public LoginService(IWebDriver driver, AppConfig config)
-    {
-        _driver = driver;
-        _config = config;
-    }
 
     public void Login(AppCredentials credentials)
     {
@@ -189,10 +184,7 @@ internal sealed class LoginService
     }
 }
 
-internal sealed class LoginFailedException : Exception
-{
-    public LoginFailedException(string message, Exception? innerException = null)
-        : base(message, innerException)
-    {
-    }
-}
+internal sealed class LoginFailedException(
+    string message,
+    Exception? innerException = null)
+    : Exception(message, innerException);
