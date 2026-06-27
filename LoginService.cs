@@ -184,9 +184,7 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
     }
 }
 
-internal sealed class LoginFailedException (string message, Exception? innerException = null) : Exception
-{
-    public LoginFailedException ()
-        : base(message, innerException)
-    { }
-}
+internal sealed class LoginFailedException(
+    string message,
+    Exception? innerException = null)
+    : Exception(message, innerException);
