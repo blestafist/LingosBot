@@ -4,21 +4,16 @@ using System.Text.Json;
 
 namespace LingosBotApp;
 
-internal sealed class CredentialStore
+internal sealed class CredentialStore (AppConfig config)
 {
     private static readonly byte[] AdditionalEntropy = Encoding.UTF8.GetBytes("LingosBot.Credentials.v1");
 
-    private readonly AppConfig _config;
+    private readonly AppConfig _config = config;
     private readonly JsonSerializerOptions _serializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
     };
-
-    public CredentialStore(AppConfig config)
-    {
-        _config = config;
-    }
 
     public bool TryLoad(out AppCredentials? credentials)
     {
