@@ -1,5 +1,4 @@
 using System.Text;
-using DotNetEnv;
 
 namespace LingosBotApp;
 
@@ -11,9 +10,6 @@ internal static class Program
         Console.WriteLine("LingosBot");
         Console.WriteLine("Automates lessons on lingos.pl using Selenium and Google Chrome.");
         Console.WriteLine();
-
-        // Load environment variables from .env file
-        Env.Load();
 
         var config = new AppConfig();
         var credentialStore = new CredentialStore(config);

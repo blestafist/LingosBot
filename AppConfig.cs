@@ -10,13 +10,18 @@ internal sealed class AppConfig
 
     public string CredentialFilePath { get; } = Path.Combine(AppContext.BaseDirectory, "credentials.json");
 
-    public string? ChromeBinaryPath { get; }
+    public string? ChromeBinaryPath { get; } = Environment.GetEnvironmentVariable("LINGOS_CHROME_BINARY");
 
-    public string Browser { get; }
+    public string Browser { get; } = Environment.GetEnvironmentVariable("LINGOS_BROWSER") ?? "Chrome";
 
-    public bool Headless { get; }
+    public bool Headless { get; } = string.Equals(
+        Environment.GetEnvironmentVariable("LINGOS_HEADLESS"),
+        "true",
+        StringComparison.OrdinalIgnoreCase);
 
-    public int ErrorsPer100Words { get; }
+    public int ErrorsPer100Words { get; } = int.TryParse(
+        Environment.GetEnvironmentVariable("LINGOS_ERRORS_PER_100"),
+        out var errors) ? errors : 10;
 
     public TimeSpan DefaultWaitTimeout { get; } = TimeSpan.FromSeconds(15);
 
@@ -33,19 +38,6 @@ internal sealed class AppConfig
     public int LessonPromptSafetyCap { get; } = 30;
 
     public int ChallengeLessonSafetyCap { get; } = 40;
-
-    public AppConfig()
-    {
-        ChromeBinaryPath = Environment.GetEnvironmentVariable("LINGOS_CHROME_BINARY");
-        Browser = Environment.GetEnvironmentVariable("LINGOS_BROWSER") ?? "Chrome";
-        Headless = string.Equals(
-            Environment.GetEnvironmentVariable("LINGOS_HEADLESS"),
-            "true",
-            StringComparison.OrdinalIgnoreCase);
-        ErrorsPer100Words = int.TryParse(
-            Environment.GetEnvironmentVariable("LINGOS_ERRORS_PER_100"),
-            out var errors) ? errors : 10;
-    }
 }
 
 internal static class TextNormalizer
