@@ -19,17 +19,6 @@ internal sealed class CredentialStore (AppConfig config)
     {
         credentials = null;
 
-        // First try to load from environment variables
-        var envEmail = Environment.GetEnvironmentVariable("LINGOS_EMAIL");
-        var envPassword = Environment.GetEnvironmentVariable("LINGOS_PASSWORD");
-
-        if (!string.IsNullOrWhiteSpace(envEmail) && !string.IsNullOrWhiteSpace(envPassword))
-        {
-            credentials = new AppCredentials(envEmail.Trim(), envPassword);
-            return true;
-        }
-
-        // Fallback to credentials.json file
         if (!File.Exists(_config.CredentialFilePath))
         {
             return false;
