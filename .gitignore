@@ -4,4 +4,3 @@ obj/
 *.html
 dev_pages/
 .example/
-.env
