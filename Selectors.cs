@@ -5,6 +5,7 @@ namespace LingosBotApp;
 internal static class Selectors
 {
     // Verified from https://lingos.pl/h/login on 2026-03-21 where possible.
+    // Lesson selectors were verified against saved /learning/start pages.
     // The remaining TODO values are post-login selectors that still need to be inspected manually.
     public static SelectorDefinition CookieAcceptButton { get; } = SelectorDefinition.CssRequired(
         "CookieAcceptButton",
