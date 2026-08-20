@@ -12,11 +12,11 @@ internal static class Selectors
 
     public static SelectorDefinition LoginEmailInput { get; } = SelectorDefinition.CssRequired(
         "LoginEmailInput",
-        "form#login-form input[name='login']");
+        "form#login-form input[name='_username']");
 
     public static SelectorDefinition LoginPasswordInput { get; } = SelectorDefinition.CssRequired(
         "LoginPasswordInput",
-        "form#login-form input[name='password']");
+        "form#login-form input[name='_password']");
 
     public static SelectorDefinition LoginSubmitButton { get; } = SelectorDefinition.CssRequired(
         "LoginSubmitButton",
