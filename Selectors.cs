@@ -72,31 +72,31 @@ internal static class Selectors
 
     public static SelectorDefinition LessonPrompt { get; } = SelectorDefinition.CssRequired(
         "LessonPrompt",
-        "#flashcard_main_text");
+        "#app p.text-2xl strong");
 
     public static SelectorDefinition LessonAnswerInput { get; } = SelectorDefinition.CssRequired(
         "LessonAnswerInput",
-        "#flashcard_answer_input");
+        "#learning-answer");
 
     public static SelectorDefinition LessonFeedbackMarker { get; } = SelectorDefinition.CssRequired(
         "LessonFeedbackMarker",
-        "#flashcard_error_div");
+        "#app p.text-brand, #app p.text-red-700");
 
     public static SelectorDefinition LessonContinueButton { get; } = SelectorDefinition.CssRequired(
         "LessonContinueButton",
-        "#enterBtn");
+        "#app button[type='submit'], #app button[type='button']:not([tabindex='-1'])");
 
     public static SelectorDefinition LessonProgressCounter { get; } = SelectorDefinition.CssRequired(
         "LessonProgressCounter",
-        "#progress_counter");
+        "#app [role='progressbar']");
 
     public static SelectorDefinition LessonLimitOfferButton { get; } = SelectorDefinition.CssRequired(
         "LessonLimitOfferButton",
-        "#loaded_btn a[href='/student-confirmed/premium-buy']");
+        "a[href='/student-confirmed/premium-buy'], a[href='/premium-buy']");
 
     public static SelectorDefinition LessonIncorrectAnswerMarker { get; } = SelectorDefinition.CssRequired(
         "LessonIncorrectAnswerMarker",
-        "#flashcard_error_text");
+        "#app p.text-red-700");
 
     public static SelectorDefinition LessonFinishedMarker { get; } = SelectorDefinition.CssOptional(
         "LessonFinishedMarker",

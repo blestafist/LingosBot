@@ -190,11 +190,6 @@ internal sealed class LessonRunner (
 
     private LessonAnswerOutcome SubmitBestEffortAnswer(string answer)
     {
-        if (TrySubmitAnswerViaAjax(answer, out var ajaxOutcome))
-        {
-            return ajaxOutcome;
-        }
-
         var answerInput = WaitUntilClickable(Selectors.LessonAnswerInput);
         SubmitAnswer(answerInput, answer);
         return WaitForAnswerOutcome();
@@ -203,10 +198,6 @@ internal sealed class LessonRunner (
     private void SubmitAnswer(IWebElement answerInput, string answer)
     {
         var populatedWithFastPath = TryPopulateAnswerInput(answerInput, answer);
-        if (populatedWithFastPath && TryInvokePageAction())
-        {
-            return;
-        }
 
         ScrollIntoView(answerInput);
         if (!populatedWithFastPath)
@@ -264,11 +255,6 @@ internal sealed class LessonRunner (
     {
         try
         {
-            if (TryInvokePageAction())
-            {
-                return true;
-            }
-
             if (!TryFindVisible(_driver, Selectors.LessonContinueButton.ToBy(), out var button) ||
                 button is null ||
                 !button.Enabled)
@@ -310,18 +296,11 @@ internal sealed class LessonRunner (
                 return "rejected";
             }
 
-            if (TryFindVisible(driver, continueBy, out var continueButton) && continueButton is not null)
+            // The new UI shows a single "Dalej" button for both outcomes;
+            // the red feedback marker above is the reliable rejection signal.
+            if (TryFindVisible(driver, continueBy, out _))
             {
-                var buttonClasses = continueButton.GetDomAttribute("class") ?? string.Empty;
-                if (buttonClasses.Contains("btn-danger", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "rejected";
-                }
-
-                if (buttonClasses.Contains("btn-primary", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "accepted";
-                }
+                return "accepted";
             }
 
             return null;
@@ -359,13 +338,8 @@ internal sealed class LessonRunner (
             return true;
         }
 
-        var previousExerciseIdentifier = TryGetCurrentExerciseIdentifier();
-
-        if (!TryInvokePageAction())
-        {
-            var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-            ClickElement(continueButton);
-        }
+        var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
+        ClickElement(continueButton);
 
         CreateWait().Until(_ =>
         {
@@ -374,15 +348,15 @@ internal sealed class LessonRunner (
                 return true;
             }
 
-            if (HasExerciseChanged(previousExerciseIdentifier))
-            {
-                return true;
-            }
-
             var currentStep = ReadCurrentLessonStep();
             if (currentStep.Kind != LessonStepKind.Prompt || currentStep.PromptElement is null)
             {
                 return false;
+            }
+
+            if (!HasVisibleFeedback())
+            {
+                return true;
             }
 
             var currentPromptText = TextNormalizer.Normalize(currentStep.PromptElement.Text);
@@ -399,21 +373,12 @@ internal sealed class LessonRunner (
             return;
         }
 
-        var previousExerciseIdentifier = TryGetCurrentExerciseIdentifier();
-        if (!TryInvokePageAction())
-        {
-            var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-            ClickElement(continueButton);
-        }
+        var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
+        ClickElement(continueButton);
 
         CreateWait().Until(_ =>
         {
             if (IsLessonFinished())
-            {
-                return true;
-            }
-
-            if (HasExerciseChanged(previousExerciseIdentifier))
             {
                 return true;
             }
@@ -423,82 +388,9 @@ internal sealed class LessonRunner (
         });
     }
 
-    private bool HasExerciseChanged(string previousExerciseIdentifier)
+    private bool HasVisibleFeedback()
     {
-        if (IsPageActionInProgress())
-        {
-            return false;
-        }
-
-        var currentExerciseIdentifier = TryGetCurrentExerciseIdentifier();
-        if (!string.IsNullOrWhiteSpace(previousExerciseIdentifier) &&
-            !string.IsNullOrWhiteSpace(currentExerciseIdentifier) &&
-            !string.Equals(previousExerciseIdentifier, currentExerciseIdentifier, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TrySubmitAnswerViaAjax(string answer, out LessonAnswerOutcome outcome)
-    {
-        try
-        {
-            var rawResult = ((IJavaScriptExecutor)_driver).ExecuteAsyncScript(
-                """
-                const answer = arguments[0];
-                const callback = arguments[arguments.length - 1];
-
-                try {
-                    if (typeof exerciseIdentifier === 'undefined') {
-                        callback('error:missing-exercise-identifier');
-                        return;
-                    }
-
-                    $.ajax({
-                        url: '/s/answer/' + exerciseIdentifier,
-                        type: 'POST',
-                        contentType: 'application/json',
-                        data: JSON.stringify({ answer: answer }),
-                        dataType: 'json',
-                        success: function(data, textStatus, xhr) {
-                            const contentType = xhr.getResponseHeader('content-type') || '';
-                            if (!contentType.includes('application/json') || !data || data.status !== 'success') {
-                                callback('error:unexpected-response');
-                                return;
-                            }
-
-                            showAnswer(data.details);
-                            callback(data.details.result === 0 ? 'rejected' : 'accepted');
-                        },
-                        error: function() {
-                            callback('error:ajax-failed');
-                        }
-                    });
-                } catch (error) {
-                    callback('error:' + (error && error.message ? error.message : String(error)));
-                }
-                """,
-                answer);
-
-            var result = rawResult?.ToString() ?? "error:empty-result";
-
-            outcome = result switch
-            {
-                "accepted" => LessonAnswerOutcome.Accepted,
-                "rejected" => LessonAnswerOutcome.Rejected,
-                "finished" => LessonAnswerOutcome.Finished,
-                _ => default
-            };
-
-            return result is "accepted" or "rejected" or "finished";
-        }
-        catch (Exception)
-        {
-            outcome = default;
-            return false;
-        }
+        return TryFindVisible(_driver, Selectors.LessonFeedbackMarker.ToBy(), out _);
     }
 
     private LessonStepState WaitForStepOrLessonFinished()
@@ -554,7 +446,7 @@ internal sealed class LessonRunner (
         }
 
         var currentUrl = _driver.Url ?? string.Empty;
-        if (currentUrl.Contains("/s/lesson/", StringComparison.OrdinalIgnoreCase) &&
+        if (currentUrl.Contains("/learning/start", StringComparison.OrdinalIgnoreCase) &&
             TryFindVisible(_driver, Selectors.MainLearnButton.ToBy(), out var resumeButton) &&
             resumeButton is not null &&
             resumeButton.Enabled)
@@ -563,36 +455,6 @@ internal sealed class LessonRunner (
         }
 
         return LessonEntryState.Waiting;
-    }
-
-    private bool IsPageActionInProgress()
-    {
-        try
-        {
-            var result = ((IJavaScriptExecutor)_driver).ExecuteScript(
-                "return typeof inProgress !== 'undefined' ? inProgress > 0 : false;");
-
-            return result is bool isBusy && isBusy;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    private string TryGetCurrentExerciseIdentifier()
-    {
-        try
-        {
-            var result = ((IJavaScriptExecutor)_driver).ExecuteScript(
-                "return typeof exerciseIdentifier !== 'undefined' ? String(exerciseIdentifier) : '';");
-
-            return result?.ToString() ?? string.Empty;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
-        }
     }
 
     private bool HasLessonLimitReached()
@@ -656,28 +518,6 @@ internal sealed class LessonRunner (
         }
 
         return reverse.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.AsReadOnly(), StringComparer.OrdinalIgnoreCase);
-    }
-
-    private bool TryInvokePageAction()
-    {
-        try
-        {
-            var result = ((IJavaScriptExecutor)_driver).ExecuteScript(
-                """
-                if (typeof callAction !== 'function') {
-                    return false;
-                }
-
-                callAction();
-                return true;
-                """);
-
-            return result is bool succeeded && succeeded;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
     }
 
     private bool TryFindVisible(ISearchContext context, By by, out IWebElement? element)
