@@ -68,7 +68,7 @@ internal static class Selectors
 
     public static SelectorDefinition MainLearnButton { get; } = SelectorDefinition.CssRequired(
         "MainLearnButton",
-        "a.btn.btn-primary[href^='/s/lesson/']");
+        "a.btn.btn-primary[href^='/learning/start']");
 
     public static SelectorDefinition LessonPrompt { get; } = SelectorDefinition.CssRequired(
         "LessonPrompt",

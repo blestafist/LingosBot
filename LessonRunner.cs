@@ -339,7 +339,7 @@ internal sealed class LessonRunner (
     private bool IsLessonFinished()
     {
         var currentUrl = _driver.Url ?? string.Empty;
-        if (!currentUrl.Contains("/s/lesson/", StringComparison.OrdinalIgnoreCase))
+        if (!currentUrl.Contains("/learning/start/", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
