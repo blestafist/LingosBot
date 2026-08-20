@@ -31,8 +31,11 @@ dotnet restore
 dotnet run
 ```
 
-Set your login & pass and other configuration in first run, then in config.json
-Headless mode is running the program without a browser window (hidden) → good for servers
+On the first run, the bot creates `config.json` in the directory where it was started. It contains all settings, including the login and password. You can also start from `config.example.json`.
+
+`config.json` is ignored by Git because it contains credentials. The password is stored as plain text in this file, so restrict access to it and do not share or commit it.
+
+Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers.
 
 ## ⚠️ Important
 

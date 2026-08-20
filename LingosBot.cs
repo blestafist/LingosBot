@@ -165,7 +165,7 @@ internal sealed class LingosBot (
     {
         if (_credentialStore.TryLoad(out var savedCredentials) && savedCredentials is not null)
         {
-            Console.WriteLine("Loaded saved credentials from credentials.json.");
+            Console.WriteLine("Loaded saved credentials from config.json.");
             return savedCredentials;
         }
 
