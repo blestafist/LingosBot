@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://lingos.pl",
+  "studentDashboardUrl": "https://lingos.pl/student-confirmed/group",
+  "credentials": {
+    "email": "you@example.com",
+    "password": "replace-with-your-password"
+  },
+  "chromeBinaryPath": null,
+  "browser": "Chrome",
+  "headless": false,
+  "errorsPer100Words": 10,
+  "defaultWaitTimeoutSeconds": 15,
+  "shortWaitTimeoutSeconds": 4,
+  "lessonRestartReuseTimeoutMilliseconds": 1500,
+  "pageLoadTimeoutSeconds": 60,
+  "pollingIntervalMilliseconds": 25,
+  "minLessonCount": 1,
+  "lessonPromptSafetyCap": 30,
+  "challengeLessonSafetyCap": 40
+}

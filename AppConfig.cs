@@ -1,43 +1,109 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace LingosBotApp;
 
 internal sealed class AppConfig
 {
-    public string BaseUrl { get; } = "https://lingos.pl";
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
 
-    public string StudentDashboardUrl { get; } = "https://lingos.pl/student-confirmed/group";
+    public string BaseUrl { get; set; } = "https://lingos.pl";
 
-    public string CredentialFilePath { get; } = Path.Combine(AppContext.BaseDirectory, "credentials.json");
+    public string StudentDashboardUrl { get; set; } = "https://lingos.pl/student-confirmed/group";
 
-    public string? ChromeBinaryPath { get; } = Environment.GetEnvironmentVariable("LINGOS_CHROME_BINARY");
+    public AppCredentials? Credentials { get; set; }
 
-    public string Browser { get; } = Environment.GetEnvironmentVariable("LINGOS_BROWSER") ?? "Chrome";
+    public string? ChromeBinaryPath { get; set; }
 
-    public bool Headless { get; } = string.Equals(
-        Environment.GetEnvironmentVariable("LINGOS_HEADLESS"),
-        "true",
-        StringComparison.OrdinalIgnoreCase);
+    public string Browser { get; set; } = "Chrome";
 
-    public int ErrorsPer100Words { get; } = int.TryParse(
-        Environment.GetEnvironmentVariable("LINGOS_ERRORS_PER_100"),
-        out var errors) ? errors : 10;
+    public bool Headless { get; set; }
 
-    public TimeSpan DefaultWaitTimeout { get; } = TimeSpan.FromSeconds(15);
+    public int ErrorsPer100Words { get; set; } = 10;
 
-    public TimeSpan ShortWaitTimeout { get; } = TimeSpan.FromSeconds(4);
+    public int DefaultWaitTimeoutSeconds { get; set; } = 15;
 
-    public TimeSpan LessonRestartReuseTimeout { get; } = TimeSpan.FromMilliseconds(1500);
+    public int ShortWaitTimeoutSeconds { get; set; } = 4;
 
-    public TimeSpan PageLoadTimeout { get; } = TimeSpan.FromSeconds(60);
+    public int LessonRestartReuseTimeoutMilliseconds { get; set; } = 1500;
 
-    public TimeSpan PollingInterval { get; } = TimeSpan.FromMilliseconds(25);
+    public int PageLoadTimeoutSeconds { get; set; } = 60;
 
-    public int MinLessonCount { get; } = 1;
+    public int PollingIntervalMilliseconds { get; set; } = 25;
 
-    public int LessonPromptSafetyCap { get; } = 30;
+    public int MinLessonCount { get; set; } = 1;
 
-    public int ChallengeLessonSafetyCap { get; } = 40;
+    public int LessonPromptSafetyCap { get; set; } = 30;
+
+    public int ChallengeLessonSafetyCap { get; set; } = 40;
+
+    public TimeSpan DefaultWaitTimeout => TimeSpan.FromSeconds(DefaultWaitTimeoutSeconds);
+
+    public TimeSpan ShortWaitTimeout => TimeSpan.FromSeconds(ShortWaitTimeoutSeconds);
+
+    public TimeSpan LessonRestartReuseTimeout => TimeSpan.FromMilliseconds(LessonRestartReuseTimeoutMilliseconds);
+
+    public TimeSpan PageLoadTimeout => TimeSpan.FromSeconds(PageLoadTimeoutSeconds);
+
+    public TimeSpan PollingInterval => TimeSpan.FromMilliseconds(PollingIntervalMilliseconds);
+
+    public static string ConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
+
+    public static AppConfig Load()
+    {
+        if (!File.Exists(ConfigFilePath))
+        {
+            var config = new AppConfig();
+            config.Save();
+            Console.WriteLine($"Created configuration file: {ConfigFilePath}");
+            return config;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(ConfigFilePath);
+            var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions)
+                ?? throw new JsonException("The configuration is empty.");
+            config.Validate();
+            return config;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            throw new InvalidOperationException($"Could not load configuration from '{ConfigFilePath}': {ex.Message}", ex);
+        }
+    }
+
+    public void Save()
+    {
+        Validate();
+        File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(this, SerializerOptions));
+    }
+
+    private void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl) || string.IsNullOrWhiteSpace(StudentDashboardUrl))
+        {
+            throw new InvalidOperationException("baseUrl and studentDashboardUrl must not be empty.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Browser))
+        {
+            throw new InvalidOperationException("browser must not be empty.");
+        }
+
+        if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds <= 0 || ShortWaitTimeoutSeconds <= 0 ||
+            LessonRestartReuseTimeoutMilliseconds <= 0 || PageLoadTimeoutSeconds <= 0 ||
+            PollingIntervalMilliseconds <= 0 || MinLessonCount < 1 || LessonPromptSafetyCap < 1 ||
+            ChallengeLessonSafetyCap < 1)
+        {
+            throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words may be zero.");
+        }
+    }
 }
 
 internal static class TextNormalizer
