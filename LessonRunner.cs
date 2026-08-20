@@ -78,7 +78,7 @@ internal sealed class LessonRunner (
     private void OpenMainPage()
     {
         var currentUrl = _driver.Url ?? string.Empty;
-        var lessonPageVisible = currentUrl.Contains("/s/lesson/", StringComparison.OrdinalIgnoreCase);
+        var lessonPageVisible = currentUrl.Contains("/learning/start/", StringComparison.OrdinalIgnoreCase);
 
         if (!lessonPageVisible &&
             TryFindVisible(_driver, Selectors.MainLearnButton.ToBy(), out var existingLearnButton) &&
