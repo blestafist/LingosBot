@@ -42,14 +42,19 @@ internal sealed class AppConfig
 
     public int ChallengeLessonSafetyCap { get; set; } = 40;
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan DefaultWaitTimeout => TimeSpan.FromSeconds(DefaultWaitTimeoutSeconds);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan ShortWaitTimeout => TimeSpan.FromSeconds(ShortWaitTimeoutSeconds);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan LessonRestartReuseTimeout => TimeSpan.FromMilliseconds(LessonRestartReuseTimeoutMilliseconds);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan PageLoadTimeout => TimeSpan.FromSeconds(PageLoadTimeoutSeconds);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan PollingInterval => TimeSpan.FromMilliseconds(PollingIntervalMilliseconds);
 
     public static string ConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
