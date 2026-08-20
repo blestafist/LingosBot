@@ -11,7 +11,7 @@ internal static class Program
         Console.WriteLine("Automates lessons on lingos.pl using Selenium and Google Chrome.");
         Console.WriteLine();
 
-        var config = new AppConfig();
+        var config = AppConfig.Load();
         var credentialStore = new CredentialStore(config);
         var browserFactory = new BrowserFactory();
 

@@ -1,5 +1,5 @@
 bin/
-*.json
+config.json
 obj/
 *.html
 dev_pages/

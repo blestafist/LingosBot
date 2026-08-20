@@ -62,7 +62,7 @@ internal sealed class BrowserFactory
         if (!string.IsNullOrWhiteSpace(config.ChromeBinaryPath))
         {
             options.BinaryLocation = config.ChromeBinaryPath;
-            Console.WriteLine($"Using Chrome binary from LINGOS_CHROME_BINARY: {config.ChromeBinaryPath}");
+            Console.WriteLine($"Using Chrome binary from config.json: {config.ChromeBinaryPath}");
         }
 
         return new ChromeDriver(service, options);
