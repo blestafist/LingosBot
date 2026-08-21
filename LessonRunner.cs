@@ -318,14 +318,9 @@ internal sealed class LessonRunner (
     private bool IsLessonFinished()
     {
         var currentUrl = _driver.Url ?? string.Empty;
-        if (!currentUrl.Contains("/learning/start/", StringComparison.OrdinalIgnoreCase))
+        if (currentUrl.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
         {
             return true;
-        }
-
-        if (Selectors.LessonFinishedMarker.TryToBy(out var finishedBy) && finishedBy is not null)
-        {
-            return TryFindVisible(_driver, finishedBy, out _);
         }
 
         return false;
@@ -349,6 +344,11 @@ internal sealed class LessonRunner (
             }
 
             var currentStep = ReadCurrentLessonStep();
+            if (currentStep.Kind == LessonStepKind.ContinueOnly)
+            {
+                return true;
+            }
+
             if (currentStep.Kind != LessonStepKind.Prompt || currentStep.PromptElement is null)
             {
                 return false;
@@ -459,7 +459,7 @@ internal sealed class LessonRunner (
 
     private bool HasLessonLimitReached()
     {
-        return TryFindVisible(_driver, Selectors.LessonLimitOfferButton.ToBy(), out _);
+        return _driver.FindElements(Selectors.LessonLimitReachedMarker.ToBy()).Count > 0;
     }
 
     private void ThrowIfLessonLimitReached()

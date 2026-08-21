@@ -91,9 +91,9 @@ internal static class Selectors
         "LessonProgressCounter",
         "#app [role='progressbar']");
 
-    public static SelectorDefinition LessonLimitOfferButton { get; } = SelectorDefinition.CssRequired(
-        "LessonLimitOfferButton",
-        "a[href='/student-confirmed/premium-buy'], a[href='/premium-buy']");
+    public static SelectorDefinition LessonLimitReachedMarker { get; } = SelectorDefinition.CssRequired(
+        "LessonLimitReachedMarker",
+        "#main-content a[href*='/learning/start/'].disabled");
 
     public static SelectorDefinition LessonIncorrectAnswerMarker { get; } = SelectorDefinition.CssRequired(
         "LessonIncorrectAnswerMarker",

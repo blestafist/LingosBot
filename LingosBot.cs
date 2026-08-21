@@ -24,7 +24,7 @@ internal sealed class LingosBot (
 
         try
         {
-            Console.WriteLine("Starting Google Chrome...");
+            Console.WriteLine($"Starting {_config.Browser}...");
             driver = _browserFactory.Create(_config);
             var totalStopwatch = Stopwatch.StartNew();
 
@@ -77,7 +77,7 @@ internal sealed class LingosBot (
         {
             if (driver is not null)
             {
-                Console.WriteLine("Closing Chrome...");
+                Console.WriteLine($"Closing {_config.Browser}...");
 
                 try
                 {
@@ -86,7 +86,7 @@ internal sealed class LingosBot (
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Chrome cleanup reported an error: {ex.Message}");
+                    Console.WriteLine($"Browser cleanup reported an error: {ex.Message}");
                 }
             }
         }

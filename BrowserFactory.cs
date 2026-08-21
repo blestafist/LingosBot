@@ -10,16 +10,22 @@ internal sealed class BrowserFactory
 {
     public IWebDriver Create(AppConfig config)
     {
-        IWebDriver driver = config.Browser.ToLowerInvariant() switch
+        IWebDriver driver = config.Browser.Trim().ToLowerInvariant() switch
         {
             "firefox" => CreateFirefox(config),
             "edge" => CreateEdge(config),
             "safari" => CreateSafari(config),
-            "chrome" or _ => CreateChrome(config)
+            "chrome" => CreateChrome(config),
+            _ => throw new InvalidOperationException($"Unsupported browser: {config.Browser}.")
         };
 
         driver.Manage().Timeouts().PageLoad = config.PageLoadTimeout;
         driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
+
+        if (!config.Headless)
+        {
+            driver.Manage().Window.Size = new System.Drawing.Size(1600, 1000);
+        }
 
         return driver;
     }
@@ -37,8 +43,6 @@ internal sealed class BrowserFactory
         }
 
         options.AddArgument("--mute-audio");
-        options.AddArgument("--start-maximized");
-        options.AddArgument("--window-size=1600,1000");
         options.AddArgument("--no-first-run");
         options.AddArgument("--disable-default-apps");
         options.AddArgument("--disable-background-networking");
@@ -59,17 +63,17 @@ internal sealed class BrowserFactory
         options.AddUserProfilePreference("profile.password_manager_enabled", false);
         options.PageLoadStrategy = PageLoadStrategy.Eager;
 
-        if (!string.IsNullOrWhiteSpace(config.ChromeBinaryPath))
-        {
-            options.BinaryLocation = config.ChromeBinaryPath;
-            Console.WriteLine($"Using Chrome binary from config.json: {config.ChromeBinaryPath}");
-        }
+        SetBinaryLocation(options, config);
 
         return new ChromeDriver(service, options);
     }
 
     private static IWebDriver CreateFirefox(AppConfig config)
     {
+        var service = FirefoxDriverService.CreateDefaultService();
+        service.HideCommandPromptWindow = true;
+        service.LogLevel = FirefoxDriverLogLevel.Fatal;
+
         var options = new FirefoxOptions();
 
         if (config.Headless)
@@ -82,9 +86,14 @@ internal sealed class BrowserFactory
         options.SetPreference("permissions.default.microphone", 2);
         options.SetPreference("permissions.default.camera", 2);
         options.SetPreference("permissions.default.desktop-notification", 2);
+        options.SetPreference("permissions.default.image", 2);
+        options.SetPreference("browser.shell.checkDefaultBrowser", false);
+        options.SetPreference("browser.warnOnQuit", false);
         options.PageLoadStrategy = PageLoadStrategy.Eager;
 
-        return new FirefoxDriver(options);
+        SetBinaryLocation(options, config);
+
+        return new FirefoxDriver(service, options);
     }
 
     private static IWebDriver CreateEdge(AppConfig config)
@@ -102,11 +111,44 @@ internal sealed class BrowserFactory
         options.AddArgument("--disable-dev-shm-usage");
         options.PageLoadStrategy = PageLoadStrategy.Eager;
 
+        SetBinaryLocation(options, config);
+
         return new EdgeDriver(options);
     }
 
     private static IWebDriver CreateSafari(AppConfig config)
     {
+        if (config.Headless)
+        {
+            throw new InvalidOperationException("Safari does not support headless mode through Selenium.");
+        }
+
         return new SafariDriver();
+    }
+
+    private static void SetBinaryLocation(ChromeOptions options, AppConfig config)
+    {
+        SetBinaryLocation(config, path => options.BinaryLocation = path);
+    }
+
+    private static void SetBinaryLocation(FirefoxOptions options, AppConfig config)
+    {
+        SetBinaryLocation(config, path => options.BinaryLocation = path);
+    }
+
+    private static void SetBinaryLocation(EdgeOptions options, AppConfig config)
+    {
+        SetBinaryLocation(config, path => options.BinaryLocation = path);
+    }
+
+    private static void SetBinaryLocation(AppConfig config, Action<string> setBinaryLocation)
+    {
+        if (string.IsNullOrWhiteSpace(config.BrowserBinaryPath))
+        {
+            return;
+        }
+
+        setBinaryLocation(config.BrowserBinaryPath);
+        Console.WriteLine($"Using {config.Browser} binary from config.json: {config.BrowserBinaryPath}");
     }
 }
