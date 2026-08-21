@@ -8,7 +8,7 @@ internal static class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.WriteLine("LingosBot");
-        Console.WriteLine("Automates lessons on lingos.pl using Selenium and Google Chrome.");
+        Console.WriteLine("Automates lessons on lingos.pl using Selenium WebDriver.");
         Console.WriteLine();
 
         var config = AppConfig.Load();

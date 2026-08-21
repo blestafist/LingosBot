@@ -18,7 +18,7 @@ internal sealed class AppConfig
 
     public AppCredentials? Credentials { get; set; }
 
-    public string? ChromeBinaryPath { get; set; }
+    public string? BrowserBinaryPath { get; set; }
 
     public string Browser { get; set; } = "Chrome";
 
@@ -95,6 +95,11 @@ internal sealed class AppConfig
         if (string.IsNullOrWhiteSpace(Browser))
         {
             throw new InvalidOperationException("browser must not be empty.");
+        }
+
+        if (Browser.Trim().ToLowerInvariant() is not ("chrome" or "firefox" or "edge" or "safari"))
+        {
+            throw new InvalidOperationException("browser must be one of: Chrome, Firefox, Edge, Safari.");
         }
 
         if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds <= 0 || ShortWaitTimeoutSeconds <= 0 ||

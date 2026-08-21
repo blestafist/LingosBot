@@ -5,7 +5,7 @@
     "email": "you@example.com",
     "password": "replace-with-your-password"
   },
-  "chromeBinaryPath": null,
+  "browserBinaryPath": null,
   "browser": "Chrome",
   "headless": false,
   "errorsPer100Words": 10,

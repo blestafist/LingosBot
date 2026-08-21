@@ -37,6 +37,10 @@ On the first run, the bot creates `config.json` in the directory where it was st
 
 Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers.
 
+## Browser Support
+
+Set `browser` in `config.json` to `Chrome`, `Firefox`, `Edge`, or `Safari`. Selenium Manager downloads a compatible driver automatically when possible. Use `browserBinaryPath` when the browser executable is installed outside the standard location. Firefox is fully supported in both visible and headless modes; Safari requires macOS and does not support Selenium headless mode.
+
 ## ⚠️ Important
 
 Browser automation may violate the terms of service of lingos.pl.  
