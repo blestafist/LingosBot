@@ -344,6 +344,11 @@ internal sealed class LessonRunner (
             }
 
             var currentStep = ReadCurrentLessonStep();
+            if (currentStep.Kind == LessonStepKind.ContinueOnly)
+            {
+                return true;
+            }
+
             if (currentStep.Kind != LessonStepKind.Prompt || currentStep.PromptElement is null)
             {
                 return false;
