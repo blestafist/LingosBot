@@ -71,6 +71,12 @@ internal static class Selectors
         "MainLearnButton",
         "a.btn.btn-primary[href^='/learning/start']");
 
+    // The dashboard embeds every available class in this select. Selecting an
+    // option navigates to its server-side group-change URL.
+    public static SelectorDefinition ClassSelect { get; } = SelectorDefinition.CssRequired(
+        "ClassSelect",
+        "#modal-change-group select");
+
     public static SelectorDefinition LessonPrompt { get; } = SelectorDefinition.CssRequired(
         "LessonPrompt",
         "#app p.text-2xl strong");

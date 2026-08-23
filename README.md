@@ -33,7 +33,17 @@ dotnet restore
 dotnet run
 ```
 
-The application is fully non-interactive: every run immediately completes the number of lessons in `lessonCount` from `config.json` and then exits. Login credentials are also read only from this file. If `config.json` is missing, an empty template is created and the process exits with an error until it is configured.
+The application is fully non-interactive: every run discovers all classes listed under `Zmień klasę`, switches to each one, and completes `lessonCount` lessons for that class before continuing to the next. `classLessonCounts` can override this number by the exact class name; use `0` to skip a class. If Lingos reports a daily limit for one class, its remaining lessons are skipped and the bot continues with the next class. Login credentials are also read only from this file. If `config.json` is missing, an empty template is created and the process exits with an error until it is configured.
+
+```json
+"lessonCount": 1,
+"classLessonCounts": {
+  "1c 24/25": 0,
+  "2AC 2025/2026_Ein tolles Team 2": 2
+}
+```
+
+The first class is skipped, the second gets two lessons, and every other class gets one. Class-name matching ignores letter case but otherwise uses the name shown under `Zmień klasę`.
 
 `config.json` is ignored by Git because it contains credentials. The password is stored as plain text in this file, so restrict access to it and do not share or commit it.
 

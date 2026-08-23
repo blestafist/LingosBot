@@ -15,6 +15,10 @@
   "pageLoadTimeoutSeconds": 60,
   "pollingIntervalMilliseconds": 25,
   "lessonCount": 1,
+  "classLessonCounts": {
+    "1c 24/25": 0,
+    "2AC 2025/2026_Ein tolles Team 2": 2
+  },
   "lessonPromptSafetyCap": 30,
   "challengeLessonSafetyCap": 40
 }

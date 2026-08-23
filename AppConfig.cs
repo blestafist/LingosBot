@@ -13,33 +13,20 @@ internal sealed class AppConfig
     };
 
     public string BaseUrl { get; set; } = "https://lingos.pl";
-
     public string StudentDashboardUrl { get; set; } = "https://lingos.pl/student-confirmed/group";
-
     public AppCredentials? Credentials { get; set; }
-
     public string? BrowserBinaryPath { get; set; }
-
     public string Browser { get; set; } = "Chrome";
-
     public bool Headless { get; set; }
-
     public int ErrorsPer100Words { get; set; } = 10;
-
     public int DefaultWaitTimeoutSeconds { get; set; } = 15;
-
     public int ShortWaitTimeoutSeconds { get; set; } = 4;
-
     public int LessonRestartReuseTimeoutMilliseconds { get; set; } = 1500;
-
     public int PageLoadTimeoutSeconds { get; set; } = 60;
-
     public int PollingIntervalMilliseconds { get; set; } = 25;
-
     public int LessonCount { get; set; } = 1;
-
+    public Dictionary<string, int> ClassLessonCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public int LessonPromptSafetyCap { get; set; } = 30;
-
     public int ChallengeLessonSafetyCap { get; set; } = 40;
 
     [System.Text.Json.Serialization.JsonIgnore]
@@ -99,6 +86,11 @@ internal sealed class AppConfig
         if (Browser.Trim().ToLowerInvariant() is not ("chrome" or "firefox" or "edge" or "safari"))
         {
             throw new InvalidOperationException("browser must be one of: Chrome, Firefox, Edge, Safari.");
+        }
+
+        if (ClassLessonCounts is null || ClassLessonCounts.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value < 0))
+        {
+            throw new InvalidOperationException("classLessonCounts keys must not be empty and values must be zero or positive.");
         }
 
         if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds <= 0 || ShortWaitTimeoutSeconds <= 0 ||

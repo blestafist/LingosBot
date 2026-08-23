@@ -4,7 +4,7 @@ using OpenQA.Selenium.Support.Extensions;
 
 namespace LingosBotApp;
 
-internal sealed class LingosBot (  
+internal sealed class LingosBot(
     AppConfig config,
     BrowserFactory browserFactory)
 {
@@ -27,42 +27,31 @@ internal sealed class LingosBot (
             var loginService = new LoginService(driver, _config);
             LoginWithRetry(loginService, credentials);
 
-            var vocabularyCollector = new VocabularyCollector(driver, _config);
-            var vocabularyStopwatch = Stopwatch.StartNew();
-            var vocabulary = vocabularyCollector.CollectVocabulary();
-            vocabularyStopwatch.Stop();
-
-            if (vocabulary.Count == 0)
-            {
-                throw new InvalidOperationException("No vocabulary was collected from Zestawy. Verify the selectors in Selectors.cs.");
-            }
-
-            var totalStoredAnswers = vocabulary.Sum(pair => pair.Value.Count);
-            Console.WriteLine(
-                $"Collected {vocabulary.Count} unique Polish prompts with {totalStoredAnswers} stored answer candidates in {vocabularyStopwatch.Elapsed:mm\\:ss}.");
-
-            var lessonRunner = new LessonRunner(driver, _config, vocabulary);
+            var classRunner = new ClassRunner(driver, _config);
+            var classes = classRunner.ReadClasses();
+            Console.WriteLine($"Found {classes.Count} class(es) to process.");
             var challengeRunner = new ChallengeRunner(driver, _config);
 
-            for (var lessonNumber = 1; lessonNumber <= lessonCount; lessonNumber++)
+            for (var classIndex = 0; classIndex < classes.Count; classIndex++)
             {
-                // Always make sure we're working toward a Wyzwania challenge first.
-                EnsureChallengeSelected(challengeRunner);
+                var @class = classes[classIndex];
+                var classLessonCount = ResolveLessonCount(@class);
+                Console.WriteLine();
+                Console.WriteLine($"=== Class {classIndex + 1}/{classes.Count}: {@class.Title} ({classLessonCount} lesson(s)) ===");
 
-                var lessonStopwatch = Stopwatch.StartNew();
-                lessonRunner.RunLesson(lessonNumber);
-                lessonStopwatch.Stop();
-                Console.WriteLine($"Lesson {lessonNumber} elapsed time: {lessonStopwatch.Elapsed:mm\\:ss}.");
-                completedLessons++;
+                if (classLessonCount == 0)
+                {
+                    Console.WriteLine("Skipped by classLessonCounts.");
+                    continue;
+                }
+
+                classRunner.Select(@class);
+                completedLessons += RunLessonsForClass(driver, challengeRunner, classLessonCount, @class.Title);
             }
 
             totalStopwatch.Stop();
             Console.WriteLine($"Total run time: {totalStopwatch.Elapsed:mm\\:ss}.");
-            Console.WriteLine("All requested lessons were completed.");
-        }
-        catch (LessonLimitReachedException ex)
-        {
-            Console.WriteLine($"{ex.Message} Completed lessons in this run: {completedLessons}.");
+            Console.WriteLine($"Completed {completedLessons} lesson(s) across {classes.Count} class(es).");
         }
         catch (Exception ex) when (driver is not null)
         {
@@ -86,6 +75,57 @@ internal sealed class LingosBot (
                 }
             }
         }
+    }
+
+    private int RunLessonsForClass(IWebDriver driver, ChallengeRunner challengeRunner, int lessonCount, string classTitle)
+    {
+        var vocabularyCollector = new VocabularyCollector(driver, _config);
+        var vocabularyStopwatch = Stopwatch.StartNew();
+        var vocabulary = vocabularyCollector.CollectVocabulary();
+        vocabularyStopwatch.Stop();
+
+        if (vocabulary.Count == 0)
+        {
+            throw new InvalidOperationException("No vocabulary was collected from Zestawy. Verify the selectors in Selectors.cs.");
+        }
+
+        var totalStoredAnswers = vocabulary.Sum(pair => pair.Value.Count);
+        Console.WriteLine(
+            $"Collected {vocabulary.Count} unique Polish prompts with {totalStoredAnswers} stored answer candidates in {vocabularyStopwatch.Elapsed:mm\\:ss}.");
+
+        var lessonRunner = new LessonRunner(driver, _config, vocabulary);
+        var completedLessons = 0;
+
+        for (var lessonNumber = 1; lessonNumber <= lessonCount; lessonNumber++)
+        {
+            // Always make sure we're working toward a Wyzwania challenge first.
+            EnsureChallengeSelected(challengeRunner);
+
+            var lessonStopwatch = Stopwatch.StartNew();
+            try
+            {
+                lessonRunner.RunLesson(lessonNumber);
+            }
+            catch (LessonLimitReachedException ex)
+            {
+                Console.WriteLine($"{ex.Message} Skipping the remaining lessons for '{classTitle}'.");
+                break;
+            }
+
+            lessonStopwatch.Stop();
+            Console.WriteLine($"Lesson {lessonNumber} elapsed time: {lessonStopwatch.Elapsed:mm\\:ss}.");
+            completedLessons++;
+        }
+
+        return completedLessons;
+    }
+
+    private int ResolveLessonCount(ClassInfo @class)
+    {
+        var overrideValue = _config.ClassLessonCounts.FirstOrDefault(pair =>
+            string.Equals(pair.Key, @class.Title, StringComparison.OrdinalIgnoreCase));
+
+        return string.IsNullOrEmpty(overrideValue.Key) ? _config.LessonCount : overrideValue.Value;
     }
 
     // Before each lesson, make sure a Wyzwania challenge is selected: if one is
