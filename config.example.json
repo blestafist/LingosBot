@@ -14,7 +14,7 @@
   "lessonRestartReuseTimeoutMilliseconds": 1500,
   "pageLoadTimeoutSeconds": 60,
   "pollingIntervalMilliseconds": 25,
-  "minLessonCount": 1,
+  "lessonCount": 1,
   "lessonPromptSafetyCap": 30,
   "challengeLessonSafetyCap": 40
 }

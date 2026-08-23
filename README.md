@@ -27,15 +27,17 @@ Selenium + C# · .NET · Cross-platform
 ```bash
 git clone https://github.com/blestafist/LingosBot.git
 cd LingosBot
+cp config.example.json config.json
+# Edit config.json: set credentials and lessonCount.
 dotnet restore
 dotnet run
 ```
 
-On the first run, the bot creates `config.json` in the directory where it was started. It contains all settings, including the login and password. You can also start from `config.example.json`.
+The application is fully non-interactive: every run immediately completes the number of lessons in `lessonCount` from `config.json` and then exits. Login credentials are also read only from this file. If `config.json` is missing, an empty template is created and the process exits with an error until it is configured.
 
 `config.json` is ignored by Git because it contains credentials. The password is stored as plain text in this file, so restrict access to it and do not share or commit it.
 
-Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers.
+Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers. A non-zero exit code means that configuration, login, or the bot run failed, so it can be used directly by cron, systemd, or another scheduler.
 
 ## Browser Support
 
