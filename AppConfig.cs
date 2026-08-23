@@ -36,7 +36,7 @@ internal sealed class AppConfig
 
     public int PollingIntervalMilliseconds { get; set; } = 25;
 
-    public int MinLessonCount { get; set; } = 1;
+    public int LessonCount { get; set; } = 1;
 
     public int LessonPromptSafetyCap { get; set; } = 30;
 
@@ -60,9 +60,9 @@ internal sealed class AppConfig
         if (!File.Exists(ConfigFilePath))
         {
             var config = new AppConfig();
-            config.Save();
-            Console.WriteLine($"Created configuration file: {ConfigFilePath}");
-            return config;
+            File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(config, SerializerOptions));
+            throw new InvalidOperationException(
+                $"Created configuration file: {ConfigFilePath}. Set credentials and lessonCount before starting the bot.");
         }
 
         try
@@ -79,12 +79,6 @@ internal sealed class AppConfig
         }
     }
 
-    public void Save()
-    {
-        Validate();
-        File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(this, SerializerOptions));
-    }
-
     private void Validate()
     {
         if (string.IsNullOrWhiteSpace(BaseUrl) || string.IsNullOrWhiteSpace(StudentDashboardUrl))
@@ -97,6 +91,11 @@ internal sealed class AppConfig
             throw new InvalidOperationException("browser must not be empty.");
         }
 
+        if (Credentials is null || string.IsNullOrWhiteSpace(Credentials.Email) || string.IsNullOrWhiteSpace(Credentials.Password))
+        {
+            throw new InvalidOperationException("credentials.email and credentials.password must be set in config.json.");
+        }
+
         if (Browser.Trim().ToLowerInvariant() is not ("chrome" or "firefox" or "edge" or "safari"))
         {
             throw new InvalidOperationException("browser must be one of: Chrome, Firefox, Edge, Safari.");
@@ -104,13 +103,15 @@ internal sealed class AppConfig
 
         if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds <= 0 || ShortWaitTimeoutSeconds <= 0 ||
             LessonRestartReuseTimeoutMilliseconds <= 0 || PageLoadTimeoutSeconds <= 0 ||
-            PollingIntervalMilliseconds <= 0 || MinLessonCount < 1 || LessonPromptSafetyCap < 1 ||
+            PollingIntervalMilliseconds <= 0 || LessonCount < 1 || LessonPromptSafetyCap < 1 ||
             ChallengeLessonSafetyCap < 1)
         {
             throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words may be zero.");
         }
     }
 }
+
+internal sealed record AppCredentials(string Email, string Password);
 
 internal static class TextNormalizer
 {

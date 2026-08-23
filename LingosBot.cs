@@ -6,14 +6,10 @@ namespace LingosBotApp;
 
 internal sealed class LingosBot (  
     AppConfig config,
-    BrowserFactory browserFactory,
-    CredentialStore credentialStore,
-    Func<AppCredentials> credentialPrompt)
+    BrowserFactory browserFactory)
 {
     private readonly AppConfig _config = config;
     private readonly BrowserFactory _browserFactory = browserFactory;
-    private readonly CredentialStore _credentialStore = credentialStore;
-    private readonly Func<AppCredentials> _credentialPrompt = credentialPrompt;
 
     public void Run(int lessonCount)
     {
@@ -163,41 +159,19 @@ internal sealed class LingosBot (
 
     private AppCredentials ResolveCredentials()
     {
-        if (_credentialStore.TryLoad(out var savedCredentials) && savedCredentials is not null)
-        {
-            Console.WriteLine("Loaded saved credentials from config.json.");
-            return savedCredentials;
-        }
-
-        Console.WriteLine("No saved credentials were found.");
-        return _credentialPrompt();
+        return _config.Credentials! with { Email = _config.Credentials.Email.Trim() };
     }
 
-    private void LoginWithRetry(LoginService loginService, AppCredentials initialCredentials)
+    private static void LoginWithRetry(LoginService loginService, AppCredentials credentials)
     {
-        var currentCredentials = initialCredentials;
-        var hasRetried = false;
-
-        while (true)
+        try
         {
-            try
-            {
-                loginService.Login(currentCredentials);
-                _credentialStore.Save(currentCredentials);
-                return;
-            }
-            catch (LoginFailedException ex) when (!hasRetried)
-            {
-                Console.WriteLine(ex.Message);
-                Console.WriteLine("Please enter your credentials again. The stored credentials will be replaced after a successful login.");
-                currentCredentials = _credentialPrompt();
-                hasRetried = true;
-            }
-            catch (LoginFailedException)
-            {
-                _credentialStore.Delete();
-                throw;
-            }
+            loginService.Login(credentials);
+        }
+        catch (LoginFailedException ex)
+        {
+            throw new InvalidOperationException(
+                "Login failed. Check credentials.email and credentials.password in config.json.", ex);
         }
     }
 }
