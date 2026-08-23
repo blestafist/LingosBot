@@ -27,15 +27,27 @@ Selenium + C# · .NET · Cross-platform
 ```bash
 git clone https://github.com/blestafist/LingosBot.git
 cd LingosBot
+cp config.example.json config.json
+# Edit config.json: set credentials and lessonCount.
 dotnet restore
 dotnet run
 ```
 
-On the first run, the bot creates `config.json` in the directory where it was started. It contains all settings, including the login and password. You can also start from `config.example.json`.
+The application is fully non-interactive: every run discovers all classes listed under `Zmień klasę`, switches to each one, and completes `lessonCount` lessons for that class before continuing to the next. `classLessonCounts` can override this number by the exact class name; use `0` to skip a class. If Lingos reports a daily limit for one class, its remaining lessons are skipped and the bot continues with the next class. Login credentials are also read only from this file. If `config.json` is missing, an empty template is created and the process exits with an error until it is configured.
+
+```json
+"lessonCount": 1,
+"classLessonCounts": {
+  "1c 24/25": 0,
+  "2AC 2025/2026_Ein tolles Team 2": 2
+}
+```
+
+The first class is skipped, the second gets two lessons, and every other class gets one. Class-name matching ignores letter case but otherwise uses the name shown under `Zmień klasę`.
 
 `config.json` is ignored by Git because it contains credentials. The password is stored as plain text in this file, so restrict access to it and do not share or commit it.
 
-Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers.
+Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers. A non-zero exit code means that configuration, login, or the bot run failed, so it can be used directly by cron, systemd, or another scheduler.
 
 ## Browser Support
 
