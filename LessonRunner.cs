@@ -14,9 +14,6 @@ internal sealed class LessonRunner (
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
     private readonly Random _random = new();
 
-    private int _errorStreakRemaining = 0;
-    private const int StreakTarget = 2;
-
     public void RunLesson(int lessonNumber)
     {
         Console.WriteLine($"Preparing lesson {lessonNumber}...");
@@ -25,7 +22,7 @@ internal sealed class LessonRunner (
 
         var answeredPrompts = 0;
 
-        while (answeredPrompts < _config.LessonPromptSafetyCap)
+        while (answeredPrompts < _config.EffectiveLessonPromptSafetyCap)
         {
             if (IsLessonFinished())
             {
@@ -72,7 +69,7 @@ internal sealed class LessonRunner (
         }
 
         throw new InvalidOperationException(
-            $"Lesson {lessonNumber} exceeded the safety cap of {_config.LessonPromptSafetyCap} prompts. Stopping to avoid an infinite loop.");
+            $"Lesson {lessonNumber} exceeded the safety cap of {_config.EffectiveLessonPromptSafetyCap} prompts. Stopping to avoid an infinite loop.");
     }
 
     private void OpenMainPage()
@@ -143,26 +140,45 @@ internal sealed class LessonRunner (
         int lessonNumber,
         int promptIndex)
     {
+        if (MakeAnError())
+        {
+            var wrongAnswer = GenerateWrongAnswer(candidateAnswers[0]);
+            Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {wrongAnswer} [intentional error]");
+
+            var errorOutcome = SubmitBestEffortAnswer(wrongAnswer);
+            if (errorOutcome == LessonAnswerOutcome.Finished)
+            {
+                return true;
+            }
+
+            if (errorOutcome != LessonAnswerOutcome.Rejected)
+            {
+                throw new InvalidOperationException(
+                    $"The intentional wrong answer for '{promptText}' was unexpectedly accepted.");
+            }
+
+            // Lingos shows the result screen after a wrong answer. Dismiss it
+            // before submitting the correct translation for the same prompt.
+            ContinueAfterAnswer(promptText);
+        }
+
         for (var candidateIndex = 0; candidateIndex < candidateAnswers.Count; candidateIndex++)
         {
             var answer = candidateAnswers[candidateIndex];
 
-            // Only make intentional errors if there are multiple candidates or we're not on the last one
             var isLastCandidate = candidateIndex == candidateAnswers.Count - 1;
-            var shouldMakeError = !isLastCandidate && MakeAnError();
-            var actualAnswer = shouldMakeError ? GenerateWrongAnswer(answer) : answer;
 
             if (candidateAnswers.Count > 1 || candidateIndex > 0)
             {
                 Console.WriteLine(
-                    $"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}  (option {candidateIndex + 1}/{candidateAnswers.Count}){(shouldMakeError ? " [intentional error]" : "")}");
+                    $"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}  (option {candidateIndex + 1}/{candidateAnswers.Count})");
             }
             else
             {
-                Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}{(shouldMakeError ? " [intentional error]" : "")}");
+                Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {answer}");
             }
 
-            var outcome = SubmitBestEffortAnswer(actualAnswer);
+            var outcome = SubmitBestEffortAnswer(answer);
 
             if (outcome == LessonAnswerOutcome.Accepted)
             {
@@ -658,27 +674,7 @@ internal sealed class LessonRunner (
 
     private bool MakeAnError()
     {
-        int minLen = Math.Max(1, StreakTarget - 2);
-        int maxLen = StreakTarget + 2;
-        double avgLen = (minLen + maxLen) / 2.0;
-
-        double pTarget = _config.ErrorsPer100Words / 100.0;
-        double pStart = pTarget / avgLen;
-
-        if (_errorStreakRemaining > 0)
-        {
-            _errorStreakRemaining--;
-            return true;
-        }
-
-        double sample = _random.NextDouble();
-        if (sample < pStart)
-        {
-            _errorStreakRemaining = _random.Next(minLen, maxLen + 1) - 1;
-            return true;
-        }
-
-        return false;
+        return _random.NextDouble() < _config.ErrorsPer100Words / 100.0;
     }
 
     private string GenerateWrongAnswer(string correctAnswer)
@@ -691,12 +687,22 @@ internal sealed class LessonRunner (
         if (correctAnswer.Length == 1)
         {
             var letters = "abcdefghijklmnopqrstuvwxyz";
-            return letters[_random.Next(letters.Length)].ToString();
+            var wrongCharacter = letters[_random.Next(letters.Length)];
+            while (char.ToUpperInvariant(wrongCharacter) == char.ToUpperInvariant(correctAnswer[0]))
+            {
+                wrongCharacter = letters[_random.Next(letters.Length)];
+            }
+
+            return wrongCharacter.ToString();
         }
 
         var chars = correctAnswer.ToCharArray();
         var randomIndex = _random.Next(chars.Length);
         var randomChar = (char)('a' + _random.Next(26));
+        while (char.ToUpperInvariant(randomChar) == char.ToUpperInvariant(chars[randomIndex]))
+        {
+            randomChar = (char)('a' + _random.Next(26));
+        }
         chars[randomIndex] = randomChar;
         return new string(chars);
     }

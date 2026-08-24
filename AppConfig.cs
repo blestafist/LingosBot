@@ -19,54 +19,91 @@ internal sealed class AppConfig
     public string Browser { get; set; } = "Chrome";
     public bool Headless { get; set; }
     public int ErrorsPer100Words { get; set; } = 10;
-    public int DefaultWaitTimeoutSeconds { get; set; } = 15;
-    public int ShortWaitTimeoutSeconds { get; set; } = 4;
-    public int LessonRestartReuseTimeoutMilliseconds { get; set; } = 1500;
-    public int PageLoadTimeoutSeconds { get; set; } = 60;
-    public int PollingIntervalMilliseconds { get; set; } = 25;
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? DefaultWaitTimeoutSeconds { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? ShortWaitTimeoutSeconds { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? LessonRestartReuseTimeoutMilliseconds { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? PageLoadTimeoutSeconds { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? PollingIntervalMilliseconds { get; set; }
     public int LessonCount { get; set; } = 1;
     public Dictionary<string, int> ClassLessonCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    public int LessonPromptSafetyCap { get; set; } = 30;
-    public int ChallengeLessonSafetyCap { get; set; } = 40;
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? LessonPromptSafetyCap { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? ChallengeLessonSafetyCap { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public TimeSpan DefaultWaitTimeout => TimeSpan.FromSeconds(DefaultWaitTimeoutSeconds);
+    public TimeSpan DefaultWaitTimeout => TimeSpan.FromSeconds(DefaultWaitTimeoutSeconds ?? 15);
     [System.Text.Json.Serialization.JsonIgnore]
-    public TimeSpan ShortWaitTimeout => TimeSpan.FromSeconds(ShortWaitTimeoutSeconds);
+    public TimeSpan ShortWaitTimeout => TimeSpan.FromSeconds(ShortWaitTimeoutSeconds ?? 4);
     [System.Text.Json.Serialization.JsonIgnore]
-    public TimeSpan LessonRestartReuseTimeout => TimeSpan.FromMilliseconds(LessonRestartReuseTimeoutMilliseconds);
+    public TimeSpan LessonRestartReuseTimeout => TimeSpan.FromMilliseconds(LessonRestartReuseTimeoutMilliseconds ?? 1500);
     [System.Text.Json.Serialization.JsonIgnore]
-    public TimeSpan PageLoadTimeout => TimeSpan.FromSeconds(PageLoadTimeoutSeconds);
+    public TimeSpan PageLoadTimeout => TimeSpan.FromSeconds(PageLoadTimeoutSeconds ?? 60);
     [System.Text.Json.Serialization.JsonIgnore]
-    public TimeSpan PollingInterval => TimeSpan.FromMilliseconds(PollingIntervalMilliseconds);
+    public TimeSpan PollingInterval => TimeSpan.FromMilliseconds(PollingIntervalMilliseconds ?? 25);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int EffectiveLessonPromptSafetyCap => LessonPromptSafetyCap ?? 30;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int EffectiveChallengeLessonSafetyCap => ChallengeLessonSafetyCap ?? 40;
 
-    public static string ConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
+    public static string DefaultConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
 
-    public static AppConfig Load()
+    public static AppConfig Load(string? configFilePath = null, bool validate = true)
     {
-        if (!File.Exists(ConfigFilePath))
+        var path = ResolveConfigFilePath(configFilePath);
+
+        if (!File.Exists(path))
         {
             var config = new AppConfig();
-            File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(config, SerializerOptions));
-            throw new InvalidOperationException(
-                $"Created configuration file: {ConfigFilePath}. Set credentials and lessonCount before starting the bot.");
+            Save(config, path);
+
+            if (validate)
+            {
+                throw new InvalidOperationException(
+                    $"Created configuration file: {path}. Set credentials and lessonCount before starting the bot.");
+            }
+
+            return config;
         }
 
         try
         {
-            var json = File.ReadAllText(ConfigFilePath);
+            var json = File.ReadAllText(path);
             var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions)
                 ?? throw new JsonException("The configuration is empty.");
-            config.Validate();
+
+            if (validate)
+            {
+                config.Validate();
+            }
+
             return config;
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
-            throw new InvalidOperationException($"Could not load configuration from '{ConfigFilePath}': {ex.Message}", ex);
+            throw new InvalidOperationException($"Could not load configuration from '{path}': {ex.Message}", ex);
         }
     }
 
-    private void Validate()
+    public static void Save(AppConfig config, string? configFilePath = null)
+    {
+        var path = ResolveConfigFilePath(configFilePath);
+        var directory = Path.GetDirectoryName(path);
+
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(path, JsonSerializer.Serialize(config, SerializerOptions));
+    }
+
+    public void Validate()
     {
         if (string.IsNullOrWhiteSpace(BaseUrl) || string.IsNullOrWhiteSpace(StudentDashboardUrl))
         {
@@ -93,14 +130,17 @@ internal sealed class AppConfig
             throw new InvalidOperationException("classLessonCounts keys must not be empty and values must be zero or positive.");
         }
 
-        if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds <= 0 || ShortWaitTimeoutSeconds <= 0 ||
-            LessonRestartReuseTimeoutMilliseconds <= 0 || PageLoadTimeoutSeconds <= 0 ||
-            PollingIntervalMilliseconds <= 0 || LessonCount < 1 || LessonPromptSafetyCap < 1 ||
-            ChallengeLessonSafetyCap < 1)
+        if (ErrorsPer100Words is < 0 or > 100 || DefaultWaitTimeoutSeconds is <= 0 || ShortWaitTimeoutSeconds is <= 0 ||
+            LessonRestartReuseTimeoutMilliseconds is <= 0 || PageLoadTimeoutSeconds is <= 0 ||
+            PollingIntervalMilliseconds is <= 0 || LessonCount < 1 || LessonPromptSafetyCap is <= 0 ||
+            ChallengeLessonSafetyCap is <= 0)
         {
-            throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words may be zero.");
+            throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words must be between 0 and 100.");
         }
     }
+
+    private static string ResolveConfigFilePath(string? configFilePath) => Path.GetFullPath(
+        string.IsNullOrWhiteSpace(configFilePath) ? DefaultConfigFilePath : configFilePath);
 }
 
 internal sealed record AppCredentials(string Email, string Password);

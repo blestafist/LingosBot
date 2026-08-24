@@ -77,6 +77,44 @@ internal sealed class LingosBot(
         }
     }
 
+    public IReadOnlyList<ClassInfo> ScanClasses()
+    {
+        var credentials = ResolveCredentials();
+        IWebDriver? driver = null;
+
+        try
+        {
+            Console.WriteLine($"Starting {_config.Browser} to scan classes...");
+            driver = _browserFactory.Create(_config);
+            var loginService = new LoginService(driver, _config);
+            LoginWithRetry(loginService, credentials);
+
+            var classes = new ClassRunner(driver, _config).ReadClasses();
+            Console.WriteLine($"Found {classes.Count} class(es):");
+
+            foreach (var @class in classes)
+            {
+                Console.WriteLine($"- {@class.Title}");
+            }
+
+            return classes;
+        }
+        catch (Exception ex) when (driver is not null)
+        {
+            SaveDiagnostics(driver, ex);
+            throw;
+        }
+        finally
+        {
+            if (driver is not null)
+            {
+                Console.WriteLine($"Closing {_config.Browser}...");
+                driver.Quit();
+                driver.Dispose();
+            }
+        }
+    }
+
     private int RunLessonsForClass(IWebDriver driver, ChallengeRunner challengeRunner, int lessonCount, string classTitle)
     {
         var vocabularyCollector = new VocabularyCollector(driver, _config);
