@@ -70,9 +70,9 @@ internal sealed record CommandLineOptions
 
     private static int ParseNonNegativeInteger(string argument, string value)
     {
-        if (!int.TryParse(value, out var result) || result < 0)
+        if (!int.TryParse(value, out var result) || result is < 0 or > 100)
         {
-            throw new ArgumentException($"{argument} must be a non-negative integer.");
+            throw new ArgumentException($"{argument} must be an integer between 0 and 100.");
         }
 
         return result;

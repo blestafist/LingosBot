@@ -110,9 +110,9 @@ internal static class Program
 
         config.Browser = ReadSetting("Browser", config.Browser);
         var errors = ReadSetting("Errors per 100 words", config.ErrorsPer100Words.ToString());
-        config.ErrorsPer100Words = int.TryParse(errors, out var errorCount) && errorCount >= 0
+        config.ErrorsPer100Words = int.TryParse(errors, out var errorCount) && errorCount is >= 0 and <= 100
             ? errorCount
-            : throw new ArgumentException("Errors per 100 words must be a non-negative integer.");
+            : throw new ArgumentException("Errors per 100 words must be an integer between 0 and 100.");
         config.BrowserBinaryPath = ReadSetting("Browser binary path", config.BrowserBinaryPath ?? string.Empty);
     }
 

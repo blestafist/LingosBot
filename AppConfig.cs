@@ -130,12 +130,12 @@ internal sealed class AppConfig
             throw new InvalidOperationException("classLessonCounts keys must not be empty and values must be zero or positive.");
         }
 
-        if (ErrorsPer100Words < 0 || DefaultWaitTimeoutSeconds is <= 0 || ShortWaitTimeoutSeconds is <= 0 ||
+        if (ErrorsPer100Words is < 0 or > 100 || DefaultWaitTimeoutSeconds is <= 0 || ShortWaitTimeoutSeconds is <= 0 ||
             LessonRestartReuseTimeoutMilliseconds is <= 0 || PageLoadTimeoutSeconds is <= 0 ||
             PollingIntervalMilliseconds is <= 0 || LessonCount < 1 || LessonPromptSafetyCap is <= 0 ||
             ChallengeLessonSafetyCap is <= 0)
         {
-            throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words may be zero.");
+            throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words must be between 0 and 100.");
         }
     }
 
