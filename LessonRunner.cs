@@ -25,7 +25,7 @@ internal sealed class LessonRunner (
 
         var answeredPrompts = 0;
 
-        while (answeredPrompts < _config.LessonPromptSafetyCap)
+        while (answeredPrompts < _config.EffectiveLessonPromptSafetyCap)
         {
             if (IsLessonFinished())
             {
@@ -72,7 +72,7 @@ internal sealed class LessonRunner (
         }
 
         throw new InvalidOperationException(
-            $"Lesson {lessonNumber} exceeded the safety cap of {_config.LessonPromptSafetyCap} prompts. Stopping to avoid an infinite loop.");
+            $"Lesson {lessonNumber} exceeded the safety cap of {_config.EffectiveLessonPromptSafetyCap} prompts. Stopping to avoid an infinite loop.");
     }
 
     private void OpenMainPage()
