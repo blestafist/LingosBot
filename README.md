@@ -49,6 +49,29 @@ The first class is skipped, the second gets two lessons, and every other class g
 
 Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers. A non-zero exit code means that configuration, login, or the bot run failed, so it can be used directly by cron, systemd, or another scheduler.
 
+## Command Line
+
+Use `--config <path>` (or `-c <path>`) with any command to choose a configuration file; otherwise `config.json` in the current directory is used.
+
+```bash
+# Scan the classes under "Zmień klasę", print them, and save each to classLessonCounts.
+dotnet run -- --scan_classes
+
+# Persist individual settings.
+dotnet run -- --set_email user@example.com --set_passwd secret
+dotnet run -- --set_headless true --set_browser Firefox
+dotnet run -- --set_errors 5 --set_browser_path /usr/bin/firefox
+
+# Configure the same basic settings interactively.
+dotnet run -- --run_config
+
+# Override settings for one run without changing the configuration file.
+dotnet run -- --headless
+dotnet run -- --visible --browser Edge
+```
+
+Available arguments: `--scan_classes`/`-s`, `--config`/`-c`, `--set_email`, `--set_passwd`, `--set_headless true|false`, `--headless`/`-h`, `--visible`/`-v`, `--browser`, `--set_browser`, `--set_errors`, `--set_browser_path`, and `--run_config`.
+
 ## Browser Support
 
 Set `browser` in `config.json` to `Chrome`, `Firefox`, `Edge`, or `Safari`. Selenium Manager downloads a compatible driver automatically when possible. Use `browserBinaryPath` when the browser executable is installed outside the standard location. Firefox is fully supported in both visible and headless modes; Safari requires macOS and does not support Selenium headless mode.
