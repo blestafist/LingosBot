@@ -40,33 +40,59 @@ internal sealed class AppConfig
     [System.Text.Json.Serialization.JsonIgnore]
     public TimeSpan PollingInterval => TimeSpan.FromMilliseconds(PollingIntervalMilliseconds);
 
-    public static string ConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
+    public static string DefaultConfigFilePath => Path.Combine(Environment.CurrentDirectory, "config.json");
 
-    public static AppConfig Load()
+    public static AppConfig Load(string? configFilePath = null, bool validate = true)
     {
-        if (!File.Exists(ConfigFilePath))
+        var path = ResolveConfigFilePath(configFilePath);
+
+        if (!File.Exists(path))
         {
             var config = new AppConfig();
-            File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(config, SerializerOptions));
-            throw new InvalidOperationException(
-                $"Created configuration file: {ConfigFilePath}. Set credentials and lessonCount before starting the bot.");
+            Save(config, path);
+
+            if (validate)
+            {
+                throw new InvalidOperationException(
+                    $"Created configuration file: {path}. Set credentials and lessonCount before starting the bot.");
+            }
+
+            return config;
         }
 
         try
         {
-            var json = File.ReadAllText(ConfigFilePath);
+            var json = File.ReadAllText(path);
             var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions)
                 ?? throw new JsonException("The configuration is empty.");
-            config.Validate();
+
+            if (validate)
+            {
+                config.Validate();
+            }
+
             return config;
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
-            throw new InvalidOperationException($"Could not load configuration from '{ConfigFilePath}': {ex.Message}", ex);
+            throw new InvalidOperationException($"Could not load configuration from '{path}': {ex.Message}", ex);
         }
     }
 
-    private void Validate()
+    public static void Save(AppConfig config, string? configFilePath = null)
+    {
+        var path = ResolveConfigFilePath(configFilePath);
+        var directory = Path.GetDirectoryName(path);
+
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(path, JsonSerializer.Serialize(config, SerializerOptions));
+    }
+
+    public void Validate()
     {
         if (string.IsNullOrWhiteSpace(BaseUrl) || string.IsNullOrWhiteSpace(StudentDashboardUrl))
         {
@@ -101,6 +127,9 @@ internal sealed class AppConfig
             throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words may be zero.");
         }
     }
+
+    private static string ResolveConfigFilePath(string? configFilePath) => Path.GetFullPath(
+        string.IsNullOrWhiteSpace(configFilePath) ? DefaultConfigFilePath : configFilePath);
 }
 
 internal sealed record AppCredentials(string Email, string Password);
