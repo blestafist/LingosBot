@@ -43,6 +43,11 @@ internal sealed class LessonRunner (
                 continue;
             }
 
+            if (step.Kind == LessonStepKind.Blocked)
+            {
+                ThrowLessonLimitReached();
+            }
+
             answeredPrompts++;
             var promptElement = step.PromptElement!;
             var promptText = TextNormalizer.Normalize(promptElement.Text);
@@ -333,13 +338,7 @@ internal sealed class LessonRunner (
 
     private bool IsLessonFinished()
     {
-        var currentUrl = _driver.Url ?? string.Empty;
-        if (currentUrl.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return false;
+        return (_driver.Url ?? string.Empty).Contains("/group/finished", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ContinueAfterAnswer(string previousPromptText)
@@ -360,6 +359,11 @@ internal sealed class LessonRunner (
             }
 
             var currentStep = ReadCurrentLessonStep();
+            if (currentStep.Kind == LessonStepKind.Blocked)
+            {
+                ThrowLessonLimitReached();
+            }
+
             if (currentStep.Kind == LessonStepKind.ContinueOnly)
             {
                 return true;
@@ -411,13 +415,11 @@ internal sealed class LessonRunner (
 
     private LessonStepState WaitForStepOrLessonFinished()
     {
-        var result = CreateWait().Until<object?>(_ =>
+        return CreateWait().Until(_ =>
         {
             var step = ReadCurrentLessonStep();
             return step.Kind == LessonStepKind.Waiting ? null : step;
-        });
-
-        return result as LessonStepState ?? new LessonStepState(LessonStepKind.Finished, null);
+        }) ?? throw new WebDriverTimeoutException("Timed out waiting for the next lesson step.");
     }
 
     private LessonStepState ReadCurrentLessonStep()
@@ -485,6 +487,11 @@ internal sealed class LessonRunner (
             return;
         }
 
+        ThrowLessonLimitReached();
+    }
+
+    private static void ThrowLessonLimitReached()
+    {
         throw new LessonLimitReachedException(
             "Lingos reported that today's lesson limit has been reached for this account. The bot stopped cleanly.");
     }
@@ -553,28 +560,6 @@ internal sealed class LessonRunner (
             element = null;
             return false;
         }
-    }
-
-    private IWebElement WaitUntilVisible(SelectorDefinition selector)
-    {
-        var by = selector.ToBy();
-
-        return CreateWait().Until(driver =>
-        {
-            try
-            {
-                var element = driver.FindElement(by);
-                return element.Displayed ? element : null;
-            }
-            catch (NoSuchElementException)
-            {
-                return null;
-            }
-            catch (StaleElementReferenceException)
-            {
-                return null;
-            }
-        }) ?? throw new WebDriverTimeoutException($"Timed out waiting for selector '{selector.Name}' to become visible.");
     }
 
     private IWebElement WaitUntilClickable(SelectorDefinition selector)

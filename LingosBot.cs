@@ -62,17 +62,7 @@ internal sealed class LingosBot(
         {
             if (driver is not null)
             {
-                Console.WriteLine($"Closing {_config.Browser}...");
-
-                try
-                {
-                    driver.Quit();
-                    driver.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Browser cleanup reported an error: {ex.Message}");
-                }
+                CloseDriver(driver);
             }
         }
     }
@@ -108,9 +98,32 @@ internal sealed class LingosBot(
         {
             if (driver is not null)
             {
-                Console.WriteLine($"Closing {_config.Browser}...");
-                driver.Quit();
+                CloseDriver(driver);
+            }
+        }
+    }
+
+    private void CloseDriver(IWebDriver driver)
+    {
+        Console.WriteLine($"Closing {_config.Browser}...");
+
+        try
+        {
+            driver.Quit();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Browser cleanup reported an error: {ex.Message}");
+        }
+        finally
+        {
+            try
+            {
                 driver.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Browser disposal reported an error: {ex.Message}");
             }
         }
     }
@@ -180,9 +193,10 @@ internal sealed class LingosBot(
         {
             var snapshot = challengeRunner.ReadChallenges();
 
-            if (snapshot.HasActive)
+            var active = snapshot.Active;
+            if (active is not null)
             {
-                Console.WriteLine($"Challenge in progress: '{snapshot.Active!.Title}' - this lesson counts toward it.");
+                Console.WriteLine($"Challenge in progress: '{active.Title}' - this lesson counts toward it.");
                 return;
             }
 
