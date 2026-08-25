@@ -29,7 +29,7 @@ sudo chmod 700 /opt/lingosbot /opt/lingosbot/app
 sudo chmod 700 /etc/lingosbot
 ```
 
-Extract the Linux release into `/opt/lingosbot/app`, then mark the executable as runnable:
+Download the Linux ZIP release and extract the **entire** archive into `/opt/lingosbot/app`. Keep the bundled `selenium-manager/` directory beside `LingosBot`; it is required for automatic browser-driver management. Do not copy only the executable. Then mark the executable as runnable:
 
 ```bash
 sudo chmod +x /opt/lingosbot/app/LingosBot
@@ -145,7 +145,7 @@ Cron does not run jobs missed while the server is off. Use `systemd` if catch-up
 
 ## Maintenance
 
-- Update the release by stopping any active run, replacing files in `/opt/lingosbot/app`, restoring executable permissions, and running the service manually before re-enabling the timer.
+- Update the release by stopping any active run, replacing the complete extracted contents in `/opt/lingosbot/app` including `selenium-manager/`, restoring executable permissions, and running the service manually before re-enabling the timer.
 - Keep `config.json`, `diagnostics/`, and cron logs private. They can include account and page data.
 - Review `/opt/lingosbot/app/diagnostics/` and `/opt/lingosbot/lingosbot.log` periodically, then delete old files. If you configure log rotation, preserve the `0600` log mode and `lingosbot` ownership.
 - Do not run concurrent instances against the same account. Ensure the scheduled interval is longer than the longest normal run.

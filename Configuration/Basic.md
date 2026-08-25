@@ -4,9 +4,26 @@ This guide is for running a ready-made LingosBot release on a personal computer.
 
 ## 1. Download A Release
 
-Open [GitHub Releases](https://github.com/blestafist/LingosBot/releases), download the archive matching your operating system, and extract it to a private directory. Do not extract it to a shared downloads folder because `config.json` will contain your Lingos password.
+Open [GitHub Releases](https://github.com/blestafist/LingosBot/releases), download the ZIP archive matching your operating system, and extract the **entire** archive to a private directory. Do not extract it to a shared downloads folder because `config.json` will contain your Lingos password.
 
-The extracted directory contains the LingosBot executable. LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
+The extracted directory contains the LingosBot executable and its Selenium Manager helper. Keep this layout intact:
+
+```text
+LingosBot-release/
+├── LingosBot                 # LingosBot.exe on Windows
+└── selenium-manager/
+    ├── linux/selenium-manager
+    ├── macos/selenium-manager
+    └── windows/selenium-manager.exe
+```
+
+Selenium Manager locates or downloads a compatible browser driver. Do not download it separately, delete it, or move only `LingosBot` out of the extracted directory; the browser may then fail to start.
+
+LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
+
+LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
+
+LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
 
 ## 2. Install A Browser
 
@@ -17,7 +34,7 @@ Install one supported browser if it is not already installed:
 - Edge
 - Safari on macOS only
 
-Chrome, Firefox, and Edge work in visible and headless modes. Safari works only on macOS and cannot run headlessly. Selenium normally finds or downloads a compatible driver automatically; you usually do not need to install a driver yourself.
+Chrome, Firefox, and Edge work in visible and headless modes. Safari works only on macOS and cannot run headlessly. The bundled Selenium Manager normally finds or downloads a compatible driver automatically; you usually do not need to install a driver yourself.
 
 ## 3. Create `config.json`
 
@@ -115,6 +132,6 @@ Use `0` for `errorsPer100Words` if the bot should never make intentional mistake
 ## Common Problems
 
 - **The executable does not start on macOS or Linux:** make it executable with `chmod +x LingosBot` and run it again.
-- **The browser does not start:** install the selected browser, update it, then retry with an internet connection so Selenium Manager can resolve the driver.
+- **The browser does not start:** verify that the `selenium-manager/` directory is still beside the executable, install or update the selected browser, then retry with an internet connection so Selenium Manager can resolve the driver.
 - **Login fails:** re-run `--run_config` or correct the credentials in `config.json`.
 - **The daily lesson limit is reached:** this is normal. LingosBot skips the remaining lessons for that class.

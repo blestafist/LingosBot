@@ -8,7 +8,7 @@ The bot can process every class listed in Lingos, assign a different lesson coun
 
 ## Quick Start
 
-Download the archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract it, and follow [Configuration/Basic.md](Configuration/Basic.md). A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
+Download the ZIP archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract the entire archive, and follow [Configuration/Basic.md](Configuration/Basic.md). Do not download or move only the `LingosBot` executable: its bundled `selenium-manager` directory must remain beside it. A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
 
 ## How A Run Works
 
