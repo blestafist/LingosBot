@@ -1,93 +1,69 @@
-<div align="center">
+# LingosBot
 
-# LingosBot 🚀
+LingosBot is a .NET console application that automates lessons on [lingos.pl](https://lingos.pl/) through Selenium. It signs in, reads the vocabulary available in the selected class, and completes lessons using those collected translations.
 
-**Fast automation tool for lingos.pl**  
-Selenium + C# · .NET · Cross-platform
+The bot can process every class listed in Lingos, assign a different lesson count to individual classes, choose an available challenge, and optionally make intentional mistakes.
 
-[![C#](https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=c-sharp&logoColor=white)](https://dotnet.microsoft.com/)
-[![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=for-the-badge&logo=selenium&logoColor=white)](https://www.selenium.dev/)
-[![.NET](https://img.shields.io/badge/.NET-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+> Browser automation may conflict with lingos.pl terms of service. Use the project only with an account you are allowed to automate and at your own risk.
 
-</div>
+## Quick Start
 
-## ✨ Features
+Download the ZIP archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract the entire archive, and follow [Configuration/Basic.md](Configuration/Basic.md). Do not download or move only the `LingosBot` executable: its bundled `selenium-manager` directory must remain beside it. A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
 
-- 🔐 Automatic account login
-- 📖 Auto-completion of lessons
-- 🗃 Support for word databases / dictionaries
-- ⚡ High speed (C# + .NET much faster than Python Selenium)
-- 🖥️ Works on Windows · Linux · macOS
-- 🧩 Easy to extend with new task scenarios
-- Headless mode
+## How A Run Works
 
-## 🚀 Quick Start
+1. The bot signs in and reads the class list from Lingos.
+2. For each class, it opens the word sets and builds a translation lookup.
+3. It checks whether a challenge is already active; otherwise, it joins the available challenge with the highest point value.
+4. It completes the requested lessons for that class.
+5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
+
+`lessonCount` is the default per-class count. `classLessonCounts` can override it by class title; set an entry to `0` to skip that class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
+
+## Common Commands
 
 ```bash
-git clone https://github.com/blestafist/LingosBot.git
-cd LingosBot
-cp config.example.json config.json
-# Edit config.json: set credentials and lessonCount.
-dotnet restore
-dotnet run
+# Run a downloaded Linux release.
+./LingosBot
+
+# Run a downloaded Windows release in PowerShell.
+.\LingosBot.exe
+
+# Run without a visible browser window for one invocation.
+./LingosBot --headless
+
+# Discover classes and save them to classLessonCounts.
+./LingosBot --scan_classes
 ```
 
-The application is fully non-interactive: every run discovers all classes listed under `Zmień klasę`, switches to each one, and completes `lessonCount` lessons for that class before continuing to the next. `classLessonCounts` can override this number by the exact class name; use `0` to skip a class. If Lingos reports a daily limit for one class, its remaining lessons are skipped and the bot continues with the next class. Login credentials are also read only from this file. If `config.json` is missing, an empty template is created and the process exits with an error until it is configured.
+The exact command-line interface is documented in [Configuration/CLI.md](Configuration/CLI.md). When running from source, prepend `dotnet run --` to the same arguments.
 
-```json
-"lessonCount": 1,
-"classLessonCounts": {
-  "1c 24/25": 0,
-  "2AC 2025/2026_Ein tolles Team 2": 2
-}
-```
+## Troubleshooting
 
-The first class is skipped, the second gets two lessons, and every other class gets one. Class-name matching ignores letter case but otherwise uses the name shown under `Zmień klasę`.
+- **The browser does not start:** verify that the selected browser is installed. If it lives outside the usual location, configure `browserBinaryPath`.
+- **Login fails:** check `credentials.email` and `credentials.password` in `config.json`.
+- **No classes or vocabulary are found:** Lingos may have changed its markup, or the account may not have access to the expected class and word sets.
+- **The bot stops at the daily limit:** this is expected. LingosBot skips the remaining lessons for that class.
 
-`config.json` is ignored by Git because it contains credentials. The password is stored as plain text in this file, so restrict access to it and do not share or commit it.
+## Diagnostics And Privacy
 
-Set `headless` to `true` in `config.json` to run without a visible browser window, which is useful for servers. A non-zero exit code means that configuration, login, or the bot run failed, so it can be used directly by cron, systemd, or another scheduler.
+The bot stores diagnostics below `diagnostics/` next to the application executable. Failed runs can write page HTML, a screenshot, the current URL, and exception details. Challenge checks also save the latest dashboard and challenge landing pages during normal runs.
 
-## Command Line
+These files may contain account, class, vocabulary, and page-session data. Inspect and redact them before sharing an issue, and delete them when they are no longer needed.
 
-Use `--config <path>` (or `-c <path>`) with any command to choose a configuration file; otherwise `config.json` in the current directory is used.
+## Documentation
 
-```bash
-# Scan the classes under "Zmień klasę", print them, and save each to classLessonCounts.
-dotnet run -- --scan_classes
+- [Basic setup](Configuration/Basic.md): download a release, create `config.json`, and run the bot locally.
+- [Command-line interface](Configuration/CLI.md): every command-line option and its precedence.
+- [Advanced configuration](Configuration/Advanced.md): browser paths, timing values, safety caps, and source builds.
+- [Linux servers](Configuration/Servers.md): headless setup and scheduled runs with systemd timers or cron.
 
-# Persist individual settings.
-dotnet run -- --set_email user@example.com --set_passwd secret
-dotnet run -- --set_headless true --set_browser Firefox
-dotnet run -- --set_errors 5 --set_browser_path /usr/bin/firefox
+## Development
 
-# Configure the same basic settings interactively.
-dotnet run -- --run_config
+See [Configuration/Advanced.md](Configuration/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
 
-# Override settings for one run without changing the configuration file.
-dotnet run -- --headless
-dotnet run -- --visible --browser Edge
-```
+The repository currently has no automated test project. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
 
-Available arguments: `--scan_classes`/`-s`, `--config`/`-c`, `--set_email`, `--set_passwd`, `--set_headless true|false`, `--headless`/`-h`, `--visible`/`-v`, `--browser`, `--set_browser`, `--set_errors`, `--set_browser_path`, and `--run_config`.
+## Support
 
-## Browser Support
-
-Set `browser` in `config.json` to `Chrome`, `Firefox`, `Edge`, or `Safari`. Selenium Manager downloads a compatible driver automatically when possible. Use `browserBinaryPath` when the browser executable is installed outside the standard location. Firefox is fully supported in both visible and headless modes; Safari requires macOS and does not support Selenium headless mode.
-
-## ⚠️ Important
-
-Browser automation may violate the terms of service of lingos.pl.  
-**Use at your own risk.**
-
-## 📬 Contact
-
-- 💬 **Telegram** → [@qsistch](https://t.me/qsistch)  
-- 💻 **GitHub** → [blestafist](https://github.com/blestafist)  
-- 📧 **Email** → ufw-public@proton.me
-
----
-
-⭐️ If this saves you time — give it a star!  
-🐛 Found a bug or have an idea? → [Open an issue](https://github.com/blestafist/LingosBot/issues)
+Report bugs and suggestions through the [issue tracker](https://github.com/blestafist/LingosBot/issues).
