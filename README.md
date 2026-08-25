@@ -6,35 +6,9 @@ The bot can process every class listed in Lingos, assign a different lesson coun
 
 > Browser automation may conflict with lingos.pl terms of service. Use the project only with an account you are allowed to automate and at your own risk.
 
-## Requirements
-
-- .NET SDK 10.0 or newer
-- A supported desktop browser: Chrome, Firefox, Edge, or Safari on macOS
-- A Lingos account with access to the classes you want to process
-
-Selenium normally obtains a compatible browser driver automatically. Detailed setup instructions for Windows, macOS, and Linux are in [Configuration/Desktop.md](Configuration/Desktop.md).
-
 ## Quick Start
 
-```bash
-git clone https://github.com/blestafist/LingosBot.git
-cd LingosBot
-dotnet restore
-dotnet run -- --run_config
-dotnet run
-```
-
-`--run_config` asks for your email, password, browser, headless mode, and error rate, then creates or updates `config.json`. The password is stored in plain text. Keep this file private; it is ignored by Git.
-
-To configure the file manually instead, copy `config.example.json` to `config.json`, add your credentials, set `lessonCount`, and review or remove the example `classLessonCounts` entries.
-
-```bash
-# Linux and macOS
-cp config.example.json config.json
-
-# Windows PowerShell
-Copy-Item config.example.json config.json
-```
+Download the archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract it, and follow [Configuration/Basic.md](Configuration/Basic.md). A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
 
 ## How A Run Works
 
@@ -44,31 +18,25 @@ Copy-Item config.example.json config.json
 4. It completes the requested lessons for that class.
 5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
 
-`lessonCount` is the default per-class count. `classLessonCounts` can override it by class title; set an entry to `0` to skip that class. See [Configuration/Configuration.md](Configuration/Configuration.md#class-lesson-counts).
+`lessonCount` is the default per-class count. `classLessonCounts` can override it by class title; set an entry to `0` to skip that class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
 
 ## Common Commands
 
 ```bash
-# Start using config.json in the current directory.
-dotnet run
+# Run a downloaded Linux release.
+./LingosBot
 
-# Show a browser window for this run, regardless of config.json.
-dotnet run -- --visible
+# Run a downloaded Windows release in PowerShell.
+.\LingosBot.exe
 
-# Run without a browser window for this run.
-dotnet run -- --headless
+# Run without a visible browser window for one invocation.
+./LingosBot --headless
 
-# Use a different browser for this run without saving it.
-dotnet run -- --browser Firefox
-
-# Discover classes and save default counts to classLessonCounts.
-dotnet run -- --scan_classes
-
-# Use a configuration file outside the repository.
-dotnet run -- --config /path/to/lingosbot.json
+# Discover classes and save them to classLessonCounts.
+./LingosBot --scan_classes
 ```
 
-For all configuration fields and command-line arguments, see [Configuration/Configuration.md](Configuration/Configuration.md).
+The exact command-line interface is documented in [Configuration/CLI.md](Configuration/CLI.md). When running from source, prepend `dotnet run --` to the same arguments.
 
 ## Troubleshooting
 
@@ -85,14 +53,14 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 
 ## Documentation
 
-- [Desktop setup](Configuration/Desktop.md): install the SDK and browser on Windows, macOS, or Linux.
-- [Configuration reference](Configuration/Configuration.md): `config.json`, class overrides, browser paths, timeouts, and CLI flags.
+- [Basic setup](Configuration/Basic.md): download a release, create `config.json`, and run the bot locally.
+- [Command-line interface](Configuration/CLI.md): every command-line option and its precedence.
+- [Advanced configuration](Configuration/Advanced.md): browser paths, timing values, safety caps, and source builds.
+- [Linux servers](Configuration/Servers.md): headless setup and scheduled runs with systemd timers or cron.
 
 ## Development
 
-```bash
-dotnet build
-```
+See [Configuration/Advanced.md](Configuration/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
 
 The repository currently has no automated test project. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
 
