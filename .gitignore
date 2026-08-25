@@ -4,3 +4,4 @@ obj/
 *.html
 dev_pages/
 .example/
+*.json
