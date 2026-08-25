@@ -116,8 +116,6 @@ internal sealed class ChallengeSnapshot (IReadOnlyList<ChallengeInfo> challenges
 
     public ChallengeInfo? Active => Challenges.FirstOrDefault(challenge => challenge.IsActive);
 
-    public bool HasActive => Active is not null;
-
     public ChallengeInfo? BestAvailable => Challenges
         .Where(challenge => challenge.IsAvailable)
         .OrderByDescending(challenge => challenge.Points)
