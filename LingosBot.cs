@@ -150,12 +150,12 @@ internal sealed class LingosBot(
         for (var lessonNumber = 1; lessonNumber <= lessonCount; lessonNumber++)
         {
             // Always make sure we're working toward a Wyzwania challenge first.
-            EnsureChallengeSelected(challengeRunner);
+            var perfectionismActive = EnsureChallengeSelected(challengeRunner);
 
             var lessonStopwatch = Stopwatch.StartNew();
             try
             {
-                lessonRunner.RunLesson(lessonNumber);
+                lessonRunner.RunLesson(lessonNumber, perfectionismActive);
             }
             catch (LessonLimitReachedException ex)
             {
@@ -182,22 +182,29 @@ internal sealed class LingosBot(
     // Before each lesson, make sure a Wyzwania challenge is selected: if one is
     // already active it just continues it; otherwise it joins the highest-point
     // one available. Never throws - a challenge hiccup must not block the lessons.
-    private void EnsureChallengeSelected(ChallengeRunner challengeRunner)
+    private bool EnsureChallengeSelected(ChallengeRunner challengeRunner)
     {
         if (!Selectors.ChallengeCard.IsConfigured)
         {
-            return;
+            return false;
         }
 
         try
         {
             var snapshot = challengeRunner.ReadChallenges();
 
+            var perfectionism = snapshot.ActivePerfectionism;
+            if (perfectionism is not null)
+            {
+                Console.WriteLine($"Challenge in progress: '{perfectionism.Title}' - intentional errors are disabled for this lesson.");
+                return true;
+            }
+
             var active = snapshot.Active;
             if (active is not null)
             {
                 Console.WriteLine($"Challenge in progress: '{active.Title}' - this lesson counts toward it.");
-                return;
+                return false;
             }
 
             var best = snapshot.BestAvailable;
@@ -205,15 +212,22 @@ internal sealed class LingosBot(
             {
                 Console.WriteLine($"Picking challenge '{best.Title}' (worth {best.Points} pkt)...");
                 challengeRunner.Join(best);
+
+                // Join refreshes the dashboard, but confirm the server now
+                // reports the challenge as active before changing lesson behavior.
+                return challengeRunner.ReadChallenges().ActivePerfectionism is not null;
             }
             else
             {
                 Console.WriteLine("No challenge available to pick right now - running a normal lesson.");
             }
+
+            return false;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Could not check challenges ({ex.Message}). Continuing with the lesson anyway.");
+            return false;
         }
     }
 

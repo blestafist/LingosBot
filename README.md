@@ -18,6 +18,8 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 4. It completes the requested lessons for that class.
 5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
 
+When the active challenge is exactly **Perfekcjonizm** with the condition “Wykonaj 1 lekcję z maksymalnie 1 błędem”, intentional errors are disabled for that lesson. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
+
 `lessonCount` is the default per-class count. `classLessonCounts` can override it by class title; set an entry to `0` to skip that class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
 
 Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes.

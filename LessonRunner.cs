@@ -14,7 +14,7 @@ internal sealed class LessonRunner (
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
     private readonly Random _random = new();
 
-    public void RunLesson(int lessonNumber)
+    public void RunLesson(int lessonNumber, bool perfectionismChallengeActive = false)
     {
         Console.WriteLine($"Preparing lesson {lessonNumber}...");
         OpenMainPage();
@@ -65,7 +65,12 @@ internal sealed class LessonRunner (
                     $"No collected translation exists for lesson prompt '{promptText}'. The bot stopped safely without guessing.");
             }
 
-            var lessonFinished = TryAnswerPromptWithCandidates(promptText, candidateAnswers, lessonNumber, answeredPrompts);
+            var lessonFinished = TryAnswerPromptWithCandidates(
+                promptText,
+                candidateAnswers,
+                lessonNumber,
+                answeredPrompts,
+                perfectionismChallengeActive);
             if (lessonFinished)
             {
                 Console.WriteLine($"Lesson {lessonNumber} completed.");
@@ -143,9 +148,10 @@ internal sealed class LessonRunner (
         string promptText,
         IReadOnlyList<string> candidateAnswers,
         int lessonNumber,
-        int promptIndex)
+        int promptIndex,
+        bool perfectionismChallengeActive)
     {
-        if (MakeAnError())
+        if (MakeAnError(perfectionismChallengeActive))
         {
             var wrongAnswer = GenerateWrongAnswer(candidateAnswers[0]);
             Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {wrongAnswer} [intentional error]");
@@ -713,9 +719,11 @@ internal sealed class LessonRunner (
             element);
     }
 
-    private bool MakeAnError()
+    private bool MakeAnError(bool perfectionismChallengeActive)
     {
-        return _random.NextDouble() < _config.ErrorsPer100Words / 100.0;
+        return _random.NextDouble() < ErrorRateResolver.GetEffectiveRate(
+            _config.ErrorsPer100Words,
+            perfectionismChallengeActive) / 100.0;
     }
 
     private string GenerateWrongAnswer(string correctAnswer)

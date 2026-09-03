@@ -33,7 +33,8 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
                 TextNormalizer.Normalize(item.Title),
                 item.Points,
                 item.JoinUrl.Trim(),
-                item.Completed))
+                item.Completed,
+                TextNormalizer.Normalize(item.Description)))
             .ToList();
 
         return new ChallengeSnapshot(challenges);
@@ -93,6 +94,7 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
                 const challenges = props.dashboard?.challenges || [];
                 return JSON.stringify(challenges.map(challenge => ({
                     title: challenge.title || '',
+                    description: challenge.description || '',
                     points: Number(challenge.prize) || 0,
                     joinUrl: challenge.status === 'available'
                         ? `${window.location.origin}/student/challenges/${challenge.id}`
@@ -108,10 +110,15 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
         return JSON.stringify(cards.map(card => {
             const text = (card.textContent || '').replace(/\s+/g, ' ').trim();
             const titleEl = card.querySelector('h5');
+            const descriptionEl = Array.from(card.querySelectorAll('p'))
+                .find(paragraph => /^Opis\s*:/i.test(paragraph.textContent || ''));
             const join = card.querySelector("a[href*='/students/challenge/']");
             const points = text.match(/(?:Nagroda:\s*|)(\d+)\s*pkt/i);
             return {
                 title: titleEl ? titleEl.textContent.replace(/\s+/g, ' ').trim() : '',
+                description: descriptionEl
+                    ? descriptionEl.textContent.replace(/^Opis\s*:\s*/i, '').replace(/\s+/g, ' ').trim()
+                    : '',
                 points: points ? parseInt(points[1], 10) : 0,
                 joinUrl: join ? join.href : '',
                 completed: /Gratulacje/i.test(text)
@@ -146,6 +153,8 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
     {
         public string Title { get; set; } = string.Empty;
 
+        public string Description { get; set; } = string.Empty;
+
         public int Points { get; set; }
 
         public string JoinUrl { get; set; } = string.Empty;
@@ -154,13 +163,29 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
     }
 }
 
-internal sealed record ChallengeInfo(string Title, int Points, string JoinUrl, bool Completed)
+internal sealed record ChallengeInfo(
+    string Title,
+    int Points,
+    string JoinUrl,
+    bool Completed,
+    string Description = "")
 {
+    private const string PerfectionismTitle = "Perfekcjonizm";
+    private const string PerfectionismDescription = "Wykonaj 1 lekcję z maksymalnie 1 błędem";
+
     // A challenge we can still pick has a join link and is not finished.
     public bool IsAvailable => !Completed && !string.IsNullOrWhiteSpace(JoinUrl);
 
     // In-progress: already taken (no join link) but not yet completed.
     public bool IsActive => !Completed && string.IsNullOrWhiteSpace(JoinUrl);
+
+    // Match the complete title and condition, rather than a title fragment: the
+    // other Perfekcjonizm challenges have different lesson counts and must not
+    // disable intentional errors accidentally.
+    public bool IsPerfectionism => IsActive &&
+        string.Equals(Title, PerfectionismTitle, StringComparison.Ordinal) &&
+        (string.Equals(Description, PerfectionismDescription, StringComparison.Ordinal) ||
+         string.Equals(Description, $"{PerfectionismDescription}.", StringComparison.Ordinal));
 }
 
 internal sealed class ChallengeSnapshot (IReadOnlyList<ChallengeInfo> challenges)
@@ -168,6 +193,9 @@ internal sealed class ChallengeSnapshot (IReadOnlyList<ChallengeInfo> challenges
     public IReadOnlyList<ChallengeInfo> Challenges { get; } = challenges;
 
     public ChallengeInfo? Active => Challenges.FirstOrDefault(challenge => challenge.IsActive);
+
+    public ChallengeInfo? ActivePerfectionism => Challenges.FirstOrDefault(challenge =>
+        challenge.IsActive && challenge.IsPerfectionism);
 
     public ChallengeInfo? BestAvailable => Challenges
         .Where(challenge => challenge.IsAvailable)
