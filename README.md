@@ -20,6 +20,8 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 
 `lessonCount` is the default per-class count. `classLessonCounts` can override it by class title; set an entry to `0` to skip that class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
 
+Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes.
+
 ## Common Commands
 
 ```bash
@@ -62,7 +64,7 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 
 See [Configuration/Advanced.md](Configuration/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
 
-The repository currently has no automated test project. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
+The repository includes focused tests for interactive configuration. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
 
 ## Support
 

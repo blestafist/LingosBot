@@ -91,7 +91,9 @@ Later, run the executable without options to use the values saved in `config.jso
 
 ## Choose Which Classes To Run
 
-By default, LingosBot processes every class visible in Lingos and runs `lessonCount` lessons in each. First discover the exact class titles:
+By default, LingosBot processes every class visible in Lingos and runs `lessonCount` lessons in each. You can set the total number of lessons and per-class counts interactively with `--run_config`. The first prompt asks whether to configure classes separately. Answer `no` to set only the global `lessonCount` (and leave any existing `classLessonCounts` overrides unchanged), or answer `yes` to sign in, discover the classes, and enter a count for each one. Use `0` for a class to skip it.
+
+The noninteractive class-discovery command remains available when you want to edit counts manually. First discover the exact class titles:
 
 ```bash
 ./LingosBot --scan_classes

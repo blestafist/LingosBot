@@ -26,6 +26,8 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 
 Timing fields and `lessonPromptSafetyCap` must be positive. Only increase timeouts after observing a reproducible timeout on a slow connection or machine.
 
+`--run_config` asks for `lessonCount` and, only when the first prompt is answered yes, signs in to discover classes and asks for a count for each class. Answering no preserves existing `classLessonCounts` overrides while changing the global default.
+
 ## Non-Standard Browser Locations
 
 Set `browserBinaryPath` only when the browser is portable, beta-channel, or installed outside the normal location. It is the path to the browser itself, not the Selenium driver.
