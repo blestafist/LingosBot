@@ -7,6 +7,8 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
 {
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
+    private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private const int MaxClickAttempts = 3;
 
 
     public void Login(AppCredentials credentials)
@@ -28,7 +30,7 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
         passwordInput.SendKeys(credentials.Password);
 
         var submitButton = WaitUntilClickable(Selectors.LoginSubmitButton);
-        ClickElement(submitButton);
+        ClickElement(submitButton, Selectors.LoginSubmitButton);
 
         try
         {
@@ -72,14 +74,18 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
 
         try
         {
-            var cookieButton = WaitUntilClickable(Selectors.CookieAcceptButton, _config.ShortWaitTimeout);
-            ClickElement(cookieButton);
+            if (!_cookieConsent.TryRejectCookies())
+            {
+                Console.WriteLine("Cookie rejection button was not visible within the short timeout. Continuing.");
+                return;
+            }
+
             WaitForDocumentReady();
-            Console.WriteLine("Cookie consent accepted.");
+            Console.WriteLine("Cookie consent rejected.");
         }
         catch (WebDriverTimeoutException)
         {
-            Console.WriteLine("Cookie consent button was not visible within the short timeout. Continuing.");
+            Console.WriteLine("Cookie rejection button was not visible within the short timeout. Continuing.");
         }
     }
 
@@ -143,17 +149,39 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
         return wait;
     }
 
-    private void ClickElement(IWebElement element)
+    private void ClickElement(IWebElement element, SelectorDefinition selector)
     {
-        ScrollIntoView(element);
+        for (var attempt = 1; attempt <= MaxClickAttempts; attempt++)
+        {
+            try
+            {
+                ScrollIntoView(element);
+                element.Click();
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
 
-        try
-        {
-            element.Click();
-        }
-        catch (ElementClickInterceptedException)
-        {
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", element);
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+
+            // Re-fetch after Cookiebot closes, or after a DOM replacement, so
+            // the retry cannot use a stale element or the wrong control.
+            element = WaitUntilClickable(selector);
         }
     }
 

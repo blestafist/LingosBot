@@ -10,11 +10,13 @@ internal sealed class LessonRunner (
 {
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
+    private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private const int MaxClickAttempts = 3;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary = vocabulary;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
     private readonly Random _random = new();
 
-    public void RunLesson(int lessonNumber)
+    public void RunLesson(int lessonNumber, bool perfectionismChallengeActive = false)
     {
         Console.WriteLine($"Preparing lesson {lessonNumber}...");
         OpenMainPage();
@@ -65,7 +67,12 @@ internal sealed class LessonRunner (
                     $"No collected translation exists for lesson prompt '{promptText}'. The bot stopped safely without guessing.");
             }
 
-            var lessonFinished = TryAnswerPromptWithCandidates(promptText, candidateAnswers, lessonNumber, answeredPrompts);
+            var lessonFinished = TryAnswerPromptWithCandidates(
+                promptText,
+                candidateAnswers,
+                lessonNumber,
+                answeredPrompts,
+                perfectionismChallengeActive);
             if (lessonFinished)
             {
                 Console.WriteLine($"Lesson {lessonNumber} completed.");
@@ -110,7 +117,7 @@ internal sealed class LessonRunner (
         for (var entryClick = 1; entryClick <= maxEntryClicks; entryClick++)
         {
             var mainLearnButton = WaitUntilClickable(Selectors.MainLearnButton);
-            ClickElement(mainLearnButton);
+            ClickElement(mainLearnButton, Selectors.MainLearnButton);
 
             var entryState = CreateWait(_config.ShortWaitTimeout).Until(_ =>
             {
@@ -143,9 +150,10 @@ internal sealed class LessonRunner (
         string promptText,
         IReadOnlyList<string> candidateAnswers,
         int lessonNumber,
-        int promptIndex)
+        int promptIndex,
+        bool perfectionismChallengeActive)
     {
-        if (MakeAnError())
+        if (MakeAnError(perfectionismChallengeActive))
         {
             var wrongAnswer = GenerateWrongAnswer(candidateAnswers[0]);
             Console.WriteLine($"[Lesson {lessonNumber} · word {promptIndex}] {promptText} -> {wrongAnswer} [intentional error]");
@@ -283,7 +291,7 @@ internal sealed class LessonRunner (
                 return false;
             }
 
-            ClickElement(button);
+            ClickElement(button, Selectors.LessonContinueButton);
             return true;
         }
         catch (Exception)
@@ -384,7 +392,7 @@ internal sealed class LessonRunner (
         }
 
         var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-        ClickElement(continueButton);
+        ClickElement(continueButton, Selectors.LessonContinueButton);
 
         CreateWait().Until(_ =>
         {
@@ -429,7 +437,7 @@ internal sealed class LessonRunner (
         }
 
         var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-        ClickElement(continueButton);
+        ClickElement(continueButton, Selectors.LessonContinueButton);
 
         CreateWait().Until(_ =>
         {
@@ -692,17 +700,37 @@ internal sealed class LessonRunner (
         return wait;
     }
 
-    private void ClickElement(IWebElement element)
+    private void ClickElement(IWebElement element, SelectorDefinition selector)
     {
-        ScrollIntoView(element);
+        for (var attempt = 1; attempt <= MaxClickAttempts; attempt++)
+        {
+            try
+            {
+                ScrollIntoView(element);
+                element.Click();
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
 
-        try
-        {
-            element.Click();
-        }
-        catch (ElementClickInterceptedException)
-        {
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", element);
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+
+            element = WaitUntilClickable(selector);
         }
     }
 
@@ -713,9 +741,11 @@ internal sealed class LessonRunner (
             element);
     }
 
-    private bool MakeAnError()
+    private bool MakeAnError(bool perfectionismChallengeActive)
     {
-        return _random.NextDouble() < _config.ErrorsPer100Words / 100.0;
+        return _random.NextDouble() < ErrorRateResolver.GetEffectiveRate(
+            _config.ErrorsPer100Words,
+            perfectionismChallengeActive) / 100.0;
     }
 
     private string GenerateWrongAnswer(string correctAnswer)

@@ -15,7 +15,7 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | `headless` | `false` | Hides the browser. Unsupported by Safari. |
 | `errorsPer100Words` | `10` | Intentional wrong answers from `0` to `100`. |
 | `lessonCount` | `1` | Default number of lessons for every discovered class. Must be at least `1`. |
-| `classLessonCounts` | `{}` | Lesson-count overrides by class title. A value of `0` skips a class. |
+| `classLessonCounts` | `{}` | Lesson-count overrides by stable class key (`group:<GroupId>` or `url:<change URL>`). A value of `0` skips a class. |
 | `defaultWaitTimeoutSeconds` | `15` | Standard Selenium wait timeout. |
 | `shortWaitTimeoutSeconds` | `4` | Short Selenium wait timeout. |
 | `lessonRestartReuseTimeoutMilliseconds` | `1500` | Delay used while reusing the lesson entry page. |
@@ -25,6 +25,8 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | `challengeLessonSafetyCap` | `40` | Reserved configuration field. It is accepted and validated but is not currently enforced by the application. Do not rely on it to limit challenge behavior. |
 
 Timing fields and `lessonPromptSafetyCap` must be positive. Only increase timeouts after observing a reproducible timeout on a slow connection or machine.
+
+`--run_config` asks for `lessonCount` and, only when the first prompt is answered yes, signs in to discover classes and asks for a count for each class. Answering no preserves existing `classLessonCounts` overrides while changing the global default. When configuring classes separately, a blank class prompt keeps the current setting (or uses the global fallback for a new class); enter `default`, `fallback`, or `-` to remove an override. The fallback is not written as a separate override for every class, and overrides for classes missing from discovery are preserved.
 
 ## Non-Standard Browser Locations
 

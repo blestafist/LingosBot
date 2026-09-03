@@ -8,6 +8,8 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
 {
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
+    private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private const int MaxInteractionAttempts = 3;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -48,7 +50,7 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
                 TextNormalizer.Normalize(item.Title),
                 item.ChangeUrl,
                 string.IsNullOrWhiteSpace(item.GroupId) ? null : item.GroupId))
-            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.OrdinalIgnoreCase)
+            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.Ordinal)
             .Select(group => group.First())
             .ToList();
 
@@ -108,9 +110,9 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             return;
         }
 
-        new SelectElement(select).SelectByValue(groupId);
+        SelectClass(select, groupId);
         var saveButton = WaitUntilClickable(Selectors.ClassSaveButton);
-        saveButton.Click();
+        ClickElement(saveButton, Selectors.ClassSaveButton);
 
         // Saving the new dashboard selection is an asynchronous request. The
         // dialog disappears when it succeeds; waiting for that state prevents
@@ -129,17 +131,7 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             return;
         }
 
-        try
-        {
-            closeButton.Click();
-        }
-        catch (ElementClickInterceptedException)
-        {
-            // Cookiebot can remain over the page for a short transition after
-            // login. The dialog is already identified, so a DOM click is safe
-            // and avoids making class discovery depend on that animation.
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", closeButton);
-        }
+        ClickElement(closeButton, Selectors.ClassDialogCloseButton);
     }
 
     private void OpenClassSelector()
@@ -149,9 +141,76 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             return;
         }
 
-        var changeButton = WaitUntilClickable(Selectors.ClassChangeButton);
-        changeButton.Click();
+        ClickElement(WaitUntilClickable(Selectors.ClassChangeButton), Selectors.ClassChangeButton);
         WaitUntilVisible(Selectors.ClassSelect);
+    }
+
+    private void SelectClass(IWebElement select, string groupId)
+    {
+        for (var attempt = 1; attempt <= MaxInteractionAttempts; attempt++)
+        {
+            try
+            {
+                new SelectElement(select).SelectByValue(groupId);
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
+
+                if (attempt == MaxInteractionAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxInteractionAttempts)
+                {
+                    throw;
+                }
+            }
+
+            // SelectByValue performs a native click in Selenium. Re-fetch the
+            // select after Cookiebot closes or after a DOM replacement.
+            select = WaitUntilVisible(Selectors.ClassSelect);
+        }
+    }
+
+    private void ClickElement(IWebElement element, SelectorDefinition selector)
+    {
+        for (var attempt = 1; attempt <= MaxInteractionAttempts; attempt++)
+        {
+            try
+            {
+                element.Click();
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
+
+                if (attempt == MaxInteractionAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxInteractionAttempts)
+                {
+                    throw;
+                }
+            }
+
+            element = WaitUntilClickable(selector);
+        }
     }
 
     private IWebElement WaitUntilVisible(SelectorDefinition selector)

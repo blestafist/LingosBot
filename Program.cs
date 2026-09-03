@@ -13,7 +13,11 @@ internal static class Program
 
             if (options.RunConfiguration)
             {
-                ConfigureInteractively(config);
+                InteractiveConfiguration.Configure(
+                    config,
+                    Console.In,
+                    Console.Out,
+                    () => new LingosBot(config, new BrowserFactory()).ScanClasses());
                 AppConfig.Save(config, options.ConfigFilePath);
                 Console.WriteLine("Configuration saved.");
                 return 0;
@@ -43,7 +47,10 @@ internal static class Program
             if (options.ScanClasses)
             {
                 var classes = bot.ScanClasses();
-                config.ClassLessonCounts = classes.ToDictionary(@class => @class.Title, _ => config.LessonCount, StringComparer.OrdinalIgnoreCase);
+                config.ClassLessonCounts = classes.ToDictionary(
+                    ClassLessonConfiguration.GetKey,
+                    _ => config.LessonCount,
+                    StringComparer.Ordinal);
                 AppConfig.Save(config, options.ConfigFilePath);
                 Console.WriteLine("classLessonCounts saved to configuration.");
                 return 0;
@@ -92,34 +99,4 @@ internal static class Program
         }
     }
 
-    private static void ConfigureInteractively(AppConfig config)
-    {
-        Console.WriteLine("Leave a value blank to keep its current setting.");
-        var credentials = config.Credentials ?? new AppCredentials(string.Empty, string.Empty);
-        var email = ReadSetting("Email", credentials.Email);
-        var password = ReadSetting("Password", credentials.Password, secret: true);
-        config.Credentials = new AppCredentials(email, password);
-
-        var headless = ReadSetting("Headless (true/false)", config.Headless.ToString().ToLowerInvariant());
-        if (!string.Equals(headless, config.Headless.ToString(), StringComparison.OrdinalIgnoreCase))
-        {
-            config.Headless = bool.TryParse(headless, out var value)
-                ? value
-                : throw new ArgumentException("Headless must be true or false.");
-        }
-
-        config.Browser = ReadSetting("Browser", config.Browser);
-        var errors = ReadSetting("Errors per 100 words", config.ErrorsPer100Words.ToString());
-        config.ErrorsPer100Words = int.TryParse(errors, out var errorCount) && errorCount is >= 0 and <= 100
-            ? errorCount
-            : throw new ArgumentException("Errors per 100 words must be an integer between 0 and 100.");
-        config.BrowserBinaryPath = ReadSetting("Browser binary path", config.BrowserBinaryPath ?? string.Empty);
-    }
-
-    private static string ReadSetting(string label, string currentValue, bool secret = false)
-    {
-        Console.Write($"{label} [{(secret && !string.IsNullOrEmpty(currentValue) ? "configured" : currentValue)}]: ");
-        var value = Console.ReadLine();
-        return string.IsNullOrWhiteSpace(value) ? currentValue : value.Trim();
-    }
 }

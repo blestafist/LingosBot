@@ -15,4 +15,8 @@
     <PackageReference Include="Selenium.Support" Version="4.48.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="LingosBot.Tests/**/*.cs" />
+  </ItemGroup>
+
 </Project>
