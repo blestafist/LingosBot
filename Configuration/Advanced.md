@@ -26,7 +26,7 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 
 Timing fields and `lessonPromptSafetyCap` must be positive. Only increase timeouts after observing a reproducible timeout on a slow connection or machine.
 
-`--run_config` asks for `lessonCount` and, only when the first prompt is answered yes, signs in to discover classes and asks for a count for each class. Answering no preserves existing `classLessonCounts` overrides while changing the global default.
+`--run_config` asks for `lessonCount` and, only when the first prompt is answered yes, signs in to discover classes and asks for a count for each class. Answering no preserves existing `classLessonCounts` overrides while changing the global default. When configuring classes separately, a blank class prompt keeps the current setting (or uses the global fallback for a new class); enter `default`, `fallback`, or `-` to remove an override. The fallback is not written as a separate override for every class, and overrides for classes missing from discovery are preserved.
 
 ## Non-Standard Browser Locations
 

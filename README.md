@@ -20,9 +20,9 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 
 When an active challenge is identified as **Perfekcjonizm**, intentional errors are disabled for that lesson. Matching is case-, whitespace-, punctuation-, and Polish-diacritic-tolerant: a `Perfekcjonizm` keyword in the title is sufficient for a title-only/omitted-description variant (including numbered variants); when challenge text includes an explicit error limit, it must be at most one error and include lesson wording. A keyword found only in a description must also have that lesson/max-one-error wording, while negated mentions and explicit maximum-two-or-more conditions are not matched. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
 
-`lessonCount` is the default per-class count. `classLessonCounts` can override it by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
+`lessonCount` is the default per-class count, applied independently to every discovered class. `classLessonCounts` contains optional overrides by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Classes without an entry still use `lessonCount`, and older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
 
-Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes.
+Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes. Blank per-class prompts keep the current setting, while `default`, `fallback`, or `-` removes an override and restores the global fallback. Overrides for classes missing from discovery are retained.
 
 ## Common Commands
 

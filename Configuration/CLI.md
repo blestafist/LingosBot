@@ -22,7 +22,7 @@ These options update the selected `config.json` and exit. They do not start a le
 
 | Option | Accepted value | Saved field |
 | --- | --- | --- |
-| `--run_config` | None | Opens the interactive basic configuration prompt, including the global lesson count. It first asks whether to configure each class separately; only a `yes` answer signs in and discovers classes for per-class prompts. |
+| `--run_config` | None | Opens the interactive basic configuration prompt, including the global per-class fallback. It first asks whether to configure each class separately; only a `yes` answer signs in and discovers classes for optional per-class overrides. Blank prompts keep current settings; `default`, `fallback`, or `-` removes a class override. Entries for classes missing from discovery are preserved. |
 | `--set_email <email>` | Text | `credentials.email` |
 | `--set_passwd <password>` | Text | `credentials.password` |
 | `--set_headless <true\|false>` | `true` or `false` | `headless` |

@@ -53,17 +53,40 @@ internal static class InteractiveConfiguration
         config.Validate();
         var classes = discoverClasses();
         var previousCounts = config.ClassLessonCounts ?? new(StringComparer.Ordinal);
-        var classLessonCounts = classes.ToDictionary(
-            @class => ClassLessonConfiguration.GetKey(@class),
-            @class => ClassLessonConfiguration.FindPreviousCount(previousCounts, @class, classes) ?? config.LessonCount,
-            StringComparer.Ordinal);
+        // Keep entries for classes that discovery did not return. They may be
+        // temporarily absent from the account and should not lose their saved
+        // overrides just because this run could not see them.
+        var classLessonCounts = new Dictionary<string, int>(previousCounts, StringComparer.Ordinal);
 
         foreach (var @class in classes)
         {
             var key = ClassLessonConfiguration.GetKey(@class);
-            var currentCount = classLessonCounts[key];
+            var previousCount = ClassLessonConfiguration.FindPreviousCount(previousCounts, @class, classes);
+            var currentCount = previousCount ?? config.LessonCount;
             var label = ClassLessonConfiguration.GetPromptLabel(@class, classes);
-            var count = ReadSetting($"Lessons for '{label}'", currentCount.ToString(), input, output);
+            var count = ReadOptionalSetting(
+                $"Lessons for '{label}' (global fallback: {config.LessonCount}; default/fallback/- removes override)",
+                currentCount.ToString(),
+                input,
+                output);
+
+            // A blank means that this class should use the global fallback. Do not
+            // materialize that fallback as an override for every discovered class.
+            if (count is null)
+            {
+                // Preserve the original key and value for an existing override;
+                // blank input has always meant "keep current setting".
+                continue;
+            }
+
+            if (IsFallbackRequest(count))
+            {
+                classLessonCounts.Remove(key);
+                RemoveLegacyTitleEntries(classLessonCounts, @class, classes);
+                continue;
+            }
+
+            RemoveLegacyTitleEntries(classLessonCounts, @class, classes);
             classLessonCounts[key] = int.TryParse(count, out var classLessonCount) && classLessonCount >= 0
                 ? classLessonCount
                 : throw new ArgumentException($"Lessons for '{label}' must be a non-negative integer.");
@@ -97,5 +120,45 @@ internal static class InteractiveConfiguration
         output.Write($"{label} [{(secret && !string.IsNullOrEmpty(currentValue) ? "configured" : currentValue)}]: ");
         var value = input.ReadLine();
         return string.IsNullOrWhiteSpace(value) ? currentValue : value.Trim();
+    }
+
+    private static string? ReadOptionalSetting(
+        string label,
+        string currentValue,
+        TextReader input,
+        TextWriter output)
+    {
+        output.Write($"{label} [{currentValue}]: ");
+        var value = input.ReadLine();
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static bool IsFallbackRequest(string value) =>
+        value.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("fallback", StringComparison.OrdinalIgnoreCase) ||
+        value == "-";
+
+    private static void RemoveLegacyTitleEntries(
+        IDictionary<string, int> counts,
+        ClassInfo @class,
+        IReadOnlyList<ClassInfo> discoveredClasses)
+    {
+        // A title key is only associated with a class when that title is unique;
+        // retain ambiguous legacy entries rather than deleting an override that
+        // cannot safely be attributed to the class being configured.
+        var titleMatches = discoveredClasses.Count(candidate =>
+            string.Equals(candidate.Title, @class.Title, StringComparison.OrdinalIgnoreCase));
+
+        if (titleMatches != 1)
+        {
+            return;
+        }
+
+        foreach (var key in counts.Keys
+                     .Where(key => string.Equals(key, @class.Title, StringComparison.OrdinalIgnoreCase))
+                     .ToArray())
+        {
+            counts.Remove(key);
+        }
     }
 }

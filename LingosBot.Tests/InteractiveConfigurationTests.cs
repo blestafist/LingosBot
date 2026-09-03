@@ -46,6 +46,138 @@ public sealed class InteractiveConfigurationTests
     }
 
     [Fact]
+    public void SeparateConfigurationDoesNotMaterializeGlobalFallbackAsClassOverrides()
+    {
+        var config = CreateConfig();
+        var input = new StringReader("yes\n\n\n\n\n\n\n3\n\n\n");
+        var classes = new[]
+        {
+            new ClassInfo("First class", "/first", "101"),
+            new ClassInfo("Second class", "/second", "202")
+        };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.Equal(3, config.LessonCount);
+        Assert.Empty(config.ClassLessonCounts);
+    }
+
+    [Fact]
+    public void SeparateConfigurationSavesOnlyExplicitOverrideAndUsesFallbackForBlankClass()
+    {
+        var config = CreateConfig();
+        var input = new StringReader("yes\n\n\n\n\n\n\n3\n5\n\n");
+        var classes = new[]
+        {
+            new ClassInfo("First class", "/first", "101"),
+            new ClassInfo("Second class", "/second", "202")
+        };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.Equal(5, config.ClassLessonCounts["group:101"]);
+        Assert.DoesNotContain("group:202", config.ClassLessonCounts.Keys);
+        Assert.Equal(3, ClassLessonConfiguration.ResolveCount(config, classes[1], classes));
+    }
+
+    [Fact]
+    public void SeparateConfigurationPreservesOverridesForUndiscoveredClassesAndLegacyKeys()
+    {
+        var config = CreateConfig();
+        config.ClassLessonCounts = new Dictionary<string, int>
+        {
+            ["group:999"] = 8,
+            ["Unseen old class"] = 6
+        };
+        var input = new StringReader("yes\n\n\n\n\n\n\n3\n\n");
+        var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.Equal(8, config.ClassLessonCounts["group:999"]);
+        Assert.Equal(6, config.ClassLessonCounts["Unseen old class"]);
+        Assert.DoesNotContain("group:101", config.ClassLessonCounts.Keys);
+    }
+
+    [Fact]
+    public void BlankInputPreservesExistingLegacyOverrideKey()
+    {
+        var config = CreateConfig();
+        config.ClassLessonCounts = new Dictionary<string, int> { ["Visible class"] = 6 };
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n");
+        var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.Equal(6, config.ClassLessonCounts["Visible class"]);
+        Assert.DoesNotContain("group:101", config.ClassLessonCounts.Keys);
+    }
+
+    [Fact]
+    public void FallbackKeywordRemovesExistingClassOverride()
+    {
+        var config = CreateConfig();
+        config.LessonCount = 3;
+        config.ClassLessonCounts = new Dictionary<string, int> { ["group:101"] = 7 };
+        var input = new StringReader("yes\nstudent@example.com\npassword\nfalse\nChrome\n10\n\n3\ndefault\n");
+        var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.DoesNotContain("group:101", config.ClassLessonCounts.Keys);
+        Assert.Equal(3, ClassLessonConfiguration.ResolveCount(config, classes[0], classes));
+    }
+
+    [Fact]
+    public void ClassPromptExplainsGlobalFallbackAndRemovalSyntax()
+    {
+        var config = CreateConfig();
+        var output = new StringWriter();
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n");
+        var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
+
+        InteractiveConfiguration.Configure(config, input, output, () => classes);
+
+        Assert.Contains("global fallback: 1", output.ToString());
+        Assert.Contains("default/fallback/- removes override", output.ToString());
+    }
+
+    [Fact]
+    public void SeparateConfigurationKeepsExistingOverrideButLeavesOtherClassesOnGlobalFallback()
+    {
+        var config = CreateConfig();
+        config.LessonCount = 3;
+        config.ClassLessonCounts = new Dictionary<string, int> { ["group:101"] = 5 };
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n");
+        var classes = new[]
+        {
+            new ClassInfo("First class", "/first", "101"),
+            new ClassInfo("Second class", "/second", "202")
+        };
+
+        InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
+
+        Assert.Equal(5, config.ClassLessonCounts["group:101"]);
+        Assert.DoesNotContain("group:202", config.ClassLessonCounts.Keys);
+        Assert.Equal(3, ClassLessonConfiguration.ResolveCount(config, classes[1], classes));
+    }
+
+    [Fact]
+    public void MissingClassOverridesUseGlobalCountIndependentlyForEveryClass()
+    {
+        var config = CreateConfig();
+        config.LessonCount = 4;
+        var classes = new[]
+        {
+            new ClassInfo("First class", "/first", "101"),
+            new ClassInfo("Second class", "/second", "202")
+        };
+
+        Assert.Equal(4, ClassLessonConfiguration.ResolveCount(config, classes[0], classes));
+        Assert.Equal(4, ClassLessonConfiguration.ResolveCount(config, classes[1], classes));
+    }
+
+    [Fact]
     public void SeparateConfigurationReusesExistingCountRegardlessOfClassNameCasing()
     {
         var config = CreateConfig();
@@ -55,7 +187,8 @@ public sealed class InteractiveConfigurationTests
 
         InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
 
-        Assert.Equal(5, config.ClassLessonCounts["group:101"]);
+        Assert.Equal(5, config.ClassLessonCounts["FIRST CLASS"]);
+        Assert.DoesNotContain("group:101", config.ClassLessonCounts.Keys);
     }
 
     [Fact]
