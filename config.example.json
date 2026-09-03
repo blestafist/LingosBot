@@ -1,6 +1,6 @@
 {
   "baseUrl": "https://lingos.pl",
-  "studentDashboardUrl": "https://lingos.pl/student-confirmed/group",
+  "studentDashboardUrl": "https://lingos.pl/student/dashboard",
   "credentials": {
     "email": "you@example.com",
     "password": "replace-with-your-password"
