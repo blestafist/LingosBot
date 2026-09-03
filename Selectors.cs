@@ -7,9 +7,9 @@ internal static class Selectors
     // Login selectors were verified from https://lingos.pl/h/login.
     // The post-login selectors below intentionally prefer semantic attributes and
     // stable URL fragments over generated React element IDs or utility classes.
-    public static SelectorDefinition CookieAcceptButton { get; } = SelectorDefinition.CssRequired(
-        "CookieAcceptButton",
-        "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll, #CybotCookiebotDialogBodyButtonAccept, #CybotCookiebotDialogBodyLevelButtonAccept");
+    public static SelectorDefinition CookieRejectButton { get; } = SelectorDefinition.CssRequired(
+        "CookieRejectButton",
+        "#CybotCookiebotDialogBodyLevelButtonLevelOptinDecline, #CybotCookiebotDialogBodyButtonDecline, #CybotCookiebotDialogBodyLevelButtonDecline");
 
     public static SelectorDefinition LoginEmailInput { get; } = SelectorDefinition.CssRequired(
         "LoginEmailInput",

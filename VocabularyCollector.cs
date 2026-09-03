@@ -9,6 +9,8 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
 {
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
+    private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private const int MaxClickAttempts = 3;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -18,7 +20,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
     {
         Console.WriteLine("Navigating to the Zestawy page...");
         var zestawyButton = WaitUntilClickable(Selectors.LeftMenuZestawyButton);
-        ClickElement(zestawyButton);
+        ClickElement(zestawyButton, Selectors.LeftMenuZestawyButton);
         WaitForUrlContains("/student/wordsets", "/student-confirmed/wordsets");
 
         if (Selectors.ZestawyPageMarker.TryToBy(out _))
@@ -310,7 +312,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
             }
 
             Console.WriteLine($"Moving to Zestawy page {nextPageNumber}...");
-            ClickElement(nextPageButton);
+            ClickElement(nextPageButton, Selectors.ZestawyNextPageButton);
             WaitForDocumentReady();
             WaitUntilElementsCountAtLeast(Selectors.SetCardContainer, 1);
             return true;
@@ -427,17 +429,37 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
         return wait;
     }
 
-    private void ClickElement(IWebElement element)
+    private void ClickElement(IWebElement element, SelectorDefinition selector)
     {
-        ScrollIntoView(element);
+        for (var attempt = 1; attempt <= MaxClickAttempts; attempt++)
+        {
+            try
+            {
+                ScrollIntoView(element);
+                element.Click();
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
 
-        try
-        {
-            element.Click();
-        }
-        catch (ElementClickInterceptedException)
-        {
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", element);
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+
+            element = WaitUntilClickable(selector);
         }
     }
 

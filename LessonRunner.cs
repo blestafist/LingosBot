@@ -10,6 +10,8 @@ internal sealed class LessonRunner (
 {
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
+    private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private const int MaxClickAttempts = 3;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary = vocabulary;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
     private readonly Random _random = new();
@@ -115,7 +117,7 @@ internal sealed class LessonRunner (
         for (var entryClick = 1; entryClick <= maxEntryClicks; entryClick++)
         {
             var mainLearnButton = WaitUntilClickable(Selectors.MainLearnButton);
-            ClickElement(mainLearnButton);
+            ClickElement(mainLearnButton, Selectors.MainLearnButton);
 
             var entryState = CreateWait(_config.ShortWaitTimeout).Until(_ =>
             {
@@ -289,7 +291,7 @@ internal sealed class LessonRunner (
                 return false;
             }
 
-            ClickElement(button);
+            ClickElement(button, Selectors.LessonContinueButton);
             return true;
         }
         catch (Exception)
@@ -390,7 +392,7 @@ internal sealed class LessonRunner (
         }
 
         var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-        ClickElement(continueButton);
+        ClickElement(continueButton, Selectors.LessonContinueButton);
 
         CreateWait().Until(_ =>
         {
@@ -435,7 +437,7 @@ internal sealed class LessonRunner (
         }
 
         var continueButton = WaitUntilClickable(Selectors.LessonContinueButton);
-        ClickElement(continueButton);
+        ClickElement(continueButton, Selectors.LessonContinueButton);
 
         CreateWait().Until(_ =>
         {
@@ -698,17 +700,37 @@ internal sealed class LessonRunner (
         return wait;
     }
 
-    private void ClickElement(IWebElement element)
+    private void ClickElement(IWebElement element, SelectorDefinition selector)
     {
-        ScrollIntoView(element);
+        for (var attempt = 1; attempt <= MaxClickAttempts; attempt++)
+        {
+            try
+            {
+                ScrollIntoView(element);
+                element.Click();
+                return;
+            }
+            catch (ElementClickInterceptedException)
+            {
+                if (!_cookieConsent.TryRejectCookies())
+                {
+                    throw;
+                }
 
-        try
-        {
-            element.Click();
-        }
-        catch (ElementClickInterceptedException)
-        {
-            ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", element);
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+            catch (StaleElementReferenceException)
+            {
+                if (attempt == MaxClickAttempts)
+                {
+                    throw;
+                }
+            }
+
+            element = WaitUntilClickable(selector);
         }
     }
 
