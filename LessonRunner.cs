@@ -338,7 +338,42 @@ internal sealed class LessonRunner (
 
     private bool IsLessonFinished()
     {
-        return (_driver.Url ?? string.Empty).Contains("/group/finished", StringComparison.OrdinalIgnoreCase);
+        var currentUrl = _driver.Url ?? string.Empty;
+
+        // Older lesson flows used a dedicated /group/finished page. The current
+        // UI completes the lesson by redirecting to the dashboard and appending
+        // ?finished=1. Checking only the old path makes the dashboard's generic
+        // buttons look like a lesson "continue" step; in particular, the class
+        // selector's Headless UI popover button is then incorrectly clicked.
+        if (currentUrl.Contains("/group/finished", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (uri.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .Any(pair => pair.Length == 2 &&
+                string.Equals(Uri.UnescapeDataString(pair[0]), "finished", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Uri.UnescapeDataString(pair[1]), "1", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // A completion can briefly be represented by the modal before the
+        // redirect settles. Use its text rather than treating every dialog as
+        // completion (the class selector is also a dialog).
+        return Selectors.LessonFinishedMarker.TryToBy(out var finishedBy) &&
+            finishedBy is not null &&
+            TryFindVisible(_driver, finishedBy, out var finishedElement) &&
+            finishedElement is not null &&
+            TextNormalizer.Normalize(finishedElement.Text).Contains("lekcja wykonana", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ContinueAfterAnswer(string previousPromptText)
@@ -424,14 +459,14 @@ internal sealed class LessonRunner (
 
     private LessonStepState ReadCurrentLessonStep()
     {
-        if (HasLessonLimitReached())
-        {
-            return new LessonStepState(LessonStepKind.Blocked, null);
-        }
-
         if (IsLessonFinished())
         {
             return new LessonStepState(LessonStepKind.Finished, null);
+        }
+
+        if (HasLessonLimitReached())
+        {
+            return new LessonStepState(LessonStepKind.Blocked, null);
         }
 
         var promptVisible = TryFindVisible(_driver, Selectors.LessonPrompt.ToBy(), out var promptElement) && promptElement is not null;
@@ -570,8 +605,20 @@ internal sealed class LessonRunner (
         {
             try
             {
-                var element = driver.FindElement(by);
-                return element.Displayed && element.Enabled ? element : null;
+                // A React transition can leave an old matching element in the
+                // DOM. Do not let the first (hidden or stale) match determine
+                // which control is clicked.
+                return driver.FindElements(by).FirstOrDefault(element =>
+                {
+                    try
+                    {
+                        return element.Displayed && element.Enabled;
+                    }
+                    catch (StaleElementReferenceException)
+                    {
+                        return false;
+                    }
+                });
             }
             catch (NoSuchElementException)
             {
@@ -606,8 +653,17 @@ internal sealed class LessonRunner (
         {
             try
             {
-                var clickableElement = driver.FindElement(by);
-                return clickableElement.Displayed && clickableElement.Enabled ? clickableElement : null;
+                return driver.FindElements(by).FirstOrDefault(element =>
+                {
+                    try
+                    {
+                        return element.Displayed && element.Enabled;
+                    }
+                    catch (StaleElementReferenceException)
+                    {
+                        return false;
+                    }
+                });
             }
             catch (NoSuchElementException)
             {

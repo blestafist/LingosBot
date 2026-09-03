@@ -19,7 +19,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
         Console.WriteLine("Navigating to the Zestawy page...");
         var zestawyButton = WaitUntilClickable(Selectors.LeftMenuZestawyButton);
         ClickElement(zestawyButton);
-        WaitForUrlContains("/student-confirmed/wordsets");
+        WaitForUrlContains("/student/wordsets", "/student-confirmed/wordsets");
 
         if (Selectors.ZestawyPageMarker.TryToBy(out _))
         {
@@ -142,7 +142,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
     private List<VocabularyEntry> ScrapeWordsetByNavigation(WordsetDescriptor wordset)
     {
         _driver.Navigate().GoToUrl(wordset.Url);
-        WaitForUrlContains("/student-confirmed/wordset/");
+        WaitForUrlContains("/student/wordsets/", "/student-confirmed/wordset/");
         return ReadVocabularyEntriesFromCurrentPage();
     }
 
@@ -411,12 +411,12 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
         });
     }
 
-    private void WaitForUrlContains(string pathFragment)
+    private void WaitForUrlContains(params string[] pathFragments)
     {
         CreateWait().Until(driver =>
         {
             var currentUrl = driver.Url ?? string.Empty;
-            return currentUrl.Contains(pathFragment, StringComparison.OrdinalIgnoreCase);
+            return pathFragments.Any(pathFragment => currentUrl.Contains(pathFragment, StringComparison.OrdinalIgnoreCase));
         });
     }
 

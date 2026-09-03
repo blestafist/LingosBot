@@ -7,7 +7,7 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | Key | Default | Notes |
 | --- | --- | --- |
 | `baseUrl` | `https://lingos.pl` | Leave unchanged unless Lingos changes its host. |
-| `studentDashboardUrl` | `https://lingos.pl/student-confirmed/group` | Leave unchanged unless Lingos changes its dashboard URL. |
+| `studentDashboardUrl` | `https://lingos.pl/student/dashboard` | Leave unchanged unless Lingos changes its dashboard URL. |
 | `credentials.email` | Required | Lingos account email. |
 | `credentials.password` | Required | Lingos account password in plain text. |
 | `browser` | `Chrome` | `Chrome`, `Firefox`, `Edge`, or `Safari`; case-insensitive. |

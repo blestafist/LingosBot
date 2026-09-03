@@ -4,9 +4,9 @@ namespace LingosBotApp;
 
 internal static class Selectors
 {
-    // Verified from https://lingos.pl/h/login on 2026-03-21 where possible.
-    // Lesson selectors were verified against saved /learning/start pages.
-    // The remaining TODO values are post-login selectors that still need to be inspected manually.
+    // Login selectors were verified from https://lingos.pl/h/login.
+    // The post-login selectors below intentionally prefer semantic attributes and
+    // stable URL fragments over generated React element IDs or utility classes.
     public static SelectorDefinition CookieAcceptButton { get; } = SelectorDefinition.CssRequired(
         "CookieAcceptButton",
         "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll, #CybotCookiebotDialogBodyButtonAccept, #CybotCookiebotDialogBodyLevelButtonAccept");
@@ -29,7 +29,7 @@ internal static class Selectors
 
     public static SelectorDefinition LeftMenuZestawyButton { get; } = SelectorDefinition.CssRequired(
         "LeftMenuZestawyButton",
-        "#main-menu-list a[href='/student-confirmed/wordsets'], a#menu-small-item-icon-1[href='/student-confirmed/wordsets']");
+        "a[href='/student/wordsets'], #main-menu-list a[href='/student-confirmed/wordsets'], a#menu-small-item-icon-1[href='/student-confirmed/wordsets']");
 
     public static SelectorDefinition ZestawyPageMarker { get; } = SelectorDefinition.CssOptional(
         "ZestawyPageMarker",
@@ -37,11 +37,11 @@ internal static class Selectors
 
     public static SelectorDefinition SetCardContainer { get; } = SelectorDefinition.CssRequired(
         "SetCardContainer",
-        ".card.rounded-3.p-3.p-sm-4.nav");
+        "ul.mt-6 > li:has(a[href^='/student/wordsets/']), .card.rounded-3.p-3.p-sm-4.nav");
 
     public static SelectorDefinition SetCardPreviewButton { get; } = SelectorDefinition.CssRequired(
         "SetCardPreviewButton",
-        "a.btn[href*='/student-confirmed/wordset/']");
+        "a[href^='/student/wordsets/'], a.btn[href*='/student-confirmed/wordset/']");
 
     public static SelectorDefinition SetPreviewContainer { get; } = SelectorDefinition.CssOptional(
         "SetPreviewContainer",
@@ -49,15 +49,15 @@ internal static class Selectors
 
     public static SelectorDefinition PreviewVocabularyRow { get; } = SelectorDefinition.CssRequired(
         "PreviewVocabularyRow",
-        ".card.rounded-3.p-3.nav.text-dark");
+        "ul.mt-6.flex.flex-col.gap-3 > li:has(div.grid > p:nth-child(2)), .card.rounded-3.p-3.nav.text-dark");
 
     public static SelectorDefinition PreviewForeignWordCell { get; } = SelectorDefinition.CssRequired(
         "PreviewForeignWordCell",
-        ".flashcard-border-end");
+        "div.grid > p:first-child, .flashcard-border-end");
 
     public static SelectorDefinition PreviewPolishWordCell { get; } = SelectorDefinition.CssRequired(
         "PreviewPolishWordCell",
-        ".flashcard-border-start");
+        "div.grid > p:nth-child(2), .flashcard-border-start");
 
     public static SelectorDefinition PreviewCloseButton { get; } = SelectorDefinition.CssOptional(
         "PreviewCloseButton",
@@ -65,17 +65,30 @@ internal static class Selectors
 
     public static SelectorDefinition MainPageMarker { get; } = SelectorDefinition.CssRequired(
         "MainPageMarker",
-        "a[href='/student-confirmed/group'].active, #main-menu-list a[href='/student-confirmed/group']");
+        "a[href='/student/dashboard'][aria-current='page'], a[href='/student-confirmed/group'].active, #main-menu-list a[href='/student-confirmed/group']");
 
     public static SelectorDefinition MainLearnButton { get; } = SelectorDefinition.CssRequired(
         "MainLearnButton",
-        "a.btn.btn-primary[href^='/learning/start']");
+        "a[href^='/learning/start']");
 
-    // The dashboard embeds every available class in this select. Selecting an
-    // option navigates to its server-side group-change URL.
+    // The current dashboard renders this select inside a Headless UI dialog after
+    // clicking "Zmień klasę". Older dashboard pages rendered the same select in
+    // #modal-change-group, so retain that fallback while avoiding generated IDs.
+    public static SelectorDefinition ClassChangeButton { get; } = SelectorDefinition.XPathRequired(
+        "ClassChangeButton",
+        "//*[self::button or self::a][normalize-space(.)='Zmień klasę']");
+
     public static SelectorDefinition ClassSelect { get; } = SelectorDefinition.CssRequired(
         "ClassSelect",
-        "#modal-change-group select");
+        "[role='dialog'] select, #modal-change-group select");
+
+    public static SelectorDefinition ClassSaveButton { get; } = SelectorDefinition.XPathRequired(
+        "ClassSaveButton",
+        "//div[@role='dialog']//button[@type='submit' and normalize-space(.)='Zapisz']");
+
+    public static SelectorDefinition ClassDialogCloseButton { get; } = SelectorDefinition.XPathRequired(
+        "ClassDialogCloseButton",
+        "//div[@role='dialog']//button[@aria-label='Zamknij' or @aria-label='Close']");
 
     public static SelectorDefinition LessonPrompt { get; } = SelectorDefinition.CssRequired(
         "LessonPrompt",
@@ -91,7 +104,10 @@ internal static class Selectors
 
     public static SelectorDefinition LessonContinueButton { get; } = SelectorDefinition.CssRequired(
         "LessonContinueButton",
-        "#app button[type='submit'], #app button[type='button']:not([tabindex='-1'])");
+        // Keep this scoped to the lesson content. The authenticated shell also
+        // contains Headless UI popover buttons (and those can remain in the DOM
+        // while the lesson redirects to the finished dashboard).
+        "#app main button[type='submit'], #app main button[type='button']:not([tabindex='-1']):not([id^='headlessui-popover-'])");
 
     public static SelectorDefinition LessonProgressCounter { get; } = SelectorDefinition.CssRequired(
         "LessonProgressCounter",
@@ -107,21 +123,20 @@ internal static class Selectors
 
     public static SelectorDefinition LessonFinishedMarker { get; } = SelectorDefinition.CssOptional(
         "LessonFinishedMarker",
-        "TODO: optional selector that appears when the lesson is finished");
+        // The completion dialog is rendered in Headless UI's portal, outside
+        // #app, so do not scope this to the lesson root.
+        "[role='dialog'] h2");
 
     public static SelectorDefinition ZestawyNextPageButton { get; } = SelectorDefinition.CssOptional(
         "ZestawyNextPageButton",
         "TODO: optional selector for the next-page button on the Zestawy page");
 
     // --- Wyzwania (challenges) ------------------------------------------
-    // The challenges live in a Bootstrap modal (#wyzwaniaModal) that is
-    // server-rendered into the dashboard page, so the cards can be read
-    // directly without opening the modal. Each card is a .bg-secondary block
-    // holding the title, "Nagroda: X pkt." and either a join link
-    // (a[href*='/students/challenge/']) or a "Gratulacje!" completion notice.
+    // The current dashboard embeds challenge data in the app's data-props
+    // attribute; the legacy dashboard rendered cards in #wyzwaniaModal.
     public static SelectorDefinition ChallengeCard { get; } = SelectorDefinition.CssRequired(
         "ChallengeCard",
-        "#wyzwaniaModal .bg-secondary");
+        "#app[data-props], #wyzwaniaModal .bg-secondary");
 
 }
 

@@ -14,9 +14,9 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
     };
 
 
-    // Reads the Wyzwania modal from the dashboard. Also saves the page each
-    // time to diagnostics\wyzwania-latest.html so an in-progress challenge can
-    // be inspected later (the "active" state could not be observed up front).
+    // Reads challenges from the dashboard. The current UI embeds the challenge
+    // model in #app[data-props], while older pages rendered a Bootstrap modal.
+    // Also saves the page each time for troubleshooting.
     public ChallengeSnapshot ReadChallenges()
     {
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
@@ -41,6 +41,12 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
 
     public void Join(ChallengeInfo challenge)
     {
+        if (challenge.JoinUrl.Contains("/student/challenges/", StringComparison.OrdinalIgnoreCase))
+        {
+            JoinCurrentChallenge(challenge.JoinUrl);
+            return;
+        }
+
         _driver.Navigate().GoToUrl(challenge.JoinUrl);
         WaitForDocumentReady();
 
@@ -49,14 +55,61 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
         SaveSnapshot("challenge-landing");
     }
 
+    private void JoinCurrentChallenge(string joinUrl)
+    {
+        var result = ((IJavaScriptExecutor)_driver).ExecuteAsyncScript(
+            """
+            const callback = arguments[arguments.length - 1];
+            fetch(arguments[0], {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            }).then(response => callback({ ok: response.ok, status: response.status }))
+              .catch(error => callback({ ok: false, error: String(error) }));
+            """,
+            joinUrl) as IDictionary<string, object>;
+
+        if (result is null || !Convert.ToBoolean(result["ok"]))
+        {
+            var status = result is not null && result.TryGetValue("status", out var statusValue)
+                ? $" (HTTP {statusValue})"
+                : string.Empty;
+            throw new InvalidOperationException($"Could not join the challenge{status}.");
+        }
+
+        // Refresh the server-rendered dashboard so subsequent challenge checks
+        // observe the new in-progress status.
+        _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
+        WaitForDocumentReady();
+        SaveSnapshot("challenge-landing");
+    }
+
     private const string ParseChallengesScript =
         """
+        const root = document.querySelector(arguments[0]);
+        if (root?.id === 'app' && root.dataset.props) {
+            try {
+                const props = JSON.parse(root.dataset.props);
+                const challenges = props.dashboard?.challenges || [];
+                return JSON.stringify(challenges.map(challenge => ({
+                    title: challenge.title || '',
+                    points: Number(challenge.prize) || 0,
+                    joinUrl: challenge.status === 'available'
+                        ? `${window.location.origin}/student/challenges/${challenge.id}`
+                        : '',
+                    completed: challenge.status === 'completed'
+                })));
+            } catch (_) {
+                return '[]';
+            }
+        }
+
         const cards = Array.from(document.querySelectorAll(arguments[0]));
         return JSON.stringify(cards.map(card => {
             const text = (card.textContent || '').replace(/\s+/g, ' ').trim();
             const titleEl = card.querySelector('h5');
             const join = card.querySelector("a[href*='/students/challenge/']");
-            const points = text.match(/Nagroda:\s*(\d+)\s*pkt/i);
+            const points = text.match(/(?:Nagroda:\s*|)(\d+)\s*pkt/i);
             return {
                 title: titleEl ? titleEl.textContent.replace(/\s+/g, ' ').trim() : '',
                 points: points ? parseInt(points[1], 10) : 0,

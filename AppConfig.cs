@@ -13,7 +13,7 @@ internal sealed class AppConfig
     };
 
     public string BaseUrl { get; set; } = "https://lingos.pl";
-    public string StudentDashboardUrl { get; set; } = "https://lingos.pl/student-confirmed/group";
+    public string StudentDashboardUrl { get; set; } = "https://lingos.pl/student/dashboard";
     public AppCredentials? Credentials { get; set; }
     public string? BrowserBinaryPath { get; set; }
     public string Browser { get; set; } = "Chrome";
