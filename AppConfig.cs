@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace LingosBotApp;
@@ -158,5 +160,23 @@ internal static class TextNormalizer
 
         var sanitized = value.Replace('\u00A0', ' ').Trim();
         return MultipleWhitespace.Replace(sanitized, " ");
+    }
+
+    public static string NormalizeForMatching(string value)
+    {
+        var decomposed = Normalize(value).Normalize(NormalizationForm.FormD);
+        var withoutDiacritics = new string(decomposed
+            .Where(character => CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            .ToArray())
+            // Polish ł does not decompose under FormD.
+            .Replace('ł', 'l')
+            .Replace('Ł', 'L');
+
+        var wordCharactersOnly = new string(withoutDiacritics
+            .ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : ' ')
+            .ToArray());
+
+        return MultipleWhitespace.Replace(wordCharactersOnly, " ").Trim();
     }
 }

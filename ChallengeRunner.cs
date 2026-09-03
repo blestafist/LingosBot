@@ -170,22 +170,15 @@ internal sealed record ChallengeInfo(
     bool Completed,
     string Description = "")
 {
-    private const string PerfectionismTitle = "Perfekcjonizm";
-    private const string PerfectionismDescription = "Wykonaj 1 lekcję z maksymalnie 1 błędem";
-
     // A challenge we can still pick has a join link and is not finished.
     public bool IsAvailable => !Completed && !string.IsNullOrWhiteSpace(JoinUrl);
 
     // In-progress: already taken (no join link) but not yet completed.
     public bool IsActive => !Completed && string.IsNullOrWhiteSpace(JoinUrl);
 
-    // Match the complete title and condition, rather than a title fragment: the
-    // other Perfekcjonizm challenges have different lesson counts and must not
-    // disable intentional errors accidentally.
-    public bool IsPerfectionism => IsActive &&
-        string.Equals(Title, PerfectionismTitle, StringComparison.Ordinal) &&
-        (string.Equals(Description, PerfectionismDescription, StringComparison.Ordinal) ||
-         string.Equals(Description, $"{PerfectionismDescription}.", StringComparison.Ordinal));
+    // Match the active challenge semantically. ChallengeMatcher handles title
+    // variants, dashboard wording, and Polish diacritics.
+    public bool IsPerfectionism => IsActive && ChallengeMatcher.IsPerfectionism(Title, Description);
 }
 
 internal sealed class ChallengeSnapshot (IReadOnlyList<ChallengeInfo> challenges)

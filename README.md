@@ -18,7 +18,7 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 4. It completes the requested lessons for that class.
 5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
 
-When the active challenge is exactly **Perfekcjonizm** with the condition “Wykonaj 1 lekcję z maksymalnie 1 błędem”, intentional errors are disabled for that lesson. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
+When an active challenge is identified as **Perfekcjonizm**, intentional errors are disabled for that lesson. Matching is case-, whitespace-, punctuation-, and Polish-diacritic-tolerant: a `Perfekcjonizm` keyword in the title is sufficient for a title-only/omitted-description variant (including numbered variants); when challenge text includes an explicit error limit, it must be at most one error and include lesson wording. A keyword found only in a description must also have that lesson/max-one-error wording, while negated mentions and explicit maximum-two-or-more conditions are not matched. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
 
 `lessonCount` is the default per-class count. `classLessonCounts` can override it by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
 
