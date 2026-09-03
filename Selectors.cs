@@ -104,7 +104,10 @@ internal static class Selectors
 
     public static SelectorDefinition LessonContinueButton { get; } = SelectorDefinition.CssRequired(
         "LessonContinueButton",
-        "#app button[type='submit'], #app button[type='button']:not([tabindex='-1'])");
+        // Keep this scoped to the lesson content. The authenticated shell also
+        // contains Headless UI popover buttons (and those can remain in the DOM
+        // while the lesson redirects to the finished dashboard).
+        "#app main button[type='submit'], #app main button[type='button']:not([tabindex='-1']):not([id^='headlessui-popover-'])");
 
     public static SelectorDefinition LessonProgressCounter { get; } = SelectorDefinition.CssRequired(
         "LessonProgressCounter",
@@ -120,7 +123,9 @@ internal static class Selectors
 
     public static SelectorDefinition LessonFinishedMarker { get; } = SelectorDefinition.CssOptional(
         "LessonFinishedMarker",
-        "TODO: optional selector that appears when the lesson is finished");
+        // The completion dialog is rendered in Headless UI's portal, outside
+        // #app, so do not scope this to the lesson root.
+        "[role='dialog'] h2");
 
     public static SelectorDefinition ZestawyNextPageButton { get; } = SelectorDefinition.CssOptional(
         "ZestawyNextPageButton",
