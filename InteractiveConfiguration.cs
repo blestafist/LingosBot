@@ -52,35 +52,24 @@ internal static class InteractiveConfiguration
         // not leave a partially updated configuration on disk.
         config.Validate();
         var classes = discoverClasses();
-        var previousCounts = config.ClassLessonCounts ?? new(StringComparer.OrdinalIgnoreCase);
+        var previousCounts = config.ClassLessonCounts ?? new(StringComparer.Ordinal);
         var classLessonCounts = classes.ToDictionary(
-            @class => @class.Title,
-            @class => FindPreviousCount(previousCounts, @class.Title) ?? config.LessonCount,
-            StringComparer.OrdinalIgnoreCase);
+            @class => ClassLessonConfiguration.GetKey(@class),
+            @class => ClassLessonConfiguration.FindPreviousCount(previousCounts, @class, classes) ?? config.LessonCount,
+            StringComparer.Ordinal);
 
         foreach (var @class in classes)
         {
-            var currentCount = classLessonCounts[@class.Title];
-            var count = ReadSetting($"Lessons for '{@class.Title}'", currentCount.ToString(), input, output);
-            classLessonCounts[@class.Title] = int.TryParse(count, out var classLessonCount) && classLessonCount >= 0
+            var key = ClassLessonConfiguration.GetKey(@class);
+            var currentCount = classLessonCounts[key];
+            var label = ClassLessonConfiguration.GetPromptLabel(@class, classes);
+            var count = ReadSetting($"Lessons for '{label}'", currentCount.ToString(), input, output);
+            classLessonCounts[key] = int.TryParse(count, out var classLessonCount) && classLessonCount >= 0
                 ? classLessonCount
-                : throw new ArgumentException($"Lessons for '{@class.Title}' must be a non-negative integer.");
+                : throw new ArgumentException($"Lessons for '{label}' must be a non-negative integer.");
         }
 
         config.ClassLessonCounts = classLessonCounts;
-    }
-
-    private static int? FindPreviousCount(IReadOnlyDictionary<string, int> counts, string title)
-    {
-        foreach (var pair in counts)
-        {
-            if (string.Equals(pair.Key, title, StringComparison.OrdinalIgnoreCase))
-            {
-                return pair.Value;
-            }
-        }
-
-        return null;
     }
 
     private static bool ReadBoolean(

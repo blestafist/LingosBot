@@ -35,7 +35,7 @@ internal sealed class LingosBot(
             for (var classIndex = 0; classIndex < classes.Count; classIndex++)
             {
                 var @class = classes[classIndex];
-                var classLessonCount = ResolveLessonCount(@class);
+                var classLessonCount = ClassLessonConfiguration.ResolveCount(_config, @class, classes);
                 Console.WriteLine();
                 Console.WriteLine($"=== Class {classIndex + 1}/{classes.Count}: {@class.Title} ({classLessonCount} lesson(s)) ===");
 
@@ -169,14 +169,6 @@ internal sealed class LingosBot(
         }
 
         return completedLessons;
-    }
-
-    private int ResolveLessonCount(ClassInfo @class)
-    {
-        var overrideValue = _config.ClassLessonCounts.FirstOrDefault(pair =>
-            string.Equals(pair.Key, @class.Title, StringComparison.OrdinalIgnoreCase));
-
-        return string.IsNullOrEmpty(overrideValue.Key) ? _config.LessonCount : overrideValue.Value;
     }
 
     // Before each lesson, make sure a Wyzwania challenge is selected: if one is

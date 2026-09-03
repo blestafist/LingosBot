@@ -30,7 +30,7 @@ internal sealed class AppConfig
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? PollingIntervalMilliseconds { get; set; }
     public int LessonCount { get; set; } = 1;
-    public Dictionary<string, int> ClassLessonCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> ClassLessonCounts { get; set; } = new(StringComparer.Ordinal);
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? LessonPromptSafetyCap { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

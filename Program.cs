@@ -47,7 +47,10 @@ internal static class Program
             if (options.ScanClasses)
             {
                 var classes = bot.ScanClasses();
-                config.ClassLessonCounts = classes.ToDictionary(@class => @class.Title, _ => config.LessonCount, StringComparer.OrdinalIgnoreCase);
+                config.ClassLessonCounts = classes.ToDictionary(
+                    ClassLessonConfiguration.GetKey,
+                    _ => config.LessonCount,
+                    StringComparer.Ordinal);
                 AppConfig.Save(config, options.ConfigFilePath);
                 Console.WriteLine("classLessonCounts saved to configuration.");
                 return 0;

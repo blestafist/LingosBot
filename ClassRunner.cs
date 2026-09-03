@@ -48,7 +48,7 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
                 TextNormalizer.Normalize(item.Title),
                 item.ChangeUrl,
                 string.IsNullOrWhiteSpace(item.GroupId) ? null : item.GroupId))
-            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.OrdinalIgnoreCase)
+            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.Ordinal)
             .Select(group => group.First())
             .ToList();
 

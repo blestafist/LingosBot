@@ -99,19 +99,19 @@ The noninteractive class-discovery command remains available when you want to ed
 ./LingosBot --scan_classes
 ```
 
-This writes a `classLessonCounts` object to `config.json`. Edit its values to choose the number of lessons per class. `0` skips a class.
+This writes a `classLessonCounts` object to `config.json`. Keys use the stable Lingos group ID when available, or the class change URL otherwise. Edit its values to choose the number of lessons per class. `0` skips a class.
 
 ```json
 {
   "lessonCount": 1,
   "classLessonCounts": {
-    "Class to skip": 0,
-    "Class needing two lessons": 2
+    "group:12345": 0,
+    "url:https://lingos.pl/student/change-class/abc": 2
   }
 }
 ```
 
-Names are case-insensitive but otherwise need to match Lingos. Classes not listed in `classLessonCounts` use `lessonCount`.
+Stable keys identify a class independently of its display title. Classes not listed in `classLessonCounts` use `lessonCount`. Configurations written by older versions may still use a title key; it is used only when that title uniquely matches a discovered class.
 
 ## Basic Configuration Example
 
