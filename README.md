@@ -8,7 +8,7 @@ The bot can process every class listed in Lingos, assign a different lesson coun
 
 ## Quick Start
 
-Download the ZIP archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract the entire archive, and follow [Configuration/Basic.md](Configuration/Basic.md). Do not download or move only the `LingosBot` executable: its bundled `selenium-manager` directory must remain beside it. A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
+Download the ZIP archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract the entire archive, and follow [Docs/Basic.md](Docs/Basic.md). Do not download or move only the `LingosBot` executable: its bundled `selenium-manager` directory must remain beside it. A supported browser and a Lingos account are required; no .NET or Git installation is needed for a prebuilt release.
 
 ## How A Run Works
 
@@ -20,7 +20,7 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 
 When an active challenge is identified as **Perfekcjonizm**, intentional errors are disabled for that lesson. Matching is case-, whitespace-, punctuation-, and Polish-diacritic-tolerant: a `Perfekcjonizm` keyword in the title is sufficient for a title-only/omitted-description variant (including numbered variants); when challenge text includes an explicit error limit, it must be at most one error and include lesson wording. A keyword found only in a description must also have that lesson/max-one-error wording, while negated mentions and explicit maximum-two-or-more conditions are not matched. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
 
-`lessonCount` is the default per-class count, applied independently to every discovered class. `classLessonCounts` contains optional overrides by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Classes without an entry still use `lessonCount`, and older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Configuration/Basic.md](Configuration/Basic.md#choose-which-classes-to-run).
+`lessonCount` is the default per-class count, applied independently to every discovered class. `classLessonCounts` contains optional overrides by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Classes without an entry still use `lessonCount`, and older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Docs/Basic.md](Docs/Basic.md#choose-which-classes-to-run).
 
 Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes. Blank per-class prompts keep the current setting, while `default`, `fallback`, or `-` removes an override and restores the global fallback. Overrides for classes missing from discovery are retained.
 
@@ -40,7 +40,7 @@ Run `./LingosBot --run_config` to configure the global lesson count interactivel
 ./LingosBot --scan_classes
 ```
 
-The exact command-line interface is documented in [Configuration/CLI.md](Configuration/CLI.md). When running from source, prepend `dotnet run --` to the same arguments.
+The exact command-line interface is documented in [Docs/CLI.md](Docs/CLI.md). When running from source, prepend `dotnet run --` to the same arguments.
 
 ## Troubleshooting
 
@@ -57,14 +57,14 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 
 ## Documentation
 
-- [Basic setup](Configuration/Basic.md): download a release, create `config.json`, and run the bot locally.
-- [Command-line interface](Configuration/CLI.md): every command-line option and its precedence.
-- [Advanced configuration](Configuration/Advanced.md): browser paths, timing values, safety caps, and source builds.
-- [Linux servers](Configuration/Servers.md): headless setup and scheduled runs with systemd timers or cron.
+- [Basic setup](Docs/Basic.md): download a release, create `config.json`, and run the bot locally.
+- [Command-line interface](Docs/CLI.md): every command-line option and its precedence.
+- [Advanced configuration](Docs/Advanced.md): browser paths, timing values, safety caps, and source builds.
+- [Linux servers](Docs/Servers.md): headless setup and scheduled runs with systemd timers or cron.
 
 ## Development
 
-See [Configuration/Advanced.md](Configuration/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
+See [Docs/Advanced.md](Docs/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
 
 The repository includes focused tests for interactive configuration. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
 
