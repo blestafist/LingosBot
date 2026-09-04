@@ -46,6 +46,13 @@ internal sealed class LingosBot(
                 }
 
                 classRunner.Select(@class);
+
+                if (classRunner.IsLessonLimitReached())
+                {
+                    Console.WriteLine($"Lingos reported that today's lesson limit has been reached for '{@class.Title}'. Skipping this class.");
+                    continue;
+                }
+
                 completedLessons += RunLessonsForClass(driver, challengeRunner, classLessonCount, @class.Title);
             }
 

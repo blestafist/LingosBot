@@ -106,6 +106,12 @@ internal sealed class LessonRunner (
 
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
         WaitForDocumentReady();
+
+        if (LessonLimitDetector.IsReached(_driver.PageSource))
+        {
+            ThrowLessonLimitReached();
+        }
+
         WaitUntilClickable(Selectors.MainLearnButton);
     }
 

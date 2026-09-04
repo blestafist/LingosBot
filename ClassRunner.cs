@@ -93,6 +93,8 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         });
     }
 
+    public bool IsLessonLimitReached() => LessonLimitDetector.IsReached(_driver.PageSource);
+
     private void SelectCurrentDashboardClass(string groupId)
     {
         // Lesson and vocabulary flows leave the browser on their own pages.
