@@ -57,6 +57,12 @@ internal sealed class CookieConsentHandler(IWebDriver driver, AppConfig config)
                     throw;
                 }
             }
+            catch (WebDriverTimeoutException)
+            {
+                // The banner may finish fading out between an intercepted click
+                // and this check. Its absence is a normal TryReject result.
+                return false;
+            }
         }
 
         return false;
