@@ -159,11 +159,9 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
             }
             catch (ElementClickInterceptedException)
             {
-                if (!_cookieConsent.TryRejectCookies())
-                {
-                    throw;
-                }
-
+                // Cookiebot can stop being visible while its closing overlay is
+                // still intercepting clicks. Retry after the short consent wait.
+                _cookieConsent.TryRejectCookies();
                 if (attempt == MaxClickAttempts)
                 {
                     throw;

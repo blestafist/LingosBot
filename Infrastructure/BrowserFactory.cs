@@ -8,6 +8,8 @@ namespace LingosBotApp;
 
 internal sealed class BrowserFactory
 {
+    private static readonly System.Drawing.Size BrowserWindowSize = new(1600, 1000);
+
     public IWebDriver Create(AppConfig config)
     {
         IWebDriver driver = config.Browser.Trim().ToLowerInvariant() switch
@@ -22,10 +24,9 @@ internal sealed class BrowserFactory
         driver.Manage().Timeouts().PageLoad = config.PageLoadTimeout;
         driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
 
-        if (!config.Headless)
-        {
-            driver.Manage().Window.Size = new System.Drawing.Size(1600, 1000);
-        }
+        // Headless browsers otherwise use a platform-specific default viewport,
+        // which can make Lingos render a different responsive layout on Windows.
+        driver.Manage().Window.Size = BrowserWindowSize;
 
         return driver;
     }
