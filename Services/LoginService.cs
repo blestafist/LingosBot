@@ -35,6 +35,7 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
         try
         {
             WaitForSuccessfulLogin();
+            HandleCookieConsent("Handling cookie consent after login...");
             Console.WriteLine("Login succeeded.");
         }
         catch (WebDriverTimeoutException ex)
@@ -47,16 +48,8 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
 
     private void WaitForSuccessfulLogin()
     {
-        var loginPath = "/h/login";
-
         CreateWait().Until(driver =>
         {
-            var currentUrl = driver.Url ?? string.Empty;
-            if (!currentUrl.Contains(loginPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
             if (Selectors.AuthenticatedShellMarker.TryToBy(out var authenticatedBy) &&
                 authenticatedBy is not null &&
                 TryFindVisible(driver, authenticatedBy, out _))
@@ -68,9 +61,9 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
         });
     }
 
-    private void HandleCookieConsent()
+    private void HandleCookieConsent(string message = "Handling cookie consent...")
     {
-        Console.WriteLine("Handling cookie consent...");
+        Console.WriteLine(message);
 
         try
         {
@@ -85,6 +78,11 @@ internal sealed class LoginService ( IWebDriver driver, AppConfig config )
         }
         catch (WebDriverTimeoutException)
         {
+            if (_cookieConsent.IsRejectButtonVisible())
+            {
+                throw;
+            }
+
             Console.WriteLine("Cookie rejection button was not visible within the short timeout. Continuing.");
         }
     }

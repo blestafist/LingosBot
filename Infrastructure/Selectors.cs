@@ -25,7 +25,7 @@ internal static class Selectors
 
     public static SelectorDefinition AuthenticatedShellMarker { get; } = SelectorDefinition.CssOptional(
         "AuthenticatedShellMarker",
-        "TODO: optional selector visible only after a successful login");
+        "#app[data-props], a[href='/student/dashboard'], #main-menu-list a[href='/student-confirmed/group']");
 
     public static SelectorDefinition LeftMenuZestawyButton { get; } = SelectorDefinition.CssRequired(
         "LeftMenuZestawyButton",

@@ -19,9 +19,63 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
     {
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
         WaitForDocumentReady();
-        OpenClassSelector();
+        RejectCookiesAfterNavigation();
 
-        var raw = ((IJavaScriptExecutor)_driver).ExecuteScript(
+        var raw = ReadDashboardClassPayload();
+        var classes = ParseClasses(raw);
+
+        if (classes.Count == 0)
+        {
+            OpenClassSelector();
+            raw = ReadClassSelectorPayload();
+            classes = ParseClasses(raw);
+            CloseClassSelector();
+        }
+
+        if (classes.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "No classes were found in the dashboard data or its 'Zmień klasę' selector. Verify the dashboard response and class selectors.");
+        }
+
+        return classes;
+    }
+
+    private List<ClassInfo> ParseClasses(string raw)
+    {
+        var payload = JsonSerializer.Deserialize<List<ClassPayload>>(raw, _jsonOptions) ?? [];
+        return payload
+            .Where(item => !string.IsNullOrWhiteSpace(item.Title) && !string.IsNullOrWhiteSpace(item.ChangeUrl))
+            .Select(item => new ClassInfo(
+                TextNormalizer.Normalize(item.Title),
+                item.ChangeUrl,
+                string.IsNullOrWhiteSpace(item.GroupId) ? null : item.GroupId))
+            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private string ReadDashboardClassPayload()
+    {
+        return ((IJavaScriptExecutor)_driver).ExecuteScript(
+            """
+            try {
+                const root = document.querySelector('#app[data-props]');
+                const props = JSON.parse(root?.getAttribute('data-props') || '{}');
+                return JSON.stringify((props.dashboard?.groups || []).map(group => ({
+                    title: String(group.name || '').replace(/\s+/g, ' ').trim(),
+                    groupId: String(group.id || ''),
+                    changeUrl: window.location.href
+                })));
+            } catch {
+                return '[]';
+            }
+            """)?.ToString() ?? "[]";
+    }
+
+    private string ReadClassSelectorPayload()
+    {
+        return ((IJavaScriptExecutor)_driver).ExecuteScript(
             """
             const select = document.querySelector(arguments[0]);
             if (!select) {
@@ -42,27 +96,6 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             }).filter(item => item.title && (item.groupId || item.changeUrl)));
             """,
             Selectors.ClassSelect.Value)?.ToString() ?? "[]";
-
-        var payload = JsonSerializer.Deserialize<List<ClassPayload>>(raw, _jsonOptions) ?? [];
-        var classes = payload
-            .Where(item => !string.IsNullOrWhiteSpace(item.Title) && !string.IsNullOrWhiteSpace(item.ChangeUrl))
-            .Select(item => new ClassInfo(
-                TextNormalizer.Normalize(item.Title),
-                item.ChangeUrl,
-                string.IsNullOrWhiteSpace(item.GroupId) ? null : item.GroupId))
-            .GroupBy(item => item.GroupId is not null ? $"group:{item.GroupId}" : $"url:{item.ChangeUrl}", StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToList();
-
-        CloseClassSelector();
-
-        if (classes.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "No classes were found in the dashboard's 'Zmień klasę' selector. Verify the class selector in Selectors.cs.");
-        }
-
-        return classes;
     }
 
     public void Select(ClassInfo @class)
@@ -102,6 +135,7 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         // before opening it (including when the requested class is current).
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
         WaitForDocumentReady();
+        RejectCookiesAfterNavigation();
         OpenClassSelector();
         var select = WaitUntilVisible(Selectors.ClassSelect);
         var selectedGroupId = select.GetAttribute("value")?.Trim();
@@ -145,6 +179,19 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
 
         ClickElement(WaitUntilClickable(Selectors.ClassChangeButton), Selectors.ClassChangeButton);
         WaitUntilVisible(Selectors.ClassSelect);
+    }
+
+    private void RejectCookiesAfterNavigation()
+    {
+        if (!_cookieConsent.IsRejectButtonVisible())
+        {
+            return;
+        }
+
+        if (_cookieConsent.TryRejectCookies())
+        {
+            Console.WriteLine("Cookie consent rejected after dashboard navigation.");
+        }
     }
 
     private void SelectClass(IWebElement select, string groupId)
