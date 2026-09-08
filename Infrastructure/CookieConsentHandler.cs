@@ -12,6 +12,19 @@ internal sealed class CookieConsentHandler(IWebDriver driver, AppConfig config)
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
 
+    public bool IsRejectButtonVisible()
+    {
+        try
+        {
+            return _driver.FindElements(Selectors.CookieRejectButton.ToBy())
+                .Any(element => element.Displayed && element.Enabled);
+        }
+        catch (StaleElementReferenceException)
+        {
+            return false;
+        }
+    }
+
     public bool TryRejectCookies()
     {
         for (var attempt = 1; attempt <= MaxRejectAttempts; attempt++)
@@ -31,7 +44,8 @@ internal sealed class CookieConsentHandler(IWebDriver driver, AppConfig config)
                     ((IJavaScriptExecutor)_driver).ExecuteScript("arguments[0].click();", rejectButton);
                 }
 
-                return WaitForDialogToClose();
+                WaitForDialogToClose();
+                return true;
             }
             catch (StaleElementReferenceException)
             {
@@ -59,22 +73,11 @@ internal sealed class CookieConsentHandler(IWebDriver driver, AppConfig config)
             ?? throw new WebDriverTimeoutException($"Timed out waiting for selector '{selector.Name}' to become clickable.");
     }
 
-    private bool WaitForDialogToClose()
+    private void WaitForDialogToClose()
     {
         var by = Selectors.CookieRejectButton.ToBy();
-        var wait = new WebDriverWait(new SystemClock(), _driver, _config.ShortWaitTimeout, _config.PollingInterval);
+        var wait = new WebDriverWait(new SystemClock(), _driver, _config.DefaultWaitTimeout, _config.PollingInterval);
         wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
-
-        try
-        {
-            return wait.Until(driver => driver.FindElements(by).All(element => !element.Displayed));
-        }
-        catch (WebDriverTimeoutException)
-        {
-            // Cookiebot can keep the button in the DOM during its fade-out.
-            // Do not retry the intended click while the dialog may still be
-            // covering it.
-            return false;
-        }
+        wait.Until(driver => driver.FindElements(by).All(element => !element.Displayed));
     }
 }
