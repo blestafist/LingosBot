@@ -136,6 +136,13 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
         WaitForDocumentReady();
         RejectCookiesAfterNavigation();
+
+        if (HasCurrentDashboardGroupSwitcher())
+        {
+            SelectCurrentDashboardGroup(groupId);
+            return;
+        }
+
         OpenClassSelector();
         var select = WaitUntilVisible(Selectors.ClassSelect);
         var selectedGroupId = select.GetAttribute("value")?.Trim();
@@ -156,6 +163,53 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         CreateWait().Until(driver => driver.FindElements(Selectors.ClassSelect.ToBy())
             .All(element => !element.Displayed));
     }
+
+    private bool HasCurrentDashboardGroupSwitcher() => _driver.FindElements(Selectors.ClassChangeButton.ToBy())
+        .Any(element => element.Displayed && element.GetAttribute("aria-haspopup") == "listbox");
+
+    private void SelectCurrentDashboardGroup(string groupId)
+    {
+        var currentGroupId = ReadCurrentDashboardGroupId();
+        if (string.Equals(currentGroupId, groupId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var status = ((IJavaScriptExecutor)_driver).ExecuteAsyncScript(
+            """
+            const groupId = Number(arguments[0]);
+            const done = arguments[arguments.length - 1];
+            fetch('/student/group', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groupId })
+            }).then(response => done(String(response.status)))
+              .catch(error => done(`error: ${error}`));
+            """,
+            groupId)?.ToString();
+
+        if (!int.TryParse(status, out var statusCode) || statusCode is < 200 or >= 300)
+        {
+            throw new InvalidOperationException($"Lingos rejected class group ID '{groupId}' (HTTP {status ?? "no response"}).");
+        }
+
+        // The endpoint returns the new dashboard data, but React owns the view
+        // state. Reload so subsequent collectors always see the selected class.
+        _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
+        WaitForDocumentReady();
+        RejectCookiesAfterNavigation();
+        CreateWait().Until(_ => string.Equals(ReadCurrentDashboardGroupId(), groupId, StringComparison.Ordinal));
+    }
+
+    private string? ReadCurrentDashboardGroupId() => ((IJavaScriptExecutor)_driver).ExecuteScript(
+        """
+        try {
+            const props = JSON.parse(document.querySelector('#app[data-props]')?.getAttribute('data-props') || '{}');
+            return String(props.dashboard?.currentGroup?.id || '');
+        } catch {
+            return '';
+        }
+        """)?.ToString()?.Trim();
 
     private void CloseClassSelector()
     {
@@ -286,9 +340,9 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             StringComparison.OrdinalIgnoreCase));
     }
 
-    private WebDriverWait CreateWait()
+    private WebDriverWait CreateWait(TimeSpan? timeout = null)
     {
-        var wait = new WebDriverWait(new SystemClock(), _driver, _config.DefaultWaitTimeout, _config.PollingInterval);
+        var wait = new WebDriverWait(new SystemClock(), _driver, timeout ?? _config.DefaultWaitTimeout, _config.PollingInterval);
         wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
         return wait;
     }
