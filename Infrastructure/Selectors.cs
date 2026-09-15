@@ -71,12 +71,11 @@ internal static class Selectors
         "MainLearnButton",
         "a[href^='/learning/start']");
 
-    // The current dashboard renders this select inside a Headless UI dialog after
-    // clicking "Zmień klasę". Older dashboard pages rendered the same select in
-    // #modal-change-group, so retain that fallback while avoiding generated IDs.
+    // The current dashboard renders a Headless UI listbox. Older dashboard pages
+    // rendered a select inside #modal-change-group, so retain that fallback.
     public static SelectorDefinition ClassChangeButton { get; } = SelectorDefinition.XPathRequired(
         "ClassChangeButton",
-        "//*[self::button or self::a][normalize-space(.)='Zmień klasę']");
+        "//main//*[self::button or self::a][@aria-haspopup='listbox' or normalize-space(.)='Zmień klasę']");
 
     public static SelectorDefinition ClassSelect { get; } = SelectorDefinition.CssRequired(
         "ClassSelect",
