@@ -105,7 +105,6 @@ internal sealed class LessonRunner (
         }
 
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
 
         if (LessonLimitDetector.IsReached(_driver.PageSource))
         {
@@ -234,7 +233,6 @@ internal sealed class LessonRunner (
     {
         var populatedWithFastPath = TryPopulateAnswerInput(answerInput, answer);
 
-        ScrollIntoView(answerInput);
         if (!populatedWithFastPath)
         {
             answerInput.SendKeys(Keys.Control + "a");
@@ -690,15 +688,6 @@ internal sealed class LessonRunner (
         }) ?? throw new WebDriverTimeoutException($"Timed out waiting for selector '{selector.Name}' to become clickable.");
     }
 
-    private void WaitForDocumentReady()
-    {
-        CreateWait().Until(driver =>
-        {
-            var state = ((IJavaScriptExecutor)driver).ExecuteScript("return document.readyState");
-            return string.Equals(state?.ToString(), "complete", StringComparison.OrdinalIgnoreCase);
-        });
-    }
-
     private WebDriverWait CreateWait(TimeSpan? timeout = null)
     {
         var wait = new WebDriverWait(new SystemClock(), _driver, timeout ?? _config.DefaultWaitTimeout, _config.PollingInterval);
@@ -712,7 +701,6 @@ internal sealed class LessonRunner (
         {
             try
             {
-                ScrollIntoView(element);
                 element.Click();
                 return;
             }
@@ -720,7 +708,14 @@ internal sealed class LessonRunner (
             {
                 if (!_cookieConsent.TryRejectCookies())
                 {
-                    throw;
+                    // Native Selenium clicks normally scroll into view. On a
+                    // sticky overlay, recenter once before retrying.
+                    if (attempt == MaxClickAttempts)
+                    {
+                        throw;
+                    }
+
+                    ScrollIntoView(element);
                 }
 
                 if (attempt == MaxClickAttempts)
