@@ -11,6 +11,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
     private readonly AppConfig _config = config;
     private readonly CookieConsentHandler _cookieConsent = new(driver, config);
     private const int MaxClickAttempts = 3;
+    private const int WordsetFetchBatchSize = 4;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -33,19 +34,99 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
 
         var vocabulary = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
-        for (var index = 0; index < wordsets.Count; index++)
+        for (var batchStart = 0; batchStart < wordsets.Count; batchStart += WordsetFetchBatchSize)
         {
-            var wordset = wordsets[index];
-            Console.WriteLine($"Reading wordset {index + 1}/{wordsets.Count}: {wordset.Title}");
-
-            var entries = ScrapeWordsetByNavigation(wordset);
-            AddEntries(vocabulary, entries, logAlternatives: true);
-            Console.WriteLine($"Collected {entries.Count} entries from {wordset.Title}.");
+            var batch = wordsets.Skip(batchStart).Take(WordsetFetchBatchSize).ToList();
+            var fetched = TryFetchWordsets(batch);
+            for (var index = 0; index < batch.Count; index++)
+            {
+                var wordset = batch[index];
+                Console.WriteLine($"Reading wordset {batchStart + index + 1}/{wordsets.Count}: {wordset.Title}");
+                var entries = fetched is not null && fetched[index] is { Count: > 0 } fastEntries
+                    ? fastEntries
+                    : ScrapeWordsetByNavigation(wordset);
+                AddEntries(vocabulary, entries, logAlternatives: true);
+                Console.WriteLine($"Collected {entries.Count} entries from {wordset.Title}.");
+            }
         }
 
         var readOnlyVocabulary = ToReadOnlyVocabulary(vocabulary);
         Console.WriteLine($"Vocabulary collection finished. Stored {readOnlyVocabulary.Count} unique Polish prompts.");
         return readOnlyVocabulary;
+    }
+
+    // Fetch a few same-origin pages concurrently without rendering each in a tab.
+    // A failed request, login redirect, or unrecognized response uses the existing
+    // Selenium navigation path, so a site layout change cannot silently lose words.
+    private List<VocabularyEntry>?[]? TryFetchWordsets(IReadOnlyList<WordsetDescriptor> batch)
+    {
+        if (batch.Any(wordset => !Uri.TryCreate(wordset.Url, UriKind.Absolute, out var url) ||
+            !string.Equals(url.GetLeftPart(UriPartial.Authority), new Uri(_config.BaseUrl).GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        try
+        {
+            var raw = ((IJavaScriptExecutor)_driver).ExecuteAsyncScript(
+                """
+                const urls = arguments[0];
+                const rowSelector = arguments[1];
+                const foreignSelector = arguments[2];
+                const polishSelector = arguments[3];
+                const done = arguments[arguments.length - 1];
+                Promise.all(urls.map(async url => {
+                    try {
+                        const response = await fetch(url, { credentials: 'same-origin', signal: AbortSignal.timeout(10000) });
+                        if (!response.ok || response.redirected || !response.headers.get('content-type')?.includes('text/html')) return null;
+                        const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+                        const root = doc.querySelector('#app[data-props]');
+                        if (root) {
+                            const props = JSON.parse(root.getAttribute('data-props'));
+                            if (props.page !== 'wordset' || !Array.isArray(props.flashcards)) return null;
+                            return props.flashcards.map(card => ({ foreignWord: card.word, polishTranslation: card.translation }))
+                                .filter(entry => typeof entry.foreignWord === 'string' && typeof entry.polishTranslation === 'string'
+                                    && entry.foreignWord.trim() && entry.polishTranslation.trim());
+                        }
+                        return Array.from(doc.querySelectorAll(rowSelector)).map(row => ({
+                            foreignWord: row.querySelector(foreignSelector)?.textContent?.trim() || '',
+                            polishTranslation: row.querySelector(polishSelector)?.textContent?.trim() || ''
+                        })).filter(entry => entry.foreignWord && entry.polishTranslation);
+                    } catch (_) {
+                        return null;
+                    }
+                })).then(results => done(JSON.stringify(results))).catch(() => done('[]'));
+                """,
+                batch.Select(item => item.Url).ToArray(),
+                GetCssSelectorValue(Selectors.PreviewVocabularyRow),
+                GetCssSelectorValue(Selectors.PreviewForeignWordCell),
+                GetCssSelectorValue(Selectors.PreviewPolishWordCell))?.ToString();
+
+            return ParseFetchedWordsets(raw, batch.Count);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Parallel wordset fetch unavailable ({ex.Message}). Falling back to page navigation.");
+            return null;
+        }
+    }
+
+    internal static List<VocabularyEntry>?[]? ParseFetchedWordsets(string? raw, int expectedCount)
+    {
+        var results = JsonSerializer.Deserialize<List<List<VocabularyEntryPayload>?>>(
+            raw ?? "[]", new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (results?.Count != expectedCount)
+        {
+            return null;
+        }
+
+        return results.Select(entries => entries?
+            .Where(entry => entry is not null)
+            .Select(entry => new VocabularyEntry(
+                TextNormalizer.Normalize(entry.ForeignWord),
+                TextNormalizer.Normalize(entry.PolishTranslation)))
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ForeignWord) && !string.IsNullOrWhiteSpace(entry.PolishTranslation))
+            .ToList()).ToArray();
     }
 
     private List<WordsetDescriptor> CollectWordsetDescriptors()

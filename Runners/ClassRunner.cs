@@ -17,8 +17,8 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
 
     public IReadOnlyList<ClassInfo> ReadClasses()
     {
-        _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
+        NavigateToDashboardIfNeeded();
+        WaitForDashboard();
         RejectCookiesAfterNavigation();
 
         var raw = ReadDashboardClassPayload();
@@ -109,7 +109,6 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         }
 
         _driver.Navigate().GoToUrl(@class.ChangeUrl);
-        WaitForDocumentReady();
 
         var expectedUrl = new Uri(@class.ChangeUrl).AbsoluteUri;
         CreateWait().Until(driver =>
@@ -133,8 +132,8 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         // Lesson and vocabulary flows leave the browser on their own pages.
         // The class switcher belongs to the dashboard, so always return there
         // before opening it (including when the requested class is current).
-        _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
+        NavigateToDashboardIfNeeded();
+        WaitForDashboard();
         RejectCookiesAfterNavigation();
 
         if (HasCurrentDashboardGroupSwitcher())
@@ -196,7 +195,7 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
         // The endpoint returns the new dashboard data, but React owns the view
         // state. Reload so subsequent collectors always see the selected class.
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
+        WaitForDashboard();
         RejectCookiesAfterNavigation();
         CreateWait().Until(_ => string.Equals(ReadCurrentDashboardGroupId(), groupId, StringComparison.Ordinal));
     }
@@ -332,12 +331,21 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             ?? throw new WebDriverTimeoutException($"Timed out waiting for selector '{selector.Name}' to become clickable.");
     }
 
-    private void WaitForDocumentReady()
+    private void WaitForDashboard()
     {
-        CreateWait().Until(driver => string.Equals(
-            ((IJavaScriptExecutor)driver).ExecuteScript("return document.readyState")?.ToString(),
-            "complete",
-            StringComparison.OrdinalIgnoreCase));
+        var appBy = By.CssSelector("#app[data-props]");
+        var legacyBy = Selectors.ClassChangeButton.ToBy();
+        CreateWait().Until(driver => driver.FindElements(appBy).Count > 0 || driver.FindElements(legacyBy).Count > 0);
+    }
+
+    private void NavigateToDashboardIfNeeded()
+    {
+        // ReadClasses leaves us on the dashboard; don't reload it just to
+        // select the first class. Later lessons/wordsets still navigate back.
+        if (!string.Equals(_driver.Url, _config.StudentDashboardUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
+        }
     }
 
     private WebDriverWait CreateWait(TimeSpan? timeout = null)

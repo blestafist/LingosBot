@@ -19,8 +19,13 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
     // Also saves the page each time for troubleshooting.
     public ChallengeSnapshot ReadChallenges()
     {
-        _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
+        // Selecting a class already loads the dashboard. The finished=1 URL
+        // after a lesson must be reloaded to obtain fresh challenge status.
+        if (!string.Equals(_driver.Url, _config.StudentDashboardUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
+        }
+        WaitForChallengeData();
         SaveSnapshot("wyzwania-latest");
 
         var raw = ((IJavaScriptExecutor)_driver).ExecuteScript(ParseChallengesScript, Selectors.ChallengeCard.Value)?
@@ -49,7 +54,7 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
         }
 
         _driver.Navigate().GoToUrl(challenge.JoinUrl);
-        WaitForDocumentReady();
+        WaitForChallengeData();
 
         // Capture exactly what taking a challenge lands on, so we can confirm
         // whether the click enrolls or just opens a confirmation page.
@@ -81,7 +86,7 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
         // Refresh the server-rendered dashboard so subsequent challenge checks
         // observe the new in-progress status.
         _driver.Navigate().GoToUrl(_config.StudentDashboardUrl);
-        WaitForDocumentReady();
+        WaitForChallengeData();
         SaveSnapshot("challenge-landing");
     }
 
@@ -140,13 +145,11 @@ internal sealed class ChallengeRunner (IWebDriver driver, AppConfig config)
         }
     }
 
-    private void WaitForDocumentReady()
+    private void WaitForChallengeData()
     {
         new WebDriverWait(new SystemClock(), _driver, _config.DefaultWaitTimeout, _config.PollingInterval)
-            .Until(driver => string.Equals(
-                ((IJavaScriptExecutor)driver).ExecuteScript("return document.readyState")?.ToString(),
-                "complete",
-                StringComparison.OrdinalIgnoreCase));
+            .Until(driver => driver.FindElements(Selectors.ChallengeCard.ToBy()).Count > 0 ||
+                ((IJavaScriptExecutor)driver).ExecuteScript("return document.readyState")?.ToString() == "complete");
     }
 
     private sealed class ChallengePayload

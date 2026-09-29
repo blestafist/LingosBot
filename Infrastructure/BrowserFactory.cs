@@ -110,6 +110,9 @@ internal sealed class BrowserFactory
         options.AddArgument("--log-level=3");
         options.AddArgument("--no-sandbox");
         options.AddArgument("--disable-dev-shm-usage");
+        // Match Chrome/Firefox: lesson controls are text-based, and images do
+        // not need to be downloaded for the bot to read or click them.
+        options.AddUserProfilePreference("profile.default_content_setting_values.images", 2);
         options.PageLoadStrategy = PageLoadStrategy.Eager;
 
         SetBinaryLocation(options, config);
