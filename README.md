@@ -66,7 +66,7 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 
 See [Docs/Advanced.md](Docs/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
 
-The repository includes focused tests for interactive configuration. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
+The repository includes focused tests for configuration, challenge matching, and lesson-state handling. See [performance checks](Docs/Performance.md) for optimization details and local measurements. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
 
 ## Support
 

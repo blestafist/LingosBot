@@ -56,7 +56,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
         while (true)
         {
             Console.WriteLine($"Scanning Zestawy page {pageNumber}...");
-            WaitUntilElementsCountAtLeast(Selectors.SetCardContainer, 1);
+            WaitForVisibleMatch(Selectors.SetCardContainer);
             var pageDescriptors = ReadWordsetDescriptorsFromPage();
             Console.WriteLine($"Found {pageDescriptors.Count} set blocks on this page.");
 
@@ -150,7 +150,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
 
     private List<VocabularyEntry> ReadVocabularyEntriesFromCurrentPage()
     {
-        WaitUntilElementsCountAtLeast(Selectors.PreviewVocabularyRow, 1);
+        WaitForVisibleMatch(Selectors.PreviewVocabularyRow);
 
         try
         {
@@ -314,7 +314,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
             Console.WriteLine($"Moving to Zestawy page {nextPageNumber}...");
             ClickElement(nextPageButton, Selectors.ZestawyNextPageButton);
             WaitForDocumentReady();
-            WaitUntilElementsCountAtLeast(Selectors.SetCardContainer, 1);
+            WaitForVisibleMatch(Selectors.SetCardContainer);
             return true;
         }
         catch (WebDriverTimeoutException)
@@ -322,6 +322,32 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
             Console.WriteLine("Reached the last Zestawy page.");
             return false;
         }
+    }
+
+    // The fast readers fetch all rows in one script. Waiting for every row's
+    // Displayed property first adds one WebDriver round trip per vocabulary word.
+    private void WaitForVisibleMatch(SelectorDefinition selector)
+    {
+        var by = selector.ToBy();
+        CreateWait().Until(driver =>
+        {
+            foreach (var element in driver.FindElements(by))
+            {
+                try
+                {
+                    if (element.Displayed)
+                    {
+                        return true;
+                    }
+                }
+                catch (StaleElementReferenceException)
+                {
+                    // React may replace a row while the page is loading.
+                }
+            }
+
+            return false;
+        });
     }
 
     private IReadOnlyList<IWebElement> WaitUntilElementsCountAtLeast(SelectorDefinition selector, int minimumCount)
