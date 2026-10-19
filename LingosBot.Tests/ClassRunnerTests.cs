@@ -53,8 +53,23 @@ public sealed class ClassRunnerTests
         Assert.Equal(1, proxy.Navigations);
     }
 
+    [Fact]
+    public void AlreadyOnDashboardDoesNotReloadToSelectTheCurrentClass()
+    {
+        var driver = DispatchProxy.Create<IWebDriver, ClassDriver>();
+        var proxy = (ClassDriver)(object)driver;
+        proxy.CurrentGroup = "26083";
+        proxy.Url = "https://lingos.pl/student/dashboard";
+
+        new ClassRunner(driver, new AppConfig()).Select(new ClassInfo("German", proxy.Url, "26083"));
+
+        Assert.Null(proxy.SwitchScript);
+        Assert.Equal(0, proxy.Navigations);
+    }
+
     public class ClassDriver : DispatchProxy, IJavaScriptExecutor
     {
+        public string Url { get; set; } = "about:blank";
         public string CurrentGroup { get; set; } = "25571";
         public string Response { get; set; } = "200";
         public string? SwitchScript { get; private set; }
@@ -76,10 +91,16 @@ public sealed class ClassRunnerTests
 
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
+            if (method!.Name == "get_Url") return Url;
             if (method!.Name == "Navigate")
             {
                 var navigation = DispatchProxy.Create<INavigation, Stub>();
-                ((Stub)(object)navigation).Handler = (_, _) => { Navigations++; return null; };
+                ((Stub)(object)navigation).Handler = (_, navigationArgs) =>
+                {
+                    Url = navigationArgs![0]!.ToString()!;
+                    Navigations++;
+                    return null;
+                };
                 return navigation;
             }
             if (method.Name == "FindElements")

@@ -61,6 +61,7 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 - [Command-line interface](Docs/CLI.md): every command-line option and its precedence.
 - [Advanced configuration](Docs/Advanced.md): browser paths, timing values, safety caps, and source builds.
 - [Linux servers](Docs/Servers.md): headless setup and scheduled runs with systemd timers or cron.
+- [Creating a release](Docs/Releasing.md): build all four platforms, package with 7-Zip, and publish on GitHub.
 
 ## Development
 
