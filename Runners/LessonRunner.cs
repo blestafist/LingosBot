@@ -11,6 +11,7 @@ internal sealed class LessonRunner (
     private readonly IWebDriver _driver = driver;
     private readonly AppConfig _config = config;
     private readonly CookieConsentHandler _cookieConsent = new(driver, config);
+    private readonly LessonPageReader _pageReader = new(driver);
     private const int MaxClickAttempts = 3;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary = vocabulary;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
@@ -26,12 +27,6 @@ internal sealed class LessonRunner (
 
         while (answeredPrompts < _config.EffectiveLessonPromptSafetyCap)
         {
-            if (IsLessonFinished())
-            {
-                Console.WriteLine($"Lesson {lessonNumber} completed after {answeredPrompts} prompts.");
-                return;
-            }
-
             var step = WaitForStepOrLessonFinished();
             if (step.Kind == LessonStepKind.Finished)
             {
@@ -235,6 +230,7 @@ internal sealed class LessonRunner (
 
         if (!populatedWithFastPath)
         {
+            ScrollIntoView(answerInput);
             answerInput.SendKeys(Keys.Control + "a");
             answerInput.SendKeys(Keys.Delete);
             answerInput.SendKeys(answer);
@@ -312,6 +308,15 @@ internal sealed class LessonRunner (
 
         var result = CreateWait().Until(driver =>
         {
+            var snapshot = _pageReader.TryRead();
+            if (snapshot is not null)
+            {
+                if (snapshot.Finished) return "finished";
+                if (!snapshot.FeedbackVisible) return null;
+                if (snapshot.Incorrect) return "rejected";
+                return snapshot.ContinueVisible ? "accepted" : null;
+            }
+
             if (IsLessonFinished())
             {
                 return "finished";
@@ -350,6 +355,12 @@ internal sealed class LessonRunner (
 
     private bool IsLessonFinished()
     {
+        var snapshot = _pageReader.TryRead();
+        if (snapshot is not null)
+        {
+            return snapshot.Finished;
+        }
+
         var currentUrl = _driver.Url ?? string.Empty;
 
         // Older lesson flows used a dedicated /group/finished page. The current
@@ -400,12 +411,13 @@ internal sealed class LessonRunner (
 
         CreateWait().Until(_ =>
         {
-            if (IsLessonFinished())
+            var snapshot = _pageReader.TryRead();
+            var currentStep = snapshot is null ? ReadCurrentLessonStep() : ReadStep(snapshot);
+            if (currentStep.Kind == LessonStepKind.Finished)
             {
                 return true;
             }
 
-            var currentStep = ReadCurrentLessonStep();
             if (currentStep.Kind == LessonStepKind.Blocked)
             {
                 ThrowLessonLimitReached();
@@ -421,7 +433,7 @@ internal sealed class LessonRunner (
                 return false;
             }
 
-            if (!HasVisibleFeedback())
+            if (!(snapshot?.FeedbackVisible ?? HasVisibleFeedback()))
             {
                 return true;
             }
@@ -445,11 +457,6 @@ internal sealed class LessonRunner (
 
         CreateWait().Until(_ =>
         {
-            if (IsLessonFinished())
-            {
-                return true;
-            }
-
             var currentStep = ReadCurrentLessonStep();
             return currentStep.Kind != LessonStepKind.ContinueOnly;
         });
@@ -457,6 +464,12 @@ internal sealed class LessonRunner (
 
     private bool HasVisibleFeedback()
     {
+        var snapshot = _pageReader.TryRead();
+        if (snapshot is not null)
+        {
+            return snapshot.FeedbackVisible;
+        }
+
         return TryFindVisible(_driver, Selectors.LessonFeedbackMarker.ToBy(), out _);
     }
 
@@ -471,6 +484,12 @@ internal sealed class LessonRunner (
 
     private LessonStepState ReadCurrentLessonStep()
     {
+        var snapshot = _pageReader.TryRead();
+        if (snapshot is not null)
+        {
+            return ReadStep(snapshot);
+        }
+
         if (IsLessonFinished())
         {
             return new LessonStepState(LessonStepKind.Finished, null);
@@ -483,14 +502,12 @@ internal sealed class LessonRunner (
 
         var promptVisible = TryFindVisible(_driver, Selectors.LessonPrompt.ToBy(), out var promptElement) && promptElement is not null;
         var inputVisible = TryFindVisible(_driver, Selectors.LessonAnswerInput.ToBy(), out _);
-        var continueVisible = TryFindVisible(_driver, Selectors.LessonContinueButton.ToBy(), out _);
-
         if (promptVisible && inputVisible)
         {
             return new LessonStepState(LessonStepKind.Prompt, promptElement);
         }
 
-        if (continueVisible && !inputVisible)
+        if (!inputVisible && TryFindVisible(_driver, Selectors.LessonContinueButton.ToBy(), out _))
         {
             return new LessonStepState(LessonStepKind.ContinueOnly, null);
         }
@@ -498,14 +515,26 @@ internal sealed class LessonRunner (
         return new LessonStepState(LessonStepKind.Waiting, null);
     }
 
+    internal static LessonStepState ReadStep(LessonPageSnapshot snapshot)
+    {
+        if (snapshot.Finished) return new LessonStepState(LessonStepKind.Finished, null);
+        if (snapshot.Blocked) return new LessonStepState(LessonStepKind.Blocked, null);
+        if (snapshot.Prompt is not null && snapshot.InputVisible)
+            return new LessonStepState(LessonStepKind.Prompt, snapshot.Prompt);
+        if (snapshot.ContinueVisible && !snapshot.InputVisible)
+            return new LessonStepState(LessonStepKind.ContinueOnly, null);
+        return new LessonStepState(LessonStepKind.Waiting, null);
+    }
+
     private LessonEntryState ReadLessonEntryState()
     {
-        if (HasLessonLimitReached())
+        var step = ReadCurrentLessonStep();
+        if (step.Kind == LessonStepKind.Blocked)
         {
             return LessonEntryState.Blocked;
         }
 
-        if (ReadCurrentLessonStep().Kind != LessonStepKind.Waiting)
+        if (step.Kind != LessonStepKind.Waiting)
         {
             return LessonEntryState.Ready;
         }
