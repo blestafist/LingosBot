@@ -179,11 +179,25 @@ internal sealed class ClassRunner(IWebDriver driver, AppConfig config)
             """
             const groupId = Number(arguments[0]);
             const done = arguments[arguments.length - 1];
-            fetch('/student/group', {
+            const props = JSON.parse(document.querySelector('#app[data-props]')?.getAttribute('data-props') || '{}');
+            // The context switcher replaced /student/group in the new Lingos UI.
+            // Keep the old endpoint for dashboards predating contexts.
+            const usesContexts = !!props.dashboard?.contexts;
+            fetch(usesContexts ? '/student/context' : '/student/group', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ groupId })
-            }).then(response => done(String(response.status)))
+                body: JSON.stringify(usesContexts ? { kind: 'group', id: groupId } : { groupId })
+            }).then(response => {
+                if (!response.ok) {
+                    done(String(response.status));
+                    return;
+                }
+                if (!(response.headers.get('content-type') || '').includes('application/json')) {
+                    done('error: expected a JSON response from the class switcher');
+                    return;
+                }
+                done(String(response.status));
+            })
               .catch(error => done(`error: ${error}`));
             """,
             groupId)?.ToString();

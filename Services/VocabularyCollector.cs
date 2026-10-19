@@ -93,7 +93,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
                         .filter(Boolean);
 
                     return {
-                        title: lines.length > 0 ? lines[0] : (button?.href || ''),
+                        title: card.querySelector('h2')?.innerText?.trim() || (lines.length > 0 ? lines[0] : (button?.href || '')),
                         url: button?.href || ''
                     };
                 }).filter(item => item.url));
@@ -128,6 +128,7 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
             var previewButton = FindChildElement(card, Selectors.SetCardPreviewButton);
             var href = previewButton.GetDomAttribute("href") ?? string.Empty;
             var title = TextNormalizer.Normalize(
+                card.FindElements(By.CssSelector("h2")).FirstOrDefault()?.Text ??
                 card.Text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? href);
 
             if (string.IsNullOrWhiteSpace(href))
