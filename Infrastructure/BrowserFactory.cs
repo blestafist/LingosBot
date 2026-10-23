@@ -23,6 +23,7 @@ internal sealed class BrowserFactory
 
         driver.Manage().Timeouts().PageLoad = config.PageLoadTimeout;
         driver.Manage().Timeouts().ImplicitWait = TimeSpan.Zero;
+        driver.Manage().Timeouts().AsynchronousJavaScript = config.DefaultWaitTimeout + TimeSpan.FromSeconds(5);
 
         // Headless browsers otherwise use a platform-specific default viewport,
         // which can make Lingos render a different responsive layout on Windows.

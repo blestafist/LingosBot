@@ -83,8 +83,9 @@ internal sealed class VocabularyCollector (IWebDriver driver, AppConfig config)
                         const root = doc.querySelector('#app[data-props]');
                         if (root) {
                             const props = JSON.parse(root.getAttribute('data-props'));
-                            if (props.page !== 'wordset' || !Array.isArray(props.flashcards)) return null;
-                            return props.flashcards.map(card => ({ foreignWord: card.word, polishTranslation: card.translation }))
+                             const flashcards = props.wordset?.flashcards ?? props.flashcards;
+                             if (props.page !== 'wordset' || !Array.isArray(flashcards)) return null;
+                             return flashcards.map(card => ({ foreignWord: card.word, polishTranslation: card.translation }))
                                 .filter(entry => typeof entry.foreignWord === 'string' && typeof entry.polishTranslation === 'string'
                                     && entry.foreignWord.trim() && entry.polishTranslation.trim());
                         }

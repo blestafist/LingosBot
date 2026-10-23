@@ -18,6 +18,8 @@ Download the ZIP archive for your operating system from [GitHub Releases](https:
 4. It completes the requested lessons for that class.
 5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
 
+Lessons use Lingos's own answer endpoint through the logged-in browser to avoid per-word UI clicks and rendering waits. If the initial lesson payload is unavailable, the bot uses the UI instead. Set `useLessonApi` to `false` in `config.json` to force UI mode; failed API submissions stop without automatic retry to avoid duplicate answers.
+
 When an active challenge is identified as **Perfekcjonizm**, intentional errors are disabled for that lesson. Matching is case-, whitespace-, punctuation-, and Polish-diacritic-tolerant: a `Perfekcjonizm` keyword in the title is sufficient for a title-only/omitted-description variant (including numbered variants); when challenge text includes an explicit error limit, it must be at most one error and include lesson wording. A keyword found only in a description must also have that lesson/max-one-error wording, while negated mentions and explicit maximum-two-or-more conditions are not matched. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
 
 `lessonCount` is the default per-class count, applied independently to every discovered class. `classLessonCounts` contains optional overrides by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Classes without an entry still use `lessonCount`, and older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Docs/Basic.md](Docs/Basic.md#choose-which-classes-to-run).
