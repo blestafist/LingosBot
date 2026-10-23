@@ -13,15 +13,26 @@ internal sealed class LessonRunner (
     private readonly CookieConsentHandler _cookieConsent = new(driver, config);
     private readonly LessonPageReader _pageReader = new(driver);
     private const int MaxClickAttempts = 3;
-    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _vocabulary = vocabulary;
-    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> _reverseVocabulary = BuildReverseVocabulary(vocabulary);
-    private readonly Random _random = new();
+    private readonly LessonAnswers _answers = new(config, vocabulary);
 
     public void RunLesson(int lessonNumber, bool perfectionismChallengeActive = false)
     {
         Console.WriteLine($"Preparing lesson {lessonNumber}...");
         OpenMainPage();
         StartLesson();
+
+        if (_config.UseLessonApi)
+        {
+            var api = new LessonApiClient(_driver, _config);
+            var initial = api.TryRead();
+            if (initial is not null)
+            {
+                new ApiLessonRunner(api, _config, ResolveCandidateAnswers,
+                    () => MakeAnError(perfectionismChallengeActive), GenerateWrongAnswer)
+                    .Run(lessonNumber, initial);
+                return;
+            }
+        }
 
         var answeredPrompts = 0;
 
@@ -574,49 +585,7 @@ internal sealed class LessonRunner (
 
     private IReadOnlyList<string> ResolveCandidateAnswers(string prompt)
     {
-        if (_vocabulary.TryGetValue(prompt, out var directMatches))
-        {
-            return directMatches;
-        }
-
-        if (_reverseVocabulary.TryGetValue(prompt, out var reverseMatches))
-        {
-            Console.WriteLine($"Prompt '{prompt}' matched the reverse vocabulary lookup.");
-            return reverseMatches;
-        }
-
-        return [];
-    }
-
-    private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildReverseVocabulary(
-        IReadOnlyDictionary<string, IReadOnlyList<string>> vocabulary)
-    {
-        var reverse = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var pair in vocabulary)
-        {
-            foreach (var foreignWord in pair.Value)
-            {
-                var normalizedForeignWord = TextNormalizer.Normalize(foreignWord);
-                if (string.IsNullOrWhiteSpace(normalizedForeignWord))
-                {
-                    continue;
-                }
-
-                if (!reverse.TryGetValue(normalizedForeignWord, out var candidates))
-                {
-                    candidates = new List<string>();
-                    reverse[normalizedForeignWord] = candidates;
-                }
-
-                if (!candidates.Any(candidate => string.Equals(candidate, pair.Key, StringComparison.OrdinalIgnoreCase)))
-                {
-                    candidates.Add(pair.Key);
-                }
-            }
-        }
-
-        return reverse.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.AsReadOnly(), StringComparer.OrdinalIgnoreCase);
+        return _answers.Resolve(prompt);
     }
 
     private bool TryFindVisible(ISearchContext context, By by, out IWebElement? element)
@@ -773,39 +742,12 @@ internal sealed class LessonRunner (
 
     private bool MakeAnError(bool perfectionismChallengeActive)
     {
-        return _random.NextDouble() < ErrorRateResolver.GetEffectiveRate(
-            _config.ErrorsPer100Words,
-            perfectionismChallengeActive) / 100.0;
+        return _answers.MakeError(perfectionismChallengeActive);
     }
 
     private string GenerateWrongAnswer(string correctAnswer)
     {
-        if (string.IsNullOrEmpty(correctAnswer))
-        {
-            return "wrong";
-        }
-
-        if (correctAnswer.Length == 1)
-        {
-            var letters = "abcdefghijklmnopqrstuvwxyz";
-            var wrongCharacter = letters[_random.Next(letters.Length)];
-            while (char.ToUpperInvariant(wrongCharacter) == char.ToUpperInvariant(correctAnswer[0]))
-            {
-                wrongCharacter = letters[_random.Next(letters.Length)];
-            }
-
-            return wrongCharacter.ToString();
-        }
-
-        var chars = correctAnswer.ToCharArray();
-        var randomIndex = _random.Next(chars.Length);
-        var randomChar = (char)('a' + _random.Next(26));
-        while (char.ToUpperInvariant(randomChar) == char.ToUpperInvariant(chars[randomIndex]))
-        {
-            randomChar = (char)('a' + _random.Next(26));
-        }
-        chars[randomIndex] = randomChar;
-        return new string(chars);
+        return _answers.WrongAnswer(correctAnswer);
     }
 }
 

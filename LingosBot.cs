@@ -27,6 +27,20 @@ internal sealed class LingosBot(
             var loginService = new LoginService(driver, _config);
             LoginWithRetry(loginService, credentials);
 
+            if (_config.UseHttpAfterLogin)
+            {
+                using var session = LingosHttpSession.FromBrowser(driver, _config);
+                var runner = new HttpSessionRunner(session, _config);
+                // Validate the transferred session before releasing the browser.
+                var dashboard = runner.ReadDashboard();
+                CloseDriver(driver);
+                driver = null;
+                Console.WriteLine("Browser closed. Continuing through HTTP with an in-memory session.");
+                runner.Run(dashboard);
+                Console.WriteLine($"Total run time: {totalStopwatch.Elapsed:mm\\:ss}.");
+                return;
+            }
+
             var classRunner = new ClassRunner(driver, _config);
             var classes = classRunner.ReadClasses();
             Console.WriteLine($"Found {classes.Count} class(es) to process.");
