@@ -12,12 +12,12 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | `credentials.password` | Required | Lingos account password in plain text. |
 | `browser` | `Chrome` | `Chrome`, `Firefox`, `Edge`, or `Safari`; case-insensitive. |
 | `browserBinaryPath` | `null` | Absolute path to a non-standard browser executable. |
-| `headless` | `false` | Hides the browser. Unsupported by Safari. |
-| `useLessonApi` | `true` | Send answers through Lingos's own endpoint using the browser session. Set `false` to use UI input/clicks. Missing initial page data automatically uses the UI; failures after submitting an API answer stop without retrying. |
+| `headless` | `false` | `false`: visible browser login, then close the browser and run through HTTP/API. `true`: keep the existing headless browser workflow for the entire run. Unsupported by Safari. With `useLessonApi: false`, both modes keep the browser and use UI input/clicks. |
+| `useLessonApi` | `true` | Send answers through Lingos's own endpoint. Set `false` to force the old UI workflow. In headless/browser mode, missing initial page data uses the UI; HTTP-only mode stops on unrecognized data. Failed API submissions never automatically retry or fall back to UI. |
 | `errorsPer100Words` | `10` | Intentional wrong answers from `0` to `100`. |
 | `lessonCount` | `1` | Default number of lessons for every discovered class. Must be at least `1`. |
 | `classLessonCounts` | `{}` | Lesson-count overrides by stable class key (`group:<GroupId>` or `url:<change URL>`). A value of `0` skips a class. |
-| `defaultWaitTimeoutSeconds` | `15` | Standard Selenium wait timeout. |
+| `defaultWaitTimeoutSeconds` | `15` | Standard Selenium wait and HTTP request timeout. |
 | `shortWaitTimeoutSeconds` | `4` | Short Selenium wait timeout. |
 | `lessonRestartReuseTimeoutMilliseconds` | `1500` | Delay used while reusing the lesson entry page. |
 | `pageLoadTimeoutSeconds` | `60` | Browser page-load timeout. |
@@ -63,7 +63,7 @@ The parent directory is created automatically when a command saves the file. The
 
 ## Diagnostics
 
-Diagnostics are stored in a `diagnostics/` directory next to the executable. A failed run can write page HTML, screenshots, URLs, and exception details. Challenge checks also save dashboard snapshots during normal runs.
+Diagnostics are stored in a `diagnostics/` directory next to the executable. A failed browser run can write page HTML, screenshots, URLs, and exception details. Browser challenge checks also save dashboard snapshots during normal runs. After switching to HTTP-only mode there is no live browser to screenshot, and HTTP pages/cookies are not written to diagnostics.
 
 These files may contain account, class, vocabulary, and page-session data. Do not publish them unchanged. Delete old diagnostics when they are no longer useful.
 

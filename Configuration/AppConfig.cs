@@ -21,6 +21,7 @@ internal sealed class AppConfig
     public string Browser { get; set; } = "Chrome";
     public bool Headless { get; set; }
     public bool UseLessonApi { get; set; } = true;
+    internal bool UseHttpAfterLogin => !Headless && UseLessonApi;
     public int ErrorsPer100Words { get; set; } = 10;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? DefaultWaitTimeoutSeconds { get; set; }

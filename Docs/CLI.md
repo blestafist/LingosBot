@@ -10,8 +10,8 @@ The configuration file is `config.json` in the current working directory by defa
 | --- | --- | --- |
 | `--config <path>` | `-c <path>` | Read and write the selected configuration file instead of `./config.json`. |
 | `--scan_classes` | `-s` | Sign in, print discovered classes, and save them to `classLessonCounts`. No lessons run. |
-| `--headless` | `-h` | Hide the browser window for this run only. Does not change `config.json`. |
-| `--visible` | `-v` | Show the browser window for this run only. Does not change `config.json`. |
+| `--headless` | `-h` | Keep the existing headless browser workflow throughout this run. Does not change `config.json`. |
+| `--visible` | `-v` | Show the browser for login, then close it and use HTTP/API (default). With `useLessonApi: false`, keep the visible UI workflow instead. Does not change `config.json`. |
 | `--browser <name>` | | Use `Chrome`, `Firefox`, `Edge`, or `Safari` for this run only. |
 
 `--headless` and `--visible` cannot be combined. Safari does not support headless mode.

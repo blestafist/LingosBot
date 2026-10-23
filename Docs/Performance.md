@@ -1,8 +1,39 @@
 # Performance checks
 
+## Browser-free work after visible login
+
+With `headless: false` and `useLessonApi: true`, the bot logs in using the visible
+browser, transfers its cookies and user agent to a run-scoped .NET `HttpClient`,
+validates the HTTP dashboard, and closes the browser. Cookies are kept only in
+memory and updated by the HTTP handler; they are not exported to a file. No
+additional `useHttpSession` option is needed. `headless: true` deliberately retains
+the existing browser workflow. `useLessonApi: false` forces UI mode in either case.
+
+HTTP mode reads inert `#app[data-props]` JSON from HTML instead of downloading and
+executing React, ads, analytics, CSS and fonts. It verifies the selected class
+after switching, checks vocabulary completeness, and fetches fresh dashboard
+challenge/limit data before every lesson. Challenge joins are confirmed by ID
+and `in_progress` status before starting. Unknown challenge statuses or failed
+checks stop the run, rather than risking intentional errors during Perfectionism.
+Answers use the same sequential lesson state machine, error policy, safety caps,
+and Word/Call counters as browser API mode. No POST is replayed on error, no
+cross-origin URL/redirect is followed, and HTTP mode never silently falls back
+to browser input after starting. Wordset-transition GET redirects are bounded.
+
+Read-only checks on the current Lingos site verified authenticated non-rendered
+dashboard HTML, wordset list/detail payloads and client endpoint URLs. No lessons
+were started and no answers or challenge/class changes were submitted there.
+Unit tests simulate multi-class/multi-lesson runs, fresh Perfectionism state,
+joins, limits, incomplete vocabulary, redirects, timeouts, and mode selection.
+An additional real Chromium/local HTTP-server smoke test transferred an HttpOnly
+login cookie, closed Chromium, then completed a lesson through `HttpSessionRunner`,
+including challenge join/confirmation, Perfectionism suppression, identical
+prompts, an informational card, and HTTP cookie rotation after browser shutdown.
+Actual speed and memory savings on a Celeron have not been measured.
+
 ## Direct lesson answers
 
-By default (`useLessonApi: true`), after entering a lesson the bot reads its initial
+In browser mode (`headless: true`, `useLessonApi: true`), after entering a lesson the bot reads its initial
 `#app[data-props]` state and sends sequential answers to
 `POST /learning/answer/{lessonId}` from the authenticated browser. It follows the
 server's returned step rather than waiting for input, feedback, and Continue DOM

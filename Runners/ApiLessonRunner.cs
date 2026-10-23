@@ -7,7 +7,8 @@ internal sealed class ApiLessonRunner(
     Func<string, IReadOnlyList<string>> resolveAnswers,
     Func<bool> makeError,
     Func<string, string> wrongAnswer,
-    Action<string>? log = null)
+    Action<string>? log = null,
+    bool refreshDashboardOnCompletion = true)
 {
     public void Run(int lessonNumber, LearningProps initial)
     {
@@ -27,7 +28,7 @@ internal sealed class ApiLessonRunner(
                 WriteLog($"Lesson {lessonNumber} completed through API after {prompts} words and {requests} calls.");
                 // React still displays the initial exercise. Reload the dashboard
                 // so subsequent challenge checks/lessons see fresh server state.
-                client.Navigate(config.StudentDashboardUrl);
+                if (refreshDashboardOnCompletion) client.Navigate(config.StudentDashboardUrl);
                 return;
             }
 

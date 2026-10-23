@@ -89,6 +89,8 @@ For the first run, use a visible browser and confirm that Lingos opens correctly
 
 Later, run the executable without options to use the values saved in `config.json`.
 
+With the default `useLessonApi: true`, `--visible` / `headless: false` shows the browser only for login, then closes it and completes lessons through HTTP/API without rendering pages. `--headless` / `headless: true` keeps the existing browser workflow throughout the run. To keep a visible browser for debugging lessons, set `useLessonApi: false` (UI mode). Visible login still needs a graphical display on Linux.
+
 ## Choose Which Classes To Run
 
 By default, LingosBot processes every class visible in Lingos and runs `lessonCount` lessons in each. You can set the total number of lessons and optional per-class overrides interactively with `--run_config`. The first prompt asks whether to configure classes separately. Answer `no` to set only the global `lessonCount` (and leave any existing `classLessonCounts` overrides unchanged), or answer `yes` to sign in, discover the classes, and enter a count for each one. Leave a class blank to keep its current setting (or use the global fallback for a new class); enter `default`, `fallback`, or `-` to remove an existing override and return that class to `lessonCount`. Only explicit per-class values are saved. Use `0` for a class to skip it. Overrides for classes not returned by discovery are preserved.
