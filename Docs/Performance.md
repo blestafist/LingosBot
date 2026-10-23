@@ -46,12 +46,6 @@ API request, errors/timeouts stop the lesson without retry or UI fallback: the
 server may already have processed the answer. Set `useLessonApi: false` to force
 the old path. Completion reloads the dashboard to refresh challenges and counters.
 
-This optimization was informed by [teaquilish/Lingos](https://github.com/teaquilish/Lingos)
-(reviewed commit `58ad5f5a9c7507007ee7db33fc12468265bdeff6`). That bot uses the same
-endpoint and server page payloads. Our browser flags, bulk DOM reads, JS input,
-and bounded parallel vocabulary fetching were already present. The vocabulary
-fetcher now also recognizes the newer nested `wordset.flashcards` payload.
-
 Unit tests cover API step transitions, rejected alternatives, intentional errors,
 new-word cards, completion, caps, malformed responses, and request failures.
 A real headless Chromium smoke test against a local HTTP lesson simulator also
@@ -81,10 +75,10 @@ dotnet test LingosBot.Tests/LingosBot.Tests.csproj
 Local headless Chromium/Selenium microbenchmarks on the saved `dev_pages` pages
 (50 iterations after 5 warmups):
 
-| Operation | Previous | Optimized |
-| --- | ---: | ---: |
-| Lesson step state read | 30.17 ms | 1.38 ms |
-| Vocabulary readiness check, 84 rows | 424.68 ms | 14.98 ms |
+| Operation                           |  Previous | Optimized |
+| ----------------------------------- | --------: | --------: |
+| Lesson step state read              |  30.17 ms |   1.38 ms |
+| Vocabulary readiness check, 84 rows | 424.68 ms |  14.98 ms |
 
 These measure browser-command overhead, not end-to-end lesson speed or Lingos
 server latency. Actual performance varies by browser and machine.
