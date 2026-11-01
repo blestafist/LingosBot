@@ -99,7 +99,8 @@ internal sealed class LingosBot(
     private void RunApi(AppCredentials credentials)
     {
         var stopwatch = Stopwatch.StartNew();
-        var cookies = new HttpLoginService(_config).Login(credentials);
+        using var login = new HttpLoginService(_config);
+        var cookies = login.Login(credentials);
         using var session = LingosHttpSession.FromCookies(_config, cookies);
         var runner = new HttpSessionRunner(session, _config);
         var dashboard = runner.ReadDashboard();
@@ -113,15 +114,11 @@ internal sealed class LingosBot(
         var credentials = ResolveCredentials();
         if (_config.EffectiveMode == RunMode.Api)
         {
-            var cookies = new HttpLoginService(_config).Login(credentials);
+            using var login = new HttpLoginService(_config);
+            var cookies = login.Login(credentials);
             using var session = LingosHttpSession.FromCookies(_config, cookies);
-            var dashboard = new HttpSessionRunner(session, _config).ReadDashboard();
-            var classes = dashboard.GetProperty("groups").EnumerateArray()
-                .Select(group => new ClassInfo(
-                    TextNormalizer.Normalize(group.GetProperty("name").GetString() ?? ""),
-                    _config.StudentDashboardUrl,
-                    group.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)))
-                .ToList();
+            var runner = new HttpSessionRunner(session, _config);
+            var classes = runner.ReadClasses(runner.ReadDashboard());
             Console.WriteLine($"Found {classes.Count} class(es):");
             foreach (var @class in classes)
             {

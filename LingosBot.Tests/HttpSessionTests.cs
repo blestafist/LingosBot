@@ -147,6 +147,20 @@ public sealed class HttpSessionTests
         Assert.True(site.DashboardReads >= 8);
     }
 
+    [Theory]
+    [InlineData("{\"groups\":[]}")]
+    [InlineData("{\"groups\":[{\"id\":0,\"name\":\"Class\"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":\" \"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":\"A\"},{\"id\":1,\"name\":\"B\"}]}")]
+    public void DiscoveryAndRunShareClassValidation(string json)
+    {
+        using var session = Session(new StubHandler((_, _) => throw new Exception("No request expected")));
+        var runner = new HttpSessionRunner(session, Config);
+        using var document = JsonDocument.Parse(json);
+        Assert.Throws<InvalidOperationException>(() => runner.ReadClasses(document.RootElement));
+        Assert.Throws<InvalidOperationException>(() => runner.Run(document.RootElement));
+    }
+
     [Fact]
     public void DailyLimitSkipsClassBeforeFetchingVocabularyOrStartingLessons()
     {

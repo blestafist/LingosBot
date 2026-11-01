@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace LingosBotApp;
 
-// Current-site backend for visible-login runs. Fail closed on changed payloads instead of
+// Current-site backend for API and browser-login HTTP runs. Fail closed on changed payloads instead of
 // silently skipping classes, challenges or vocabulary, or replaying a lesson.
 internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig config)
 {
@@ -18,14 +18,20 @@ internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig con
         return dashboard;
     }
 
-    public int Run(JsonElement initialDashboard)
+    internal IReadOnlyList<ClassInfo> ReadClasses(JsonElement dashboard)
     {
-        var classes = initialDashboard.GetProperty("groups").EnumerateArray().Select(group => new ClassInfo(
+        var classes = dashboard.GetProperty("groups").EnumerateArray().Select(group => new ClassInfo(
             TextNormalizer.Normalize(group.GetProperty("name").GetString() ?? ""),
             config.StudentDashboardUrl, group.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)))
             .ToList();
         if (classes.Count == 0 || classes.Any(c => string.IsNullOrWhiteSpace(c.Title) || !long.TryParse(c.GroupId, out var id) || id <= 0) ||
-            classes.Select(c => c.GroupId).Distinct().Count() != classes.Count) throw InvalidData();
+             classes.Select(c => c.GroupId).Distinct().Count() != classes.Count) throw InvalidData();
+        return classes;
+    }
+
+    public int Run(JsonElement initialDashboard)
+    {
+        var classes = ReadClasses(initialDashboard);
         Console.WriteLine($"Found {classes.Count} class(es) to process through HTTP.");
         var completed = 0;
         for (var index = 0; index < classes.Count; index++)
@@ -158,5 +164,5 @@ internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig con
     }
 
     private static string GroupId(JsonElement data) => data.GetProperty("currentGroup").GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture);
-    private static InvalidOperationException InvalidData() => new("Unrecognized or mismatched Lingos HTTP data. Stopped safely; headless=true restores browser mode.");
+    private static InvalidOperationException InvalidData() => new("Unrecognized or mismatched Lingos HTTP data. Stopped safely; use mode=browser and headless=true for the browser workflow.");
 }
