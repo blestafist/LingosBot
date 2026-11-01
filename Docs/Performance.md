@@ -1,13 +1,17 @@
 # Performance checks
 
-## Browser-free work after visible login
+## Browser-free API and browser-login handoff
 
-With `headless: false` and `useLessonApi: true`, the bot logs in using the visible
+The default `mode: "api"` logs in directly over HTTP using the login form's CSRF
+token and an in-memory cookie jar. It does not create a browser. Browser settings,
+including `headless` and `useLessonApi`, are ignored in this mode.
+
+With `mode: "browser"`, `headless: false` and `useLessonApi: true`, the bot logs in using the visible
 browser, transfers its cookies and user agent to a run-scoped .NET `HttpClient`,
 validates the HTTP dashboard, and closes the browser. Cookies are kept only in
 memory and updated by the HTTP handler; they are not exported to a file. No
-additional `useHttpSession` option is needed. `headless: true` deliberately retains
-the existing browser workflow. `useLessonApi: false` forces UI mode in either case.
+additional `useHttpSession` option is needed. In browser mode, `headless: true` retains
+the existing browser workflow. `useLessonApi: false` forces UI only in browser mode.
 
 HTTP mode reads inert `#app[data-props]` JSON from HTML instead of downloading and
 executing React, ads, analytics, CSS and fonts. It verifies the selected class
@@ -33,7 +37,7 @@ Actual speed and memory savings on a Celeron have not been measured.
 
 ## Direct lesson answers
 
-In browser mode (`headless: true`, `useLessonApi: true`), after entering a lesson the bot reads its initial
+In browser mode (`mode: "browser"`, `headless: true`, `useLessonApi: true`), after entering a lesson the bot reads its initial
 `#app[data-props]` state and sends sequential answers to
 `POST /learning/answer/{lessonId}` from the authenticated browser. It follows the
 server's returned step rather than waiting for input, feedback, and Continue DOM

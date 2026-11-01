@@ -21,13 +21,9 @@ Selenium Manager locates or downloads a compatible browser driver. Do not downlo
 
 LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
 
-LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
+## 2. Choose A Mode
 
-LingosBot reads `config.json` from the **current working directory**, not automatically from the executable directory. The commands below assume your terminal is open in the extracted directory. Use `--config <path>` to keep the file elsewhere.
-
-## 2. Install A Browser
-
-Install one supported browser if it is not already installed:
+The default `mode: "api"` needs no browser or driver. Skip browser installation unless you explicitly choose `mode: "browser"`. For browser mode, install one supported browser:
 
 - Chrome
 - Firefox
@@ -55,9 +51,10 @@ Start the program once with interactive setup.
 The prompt asks for:
 
 - Lingos email and password
-- browser name
-- whether to hide the browser window
+- mode (`api` by default, or `browser`)
+- browser name and whether to hide its window (only for browser mode)
 - number of deliberate mistakes per 100 answers
+- lesson count per class
 
 It creates or updates `config.json` in the current directory. Your password is stored there as plain text. Do not send or commit this file.
 
@@ -73,23 +70,23 @@ If the file does not exist, a normal run also creates a blank template, but then
 
 ## 4. Run The Bot
 
-For the first run, use a visible browser and confirm that Lingos opens correctly.
+Run with the saved configuration. By default, login and lessons use HTTP/API without opening a browser.
 
 **Windows PowerShell**
 
 ```powershell
-.\LingosBot.exe --visible
+.\LingosBot.exe
 ```
 
 **macOS or Linux**
 
 ```bash
-./LingosBot --visible
+./LingosBot
 ```
 
 Later, run the executable without options to use the values saved in `config.json`.
 
-With the default `useLessonApi: true`, `--visible` / `headless: false` shows the browser only for login, then closes it and completes lessons through HTTP/API without rendering pages. `--headless` / `headless: true` keeps the existing browser workflow throughout the run. To keep a visible browser for debugging lessons, set `useLessonApi: false` (UI mode). Visible login still needs a graphical display on Linux.
+For an optional visible browser login, use `./LingosBot --mode browser --visible`. For the existing headless browser workflow, use `./LingosBot --mode browser --headless`. In browser mode, `useLessonApi: false` forces the UI workflow; otherwise the visible browser closes after login and hands off to HTTP, while headless keeps the browser. All these browser settings are ignored in API mode. Visible login still needs a graphical display on Linux.
 
 ## Choose Which Classes To Run
 
@@ -123,8 +120,7 @@ Stable keys identify a class independently of its display title. Classes not lis
     "email": "you@example.com",
     "password": "replace-with-your-password"
   },
-  "browser": "Chrome",
-  "headless": false,
+  "mode": "api",
   "errorsPer100Words": 10,
   "lessonCount": 1,
   "classLessonCounts": {}
