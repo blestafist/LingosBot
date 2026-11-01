@@ -46,6 +46,16 @@ internal sealed class LingosHttpSession : ILessonApiClient, IDisposable
         }, userAgent);
     }
 
+    // Session created without any browser, from cookies obtained by HttpLoginService.
+    public static LingosHttpSession FromCookies(AppConfig config, CookieContainer cookies)
+    {
+        return new LingosHttpSession(config, new HttpClientHandler
+        {
+            CookieContainer = cookies, AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.All
+        }, "Mozilla/5.0 (X11; Linux x86_64) LingosBot/1.0");
+    }
+
     internal Uri SameOrigin(string url)
     {
         var target = new Uri(_origin, url);

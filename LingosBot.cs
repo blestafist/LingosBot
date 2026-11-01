@@ -14,6 +14,13 @@ internal sealed class LingosBot(
     public void Run(int lessonCount)
     {
         var credentials = ResolveCredentials();
+
+        if (_config.EffectiveMode == RunMode.Api)
+        {
+            RunApi(credentials);
+            return;
+        }
+
         var completedLessons = 0;
 
         IWebDriver? driver = null;
@@ -86,6 +93,19 @@ internal sealed class LingosBot(
                 CloseDriver(driver);
             }
         }
+    }
+
+    // Browser-free path: login and every lesson step run over HTTP only.
+    private void RunApi(AppCredentials credentials)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var cookies = new HttpLoginService(_config).Login(credentials);
+        using var session = LingosHttpSession.FromCookies(_config, cookies);
+        var runner = new HttpSessionRunner(session, _config);
+        var dashboard = runner.ReadDashboard();
+        Console.WriteLine("Running in API mode (no browser).");
+        runner.Run(dashboard);
+        Console.WriteLine($"Total run time: {stopwatch.Elapsed:mm\\:ss}.");
     }
 
     public IReadOnlyList<ClassInfo> ScanClasses()
