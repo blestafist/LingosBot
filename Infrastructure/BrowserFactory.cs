@@ -39,7 +39,7 @@ internal sealed class BrowserFactory
 
         var options = new ChromeOptions();
 
-        if (config.Headless)
+        if (config.EffectiveMode == RunMode.BrowserHeadless)
         {
             options.AddArgument("--headless=new");
         }
@@ -78,7 +78,7 @@ internal sealed class BrowserFactory
 
         var options = new FirefoxOptions();
 
-        if (config.Headless)
+        if (config.EffectiveMode == RunMode.BrowserHeadless)
         {
             options.AddArgument("-headless");
         }
@@ -102,7 +102,7 @@ internal sealed class BrowserFactory
     {
         var options = new EdgeOptions();
 
-        if (config.Headless)
+        if (config.EffectiveMode == RunMode.BrowserHeadless)
         {
             options.AddArgument("--headless=new");
         }
@@ -123,7 +123,7 @@ internal sealed class BrowserFactory
 
     private static IWebDriver CreateSafari(AppConfig config)
     {
-        if (config.Headless)
+        if (config.EffectiveMode == RunMode.BrowserHeadless)
         {
             throw new InvalidOperationException("Safari does not support headless mode through Selenium.");
         }

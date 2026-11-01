@@ -20,8 +20,17 @@ internal sealed class AppConfig
     public string? BrowserBinaryPath { get; set; }
     public string Browser { get; set; } = "Chrome";
     public bool Headless { get; set; }
+    // Optional run mode: "browser-headless" (headless browser, as before),
+    // "browser" (visible browser login, then HTTP) or "api" (no browser at all).
+    // When unset, the legacy `headless` flag decides between the browser modes.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; set; }
     public bool UseLessonApi { get; set; } = true;
-    internal bool UseHttpAfterLogin => !Headless && UseLessonApi;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RunMode EffectiveMode => RunModes.Parse(Mode) ?? (Headless ? RunMode.BrowserHeadless : RunMode.Browser);
+
+    internal bool UseHttpAfterLogin => EffectiveMode == RunMode.Browser && UseLessonApi;
     public int ErrorsPer100Words { get; set; } = 10;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? DefaultWaitTimeoutSeconds { get; set; }
@@ -148,6 +157,37 @@ internal sealed class AppConfig
 }
 
 internal sealed record AppCredentials(string Email, string Password);
+
+internal enum RunMode
+{
+    BrowserHeadless,
+    Browser,
+    Api
+}
+
+internal static class RunModes
+{
+    public const string BrowserHeadless = "browser-headless";
+    public const string Browser = "browser";
+    public const string Api = "api";
+
+    public static RunMode? Parse(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => null,
+        BrowserHeadless => RunMode.BrowserHeadless,
+        Browser => RunMode.Browser,
+        Api => RunMode.Api,
+        _ => throw new InvalidOperationException("mode must be one of: browser-headless, browser, api.")
+    };
+
+    public static string ToConfigValue(RunMode mode) => mode switch
+    {
+        RunMode.BrowserHeadless => BrowserHeadless,
+        RunMode.Browser => Browser,
+        RunMode.Api => Api,
+        _ => throw new ArgumentOutOfRangeException(nameof(mode))
+    };
+}
 
 internal static class TextNormalizer
 {
