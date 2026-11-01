@@ -111,6 +111,26 @@ internal sealed class LingosBot(
     public IReadOnlyList<ClassInfo> ScanClasses()
     {
         var credentials = ResolveCredentials();
+        if (_config.EffectiveMode == RunMode.Api)
+        {
+            var cookies = new HttpLoginService(_config).Login(credentials);
+            using var session = LingosHttpSession.FromCookies(_config, cookies);
+            var dashboard = new HttpSessionRunner(session, _config).ReadDashboard();
+            var classes = dashboard.GetProperty("groups").EnumerateArray()
+                .Select(group => new ClassInfo(
+                    TextNormalizer.Normalize(group.GetProperty("name").GetString() ?? ""),
+                    _config.StudentDashboardUrl,
+                    group.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                .ToList();
+            Console.WriteLine($"Found {classes.Count} class(es):");
+            foreach (var @class in classes)
+            {
+                Console.WriteLine($"- {@class.Title}");
+            }
+
+            return classes;
+        }
+
         IWebDriver? driver = null;
 
         try
