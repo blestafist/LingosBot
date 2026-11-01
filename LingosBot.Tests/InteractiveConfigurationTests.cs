@@ -10,7 +10,7 @@ public sealed class InteractiveConfigurationTests
         var config = CreateConfig();
         config.ClassLessonCounts["Existing class"] = 2;
         var discoveryCalls = 0;
-        var input = new StringReader("no\n\n\n\n\n\n\n4\n");
+        var input = new StringReader("no\n\n\n\n\n\n\n\n4\n");
 
         InteractiveConfiguration.Configure(
             config,
@@ -31,7 +31,7 @@ public sealed class InteractiveConfigurationTests
     public void SeparateConfigurationDiscoversClassesAndSavesEachCount()
     {
         var config = CreateConfig();
-        var input = new StringReader("yes\n\n\n\n\n\n\n3\n2\n0\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n3\n2\n0\n");
         var classes = new[]
         {
             new ClassInfo("First class", "/first", "101"),
@@ -49,7 +49,7 @@ public sealed class InteractiveConfigurationTests
     public void SeparateConfigurationDoesNotMaterializeGlobalFallbackAsClassOverrides()
     {
         var config = CreateConfig();
-        var input = new StringReader("yes\n\n\n\n\n\n\n3\n\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n3\n\n\n");
         var classes = new[]
         {
             new ClassInfo("First class", "/first", "101"),
@@ -66,7 +66,7 @@ public sealed class InteractiveConfigurationTests
     public void SeparateConfigurationSavesOnlyExplicitOverrideAndUsesFallbackForBlankClass()
     {
         var config = CreateConfig();
-        var input = new StringReader("yes\n\n\n\n\n\n\n3\n5\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n3\n5\n\n");
         var classes = new[]
         {
             new ClassInfo("First class", "/first", "101"),
@@ -89,7 +89,7 @@ public sealed class InteractiveConfigurationTests
             ["group:999"] = 8,
             ["Unseen old class"] = 6
         };
-        var input = new StringReader("yes\n\n\n\n\n\n\n3\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n3\n\n");
         var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
 
         InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
@@ -104,7 +104,7 @@ public sealed class InteractiveConfigurationTests
     {
         var config = CreateConfig();
         config.ClassLessonCounts = new Dictionary<string, int> { ["Visible class"] = 6 };
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n");
         var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
 
         InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
@@ -119,7 +119,7 @@ public sealed class InteractiveConfigurationTests
         var config = CreateConfig();
         config.LessonCount = 3;
         config.ClassLessonCounts = new Dictionary<string, int> { ["group:101"] = 7 };
-        var input = new StringReader("yes\nstudent@example.com\npassword\nfalse\nChrome\n10\n\n3\ndefault\n");
+        var input = new StringReader("yes\nstudent@example.com\npassword\n\nfalse\nChrome\n10\n\n3\ndefault\n");
         var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
 
         InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
@@ -133,7 +133,7 @@ public sealed class InteractiveConfigurationTests
     {
         var config = CreateConfig();
         var output = new StringWriter();
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n");
         var classes = new[] { new ClassInfo("Visible class", "/visible", "101") };
 
         InteractiveConfiguration.Configure(config, input, output, () => classes);
@@ -148,7 +148,7 @@ public sealed class InteractiveConfigurationTests
         var config = CreateConfig();
         config.LessonCount = 3;
         config.ClassLessonCounts = new Dictionary<string, int> { ["group:101"] = 5 };
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n\n");
         var classes = new[]
         {
             new ClassInfo("First class", "/first", "101"),
@@ -182,7 +182,7 @@ public sealed class InteractiveConfigurationTests
     {
         var config = CreateConfig();
         config.ClassLessonCounts = new Dictionary<string, int> { ["FIRST CLASS"] = 5 };
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n\n\n");
         var classes = new[] { new ClassInfo("First class", "/first", "101") };
 
         InteractiveConfiguration.Configure(config, input, TextWriter.Null, () => classes);
@@ -196,7 +196,7 @@ public sealed class InteractiveConfigurationTests
     {
         var config = CreateConfig();
         var output = new StringWriter();
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n4\n1\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n4\n1\n");
         var classes = new[]
         {
             new ClassInfo("German", "/first", "101"),
@@ -216,7 +216,7 @@ public sealed class InteractiveConfigurationTests
     public void SeparateConfigurationDistinguishesDuplicateTitlesByChangeUrlWhenGroupIdIsMissing()
     {
         var config = CreateConfig();
-        var input = new StringReader("yes\n\n\n\n\n\n\n\n2\n6\n");
+        var input = new StringReader("yes\n\n\n\n\n\n\n\n\n2\n6\n");
         var classes = new[]
         {
             new ClassInfo("German", "https://lingos.example/first"),

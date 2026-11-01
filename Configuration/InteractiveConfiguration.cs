@@ -22,6 +22,14 @@ internal static class InteractiveConfiguration
         var password = ReadSetting("Password", credentials.Password, input, output, secret: true);
         config.Credentials = new AppCredentials(email, password);
 
+        var currentMode = RunModes.ToConfigValue(config.EffectiveMode);
+        var mode = ReadSetting("Mode (browser-headless/browser/api)", currentMode, input, output);
+        if (!string.Equals(mode, currentMode, StringComparison.OrdinalIgnoreCase))
+        {
+            config.Mode = RunModes.ToConfigValue(
+                RunModes.Parse(mode) ?? throw new ArgumentException("Mode must be browser-headless, browser or api."));
+        }
+
         var headless = ReadSetting("Headless (true/false)", config.Headless.ToString().ToLowerInvariant(), input, output);
         if (!string.Equals(headless, config.Headless.ToString(), StringComparison.OrdinalIgnoreCase))
         {

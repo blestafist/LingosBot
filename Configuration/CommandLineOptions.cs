@@ -13,9 +13,11 @@ internal sealed record CommandLineOptions
     public string? SetBrowser { get; private init; }
     public int? ErrorsPer100Words { get; private init; }
     public string? BrowserBinaryPath { get; private init; }
+    public string? RunMode { get; private init; }
+    public string? SetMode { get; private init; }
 
     public bool HasConfigurationChanges => Email is not null || Password is not null || SetHeadless.HasValue ||
-        SetBrowser is not null || ErrorsPer100Words.HasValue || BrowserBinaryPath is not null;
+        SetBrowser is not null || ErrorsPer100Words.HasValue || BrowserBinaryPath is not null || SetMode is not null;
 
     public static CommandLineOptions Parse(string[] args)
     {
@@ -43,6 +45,8 @@ internal sealed record CommandLineOptions
                 "--set_headless" => options with { SetHeadless = ParseBoolean(argument, ReadValue()) },
                 "--headless" or "-h" => options with { RunHeadless = true },
                 "--visible" or "-v" => options with { RunHeadless = false },
+                "--mode" => options with { RunMode = ParseMode(argument, ReadValue()) },
+                "--set_mode" => options with { SetMode = ParseMode(argument, ReadValue()) },
                 "--browser" => options with { Browser = ReadValue() },
                 "--set_browser" => options with { SetBrowser = ReadValue() },
                 "--set_errors" => options with { ErrorsPer100Words = ParseNonNegativeInteger(argument, ReadValue()) },
@@ -59,6 +63,14 @@ internal sealed record CommandLineOptions
         }
 
         return options;
+    }
+
+    private static string ParseMode(string argument, string value)
+    {
+        // Validates and normalizes the value; throws for unknown modes.
+        var mode = RunModes.Parse(value)
+            ?? throw new ArgumentException($"{argument} must be one of: browser-headless, browser, api.");
+        return RunModes.ToConfigValue(mode);
     }
 
     private static bool ParseBoolean(string argument, string value) => value.ToLowerInvariant() switch

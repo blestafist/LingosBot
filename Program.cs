@@ -31,9 +31,15 @@ internal static class Program
                 return 0;
             }
 
-            if (options.RunHeadless.HasValue)
+            if (options.RunMode is not null)
             {
+                config.Mode = options.RunMode;
+            }
+            else if (options.RunHeadless.HasValue)
+            {
+                // Legacy flag: an explicit headless/visible choice overrides a stored mode.
                 config.Headless = options.RunHeadless.Value;
+                config.Mode = null;
             }
 
             if (options.Browser is not null)
@@ -78,9 +84,14 @@ internal static class Program
             };
         }
 
-        if (options.SetHeadless.HasValue)
+        if (options.SetMode is not null)
+        {
+            config.Mode = options.SetMode;
+        }
+        else if (options.SetHeadless.HasValue)
         {
             config.Headless = options.SetHeadless.Value;
+            config.Mode = null;
         }
 
         if (options.SetBrowser is not null)
