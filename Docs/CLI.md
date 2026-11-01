@@ -60,7 +60,7 @@ Shell command history and process lists can expose values passed to `--set_passw
 - `--mode` independently selects the workflow. Headless/visible flags never change it. `--set_mode` and `--set_headless` can be saved together.
 - Missing, null or blank `mode` means `api`. Migrate `browser-headless` to `mode: "browser"` plus `headless: true`; the old mode name is rejected with a migration hint.
 - A configuration-writing option such as `--set_browser` saves and exits before any run-only override is applied.
-- `--scan_classes` signs in using the selected mode and saves the effective configuration, including any run overrides, together with `classLessonCounts`, then exits.
+- `--scan_classes` signs in using the selected mode and saves `classLessonCounts`, then exits. Run-only mode, headless and browser overrides are not saved.
 - Unknown options and missing option values exit with an error.
 
 See [Basic.md](Basic.md) for the normal local workflow and [Advanced.md](Advanced.md) for the JSON configuration reference.

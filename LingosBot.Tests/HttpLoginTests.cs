@@ -25,8 +25,10 @@ public sealed class HttpLoginTests
         Assert.Equal(expected, HttpLoginService.ExtractCsrfToken(html));
     }
 
-    [Fact]
-    public void LoginPostsFormAndVerifiesAuthenticatedDashboard()
+    [Theory]
+    [InlineData("text/html")]
+    [InlineData("Text/HTML")]
+    public void LoginPostsFormAndVerifiesAuthenticatedDashboard(string contentType)
     {
         var handler = new StubHandler(async (request, count) =>
         {
@@ -34,7 +36,9 @@ public sealed class HttpLoginTests
             {
                 Assert.Equal(HttpMethod.Get, request.Method);
                 Assert.Equal("/h/login", request.RequestUri!.AbsolutePath);
-                return Html(Form);
+                var response = Html(Form);
+                response.Content.Headers.ContentType = new(contentType);
+                return response;
             }
             if (count == 2)
             {

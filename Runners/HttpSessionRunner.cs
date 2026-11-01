@@ -20,12 +20,20 @@ internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig con
 
     internal IReadOnlyList<ClassInfo> ReadClasses(JsonElement dashboard)
     {
-        var classes = dashboard.GetProperty("groups").EnumerateArray().Select(group => new ClassInfo(
-            TextNormalizer.Normalize(group.GetProperty("name").GetString() ?? ""),
-            config.StudentDashboardUrl, group.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)))
-            .ToList();
-        if (classes.Count == 0 || classes.Any(c => string.IsNullOrWhiteSpace(c.Title) || !long.TryParse(c.GroupId, out var id) || id <= 0) ||
-             classes.Select(c => c.GroupId).Distinct().Count() != classes.Count) throw InvalidData();
+        if (dashboard.ValueKind != JsonValueKind.Object || !dashboard.TryGetProperty("groups", out var groups) ||
+            groups.ValueKind != JsonValueKind.Array) throw InvalidData();
+        var classes = new List<ClassInfo>();
+        var ids = new HashSet<long>();
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (group.ValueKind != JsonValueKind.Object || !group.TryGetProperty("id", out var idValue) ||
+                idValue.ValueKind != JsonValueKind.Number || !idValue.TryGetInt64(out var id) || id <= 0 || !ids.Add(id) ||
+                !group.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(name.GetString())) throw InvalidData();
+            classes.Add(new ClassInfo(TextNormalizer.Normalize(name.GetString()!), config.StudentDashboardUrl,
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        if (classes.Count == 0) throw InvalidData();
         return classes;
     }
 

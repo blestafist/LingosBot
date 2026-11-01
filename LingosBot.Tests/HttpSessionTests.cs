@@ -149,6 +149,12 @@ public sealed class HttpSessionTests
 
     [Theory]
     [InlineData("{\"groups\":[]}")]
+    [InlineData("{}")]
+    [InlineData("{\"groups\":null}")]
+    [InlineData("{\"groups\":[{}]}")]
+    [InlineData("{\"groups\":[{\"id\":\"1\",\"name\":\"A\"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":null}]}")]
+    [InlineData("{\"groups\":[{\"id\":1.5,\"name\":\"A\"}]}")]
     [InlineData("{\"groups\":[{\"id\":0,\"name\":\"Class\"}]}")]
     [InlineData("{\"groups\":[{\"id\":1,\"name\":\" \"}]}")]
     [InlineData("{\"groups\":[{\"id\":1,\"name\":\"A\"},{\"id\":1,\"name\":\"B\"}]}")]

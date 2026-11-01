@@ -112,7 +112,7 @@ internal sealed class HttpLoginService : IDisposable
         }
 
         response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentType?.MediaType != "text/html")
+        if (!string.Equals(response.Content.Headers.ContentType?.MediaType, "text/html", StringComparison.OrdinalIgnoreCase))
             throw new LoginFailedException("Unexpected login response content type.");
         return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
     }
