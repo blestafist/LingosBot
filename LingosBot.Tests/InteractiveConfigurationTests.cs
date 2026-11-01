@@ -285,6 +285,7 @@ public sealed class InteractiveConfigurationTests
 
     private static AppConfig CreateConfig() => new()
     {
+        Mode = "browser",
         Credentials = new AppCredentials("student@example.com", "password")
     };
 }

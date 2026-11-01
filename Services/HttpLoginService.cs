@@ -26,8 +26,8 @@ internal sealed class HttpLoginService
             AllowAutoRedirect = false,
             AutomaticDecompression = System.Net.DecompressionMethods.All,
         };
-        _http = new HttpClient(handler) { Timeout = config.DefaultWaitTimeout };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (X11; Linux x86_64) LingosBot/1.0");
+        _http = new HttpClient(handler) { Timeout = LingosHttpSession.RequestTimeout };
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd(LingosHttpSession.UserAgent);
     }
 
     // Returns the cookie container to use for the in-memory HTTP session.

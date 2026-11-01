@@ -20,17 +20,15 @@ internal sealed class AppConfig
     public string? BrowserBinaryPath { get; set; }
     public string Browser { get; set; } = "Chrome";
     public bool Headless { get; set; }
-    // Optional run mode: "browser-headless" (headless browser, as before),
-    // "browser" (visible browser login, then HTTP) or "api" (no browser at all).
-    // When unset, the legacy `headless` flag decides between the browser modes.
+    // Only browser mode uses Headless and the other browser settings.
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    public string? Mode { get; set; }
+    public string? Mode { get; set; } = RunModes.Api;
     public bool UseLessonApi { get; set; } = true;
 
     [System.Text.Json.Serialization.JsonIgnore]
-    public RunMode EffectiveMode => RunModes.Parse(Mode) ?? (Headless ? RunMode.BrowserHeadless : RunMode.Browser);
+    public RunMode EffectiveMode => RunModes.Parse(Mode) ?? RunMode.Api;
 
-    internal bool UseHttpAfterLogin => EffectiveMode == RunMode.Browser && UseLessonApi;
+    internal bool UseHttpAfterLogin => EffectiveMode == RunMode.Browser && !Headless && UseLessonApi;
     public int ErrorsPer100Words { get; set; } = 10;
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? DefaultWaitTimeoutSeconds { get; set; }
@@ -123,7 +121,8 @@ internal sealed class AppConfig
             throw new InvalidOperationException("baseUrl and studentDashboardUrl must not be empty.");
         }
 
-        if (string.IsNullOrWhiteSpace(Browser))
+        var browserMode = EffectiveMode == RunMode.Browser;
+        if (browserMode && string.IsNullOrWhiteSpace(Browser))
         {
             throw new InvalidOperationException("browser must not be empty.");
         }
@@ -133,7 +132,7 @@ internal sealed class AppConfig
             throw new InvalidOperationException("credentials.email and credentials.password must be set in config.json.");
         }
 
-        if (Browser.Trim().ToLowerInvariant() is not ("chrome" or "firefox" or "edge" or "safari"))
+        if (browserMode && Browser.Trim().ToLowerInvariant() is not ("chrome" or "firefox" or "edge" or "safari"))
         {
             throw new InvalidOperationException("browser must be one of: Chrome, Firefox, Edge, Safari.");
         }
@@ -143,9 +142,14 @@ internal sealed class AppConfig
             throw new InvalidOperationException("classLessonCounts keys must not be empty and values must be zero or positive.");
         }
 
-        if (ErrorsPer100Words is < 0 or > 100 || DefaultWaitTimeoutSeconds is <= 0 || ShortWaitTimeoutSeconds is <= 0 ||
+        if (browserMode && (DefaultWaitTimeoutSeconds is <= 0 || ShortWaitTimeoutSeconds is <= 0 ||
             LessonRestartReuseTimeoutMilliseconds is <= 0 || PageLoadTimeoutSeconds is <= 0 ||
-            PollingIntervalMilliseconds is <= 0 || LessonCount < 1 || LessonPromptSafetyCap is <= 0 ||
+            PollingIntervalMilliseconds is <= 0))
+        {
+            throw new InvalidOperationException("Browser timeout and polling values must be positive.");
+        }
+
+        if (ErrorsPer100Words is < 0 or > 100 || LessonCount < 1 || LessonPromptSafetyCap is <= 0 ||
             ChallengeLessonSafetyCap is <= 0)
         {
             throw new InvalidOperationException("Numeric configuration values must be positive; errorsPer100Words must be between 0 and 100.");
@@ -160,29 +164,25 @@ internal sealed record AppCredentials(string Email, string Password);
 
 internal enum RunMode
 {
-    BrowserHeadless,
     Browser,
     Api
 }
 
 internal static class RunModes
 {
-    public const string BrowserHeadless = "browser-headless";
     public const string Browser = "browser";
     public const string Api = "api";
 
     public static RunMode? Parse(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" => null,
-        BrowserHeadless => RunMode.BrowserHeadless,
         Browser => RunMode.Browser,
         Api => RunMode.Api,
-        _ => throw new InvalidOperationException("mode must be one of: browser-headless, browser, api.")
+        _ => throw new InvalidOperationException("mode must be one of: browser, api. For a headless browser, use mode=browser and headless=true.")
     };
 
     public static string ToConfigValue(RunMode mode) => mode switch
     {
-        RunMode.BrowserHeadless => BrowserHeadless,
         RunMode.Browser => Browser,
         RunMode.Api => Api,
         _ => throw new ArgumentOutOfRangeException(nameof(mode))

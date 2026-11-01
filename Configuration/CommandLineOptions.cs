@@ -69,7 +69,7 @@ internal sealed record CommandLineOptions
     {
         // Validates and normalizes the value; throws for unknown modes.
         var mode = RunModes.Parse(value)
-            ?? throw new ArgumentException($"{argument} must be one of: browser-headless, browser, api.");
+            ?? throw new ArgumentException($"{argument} must be one of: browser, api.");
         return RunModes.ToConfigValue(mode);
     }
 

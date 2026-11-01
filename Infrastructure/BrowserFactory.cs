@@ -12,6 +12,11 @@ internal sealed class BrowserFactory
 
     public IWebDriver Create(AppConfig config)
     {
+        if (config.EffectiveMode != RunMode.Browser)
+        {
+            throw new InvalidOperationException("Browser creation is disabled in API mode.");
+        }
+
         IWebDriver driver = config.Browser.Trim().ToLowerInvariant() switch
         {
             "firefox" => CreateFirefox(config),
@@ -39,7 +44,7 @@ internal sealed class BrowserFactory
 
         var options = new ChromeOptions();
 
-        if (config.EffectiveMode == RunMode.BrowserHeadless)
+        if (config.Headless)
         {
             options.AddArgument("--headless=new");
         }
@@ -78,7 +83,7 @@ internal sealed class BrowserFactory
 
         var options = new FirefoxOptions();
 
-        if (config.EffectiveMode == RunMode.BrowserHeadless)
+        if (config.Headless)
         {
             options.AddArgument("-headless");
         }
@@ -102,7 +107,7 @@ internal sealed class BrowserFactory
     {
         var options = new EdgeOptions();
 
-        if (config.EffectiveMode == RunMode.BrowserHeadless)
+        if (config.Headless)
         {
             options.AddArgument("--headless=new");
         }
@@ -123,7 +128,7 @@ internal sealed class BrowserFactory
 
     private static IWebDriver CreateSafari(AppConfig config)
     {
-        if (config.EffectiveMode == RunMode.BrowserHeadless)
+        if (config.Headless)
         {
             throw new InvalidOperationException("Safari does not support headless mode through Selenium.");
         }

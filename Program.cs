@@ -9,7 +9,7 @@ internal static class Program
         try
         {
             var options = CommandLineOptions.Parse(args);
-            var config = AppConfig.Load(options.ConfigFilePath, validate: !options.HasConfigurationChanges && !options.RunConfiguration);
+            var config = AppConfig.Load(options.ConfigFilePath, validate: false);
 
             if (options.RunConfiguration)
             {
@@ -31,22 +31,7 @@ internal static class Program
                 return 0;
             }
 
-            if (options.RunMode is not null)
-            {
-                config.Mode = options.RunMode;
-            }
-            else if (options.RunHeadless.HasValue)
-            {
-                // Legacy flag: an explicit headless/visible choice overrides a stored mode.
-                config.Headless = options.RunHeadless.Value;
-                config.Mode = null;
-            }
-
-            if (options.Browser is not null)
-            {
-                config.Browser = options.Browser;
-            }
-
+            ApplyRunOverrides(config, options);
             config.Validate();
             var bot = new LingosBot(config, new BrowserFactory());
 
@@ -72,7 +57,14 @@ internal static class Program
         }
     }
 
-    private static void ApplyConfigurationChanges(AppConfig config, CommandLineOptions options)
+    internal static void ApplyRunOverrides(AppConfig config, CommandLineOptions options)
+    {
+        if (options.RunMode is not null) config.Mode = options.RunMode;
+        if (options.RunHeadless.HasValue) config.Headless = options.RunHeadless.Value;
+        if (options.Browser is not null) config.Browser = options.Browser;
+    }
+
+    internal static void ApplyConfigurationChanges(AppConfig config, CommandLineOptions options)
     {
         if (options.Email is not null || options.Password is not null)
         {
@@ -88,10 +80,9 @@ internal static class Program
         {
             config.Mode = options.SetMode;
         }
-        else if (options.SetHeadless.HasValue)
+        if (options.SetHeadless.HasValue)
         {
             config.Headless = options.SetHeadless.Value;
-            config.Mode = null;
         }
 
         if (options.SetBrowser is not null)

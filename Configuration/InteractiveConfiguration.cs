@@ -8,8 +8,7 @@ internal static class InteractiveConfiguration
         TextWriter output,
         Func<IReadOnlyList<ClassInfo>> discoverClasses)
     {
-        // Ask this before any other setting. Class discovery starts a browser and
-        // logs in, so it must happen only after the user explicitly opts in.
+        // Class discovery logs in, so require explicit opt-in.
         var configureClassesSeparately = ReadBoolean(
             "Configure each class separately (yes/no)",
             defaultValue: false,
@@ -23,27 +22,33 @@ internal static class InteractiveConfiguration
         config.Credentials = new AppCredentials(email, password);
 
         var currentMode = RunModes.ToConfigValue(config.EffectiveMode);
-        var mode = ReadSetting("Mode (browser-headless/browser/api)", currentMode, input, output);
+        var mode = ReadSetting("Mode (api/browser)", currentMode, input, output);
         if (!string.Equals(mode, currentMode, StringComparison.OrdinalIgnoreCase))
         {
             config.Mode = RunModes.ToConfigValue(
-                RunModes.Parse(mode) ?? throw new ArgumentException("Mode must be browser-headless, browser or api."));
+                RunModes.Parse(mode) ?? throw new ArgumentException("Mode must be api or browser."));
         }
 
-        var headless = ReadSetting("Headless (true/false)", config.Headless.ToString().ToLowerInvariant(), input, output);
-        if (!string.Equals(headless, config.Headless.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (config.EffectiveMode == RunMode.Browser)
         {
-            config.Headless = bool.TryParse(headless, out var value)
-                ? value
-                : throw new ArgumentException("Headless must be true or false.");
-        }
+            var headless = ReadSetting("Headless (true/false)", config.Headless.ToString().ToLowerInvariant(), input, output);
+            if (!string.Equals(headless, config.Headless.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                config.Headless = bool.TryParse(headless, out var value)
+                    ? value
+                    : throw new ArgumentException("Headless must be true or false.");
+            }
 
-        config.Browser = ReadSetting("Browser", config.Browser, input, output);
+            config.Browser = ReadSetting("Browser", config.Browser, input, output);
+        }
         var errors = ReadSetting("Errors per 100 words", config.ErrorsPer100Words.ToString(), input, output);
         config.ErrorsPer100Words = int.TryParse(errors, out var errorCount) && errorCount is >= 0 and <= 100
             ? errorCount
             : throw new ArgumentException("Errors per 100 words must be an integer between 0 and 100.");
-        config.BrowserBinaryPath = ReadSetting("Browser binary path", config.BrowserBinaryPath ?? string.Empty, input, output);
+        if (config.EffectiveMode == RunMode.Browser)
+        {
+            config.BrowserBinaryPath = ReadSetting("Browser binary path", config.BrowserBinaryPath ?? string.Empty, input, output);
+        }
 
         var lessonCount = ReadSetting("Total lessons per class", config.LessonCount.ToString(), input, output);
         config.LessonCount = int.TryParse(lessonCount, out var totalLessonCount) && totalLessonCount >= 1
@@ -55,7 +60,7 @@ internal static class InteractiveConfiguration
             return;
         }
 
-        // Validate the settings needed by Selenium before opening a browser.
+        // Validate the selected mode before logging in.
         // Main saves only after this method returns, so a failed discovery does
         // not leave a partially updated configuration on disk.
         config.Validate();

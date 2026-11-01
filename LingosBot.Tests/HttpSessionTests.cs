@@ -24,7 +24,7 @@ public sealed class HttpSessionTests
     [InlineData(true, false, false)]
     public void OnlyVisibleApiRunsSwitchToHttpAfterLogin(bool headless, bool api, bool http)
     {
-        var config = new AppConfig { Headless = headless, UseLessonApi = api };
+        var config = new AppConfig { Mode = "browser", Headless = headless, UseLessonApi = api };
         Assert.Equal(http, config.UseHttpAfterLogin);
     }
 
