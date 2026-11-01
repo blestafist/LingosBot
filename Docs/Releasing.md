@@ -16,7 +16,7 @@ Maintainer checklist for building and publishing the four GitHub release archive
 | macOS Intel | `osx-x64` | `macos-x86_64.zip` |
 | macOS Apple Silicon | `osx-arm64` | `macos-arm64.zip` |
 
-These are self-contained, single-file application builds: users do not need .NET installed. Selenium Manager remains a **separate binary** and must also be included. A supported browser is still required.
+These are self-contained, single-file application builds: users do not need .NET installed. Selenium Manager remains a **separate binary** and must also be included for optional browser mode. The default API mode requires no browser or driver.
 
 ## 1. Select And Test The Release Commit
 
@@ -101,7 +101,7 @@ Never include personal `config.json`, credentials, cookies, diagnostics, browser
 - Extract each archive on its target OS and check that both binaries run. Cross-compiling on Linux does **not** verify execution on Windows or either Mac architecture.
 - On Linux/macOS, restore executable permissions if the extraction tool did not preserve them: `chmod +x LingosBot selenium-manager`.
 - Check Selenium Manager with `./selenium-manager --version` (Windows: `.\selenium-manager.exe --version`).
-- Before publishing, verify the application and browser startup using a test account: `./LingosBot` (Windows: `.\LingosBot.exe`). This is a real run and can complete lessons; do not use an account whose lesson progress must remain unchanged. There is no `--help` or dry-run option.
+- Before publishing, verify the application using a test account: `./LingosBot` (Windows: `.\LingosBot.exe`). By default this tests browser-free API mode. Test optional browser startup separately with `--mode browser --headless`. These are real runs and can complete lessons; do not use an account whose lesson progress must remain unchanged. There is no `--help` or dry-run option.
 
 ## 4. Upload A Draft To GitHub
 
@@ -115,7 +115,7 @@ cat > "$NOTES" <<'EOF'
 
 ## Installation
 Download the ZIP for your platform and extract both files into the same directory.
-A supported browser is required; installing .NET is not necessary.
+No browser is required for the default API mode. A supported browser is required only for `mode: "browser"`; installing .NET is not necessary.
 EOF
 
 # Edit the notes before continuing.

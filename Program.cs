@@ -9,7 +9,7 @@ internal static class Program
         try
         {
             var options = CommandLineOptions.Parse(args);
-            var config = AppConfig.Load(options.ConfigFilePath, validate: !options.HasConfigurationChanges && !options.RunConfiguration);
+            var config = AppConfig.Load(options.ConfigFilePath, validate: false);
 
             if (options.RunConfiguration)
             {
@@ -31,16 +31,10 @@ internal static class Program
                 return 0;
             }
 
-            if (options.RunHeadless.HasValue)
-            {
-                config.Headless = options.RunHeadless.Value;
-            }
-
-            if (options.Browser is not null)
-            {
-                config.Browser = options.Browser;
-            }
-
+            var savedMode = config.Mode;
+            var savedHeadless = config.Headless;
+            var savedBrowser = config.Browser;
+            ApplyRunOverrides(config, options);
             config.Validate();
             var bot = new LingosBot(config, new BrowserFactory());
 
@@ -51,6 +45,10 @@ internal static class Program
                     ClassLessonConfiguration.GetKey,
                     _ => config.LessonCount,
                     StringComparer.Ordinal);
+                // Discovery may use run-only overrides, but must not persist them.
+                config.Mode = savedMode;
+                config.Headless = savedHeadless;
+                config.Browser = savedBrowser;
                 AppConfig.Save(config, options.ConfigFilePath);
                 Console.WriteLine("classLessonCounts saved to configuration.");
                 return 0;
@@ -66,7 +64,14 @@ internal static class Program
         }
     }
 
-    private static void ApplyConfigurationChanges(AppConfig config, CommandLineOptions options)
+    internal static void ApplyRunOverrides(AppConfig config, CommandLineOptions options)
+    {
+        if (options.RunMode is not null) config.Mode = options.RunMode;
+        if (options.RunHeadless.HasValue) config.Headless = options.RunHeadless.Value;
+        if (options.Browser is not null) config.Browser = options.Browser;
+    }
+
+    internal static void ApplyConfigurationChanges(AppConfig config, CommandLineOptions options)
     {
         if (options.Email is not null || options.Password is not null)
         {
@@ -78,6 +83,10 @@ internal static class Program
             };
         }
 
+        if (options.SetMode is not null)
+        {
+            config.Mode = options.SetMode;
+        }
         if (options.SetHeadless.HasValue)
         {
             config.Headless = options.SetHeadless.Value;

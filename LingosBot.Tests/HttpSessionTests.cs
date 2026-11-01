@@ -24,7 +24,7 @@ public sealed class HttpSessionTests
     [InlineData(true, false, false)]
     public void OnlyVisibleApiRunsSwitchToHttpAfterLogin(bool headless, bool api, bool http)
     {
-        var config = new AppConfig { Headless = headless, UseLessonApi = api };
+        var config = new AppConfig { Mode = "browser", Headless = headless, UseLessonApi = api };
         Assert.Equal(http, config.UseHttpAfterLogin);
     }
 
@@ -145,6 +145,26 @@ public sealed class HttpSessionTests
         Assert.Equal(10, site.Answers);
         Assert.All(site.MethodsAndPaths, call => Assert.DoesNotContain(".js", call));
         Assert.True(site.DashboardReads >= 8);
+    }
+
+    [Theory]
+    [InlineData("{\"groups\":[]}")]
+    [InlineData("{}")]
+    [InlineData("{\"groups\":null}")]
+    [InlineData("{\"groups\":[{}]}")]
+    [InlineData("{\"groups\":[{\"id\":\"1\",\"name\":\"A\"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":null}]}")]
+    [InlineData("{\"groups\":[{\"id\":1.5,\"name\":\"A\"}]}")]
+    [InlineData("{\"groups\":[{\"id\":0,\"name\":\"Class\"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":\" \"}]}")]
+    [InlineData("{\"groups\":[{\"id\":1,\"name\":\"A\"},{\"id\":1,\"name\":\"B\"}]}")]
+    public void DiscoveryAndRunShareClassValidation(string json)
+    {
+        using var session = Session(new StubHandler((_, _) => throw new Exception("No request expected")));
+        var runner = new HttpSessionRunner(session, Config);
+        using var document = JsonDocument.Parse(json);
+        Assert.Throws<InvalidOperationException>(() => runner.ReadClasses(document.RootElement));
+        Assert.Throws<InvalidOperationException>(() => runner.Run(document.RootElement));
     }
 
     [Fact]

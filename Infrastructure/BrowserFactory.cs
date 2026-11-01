@@ -12,6 +12,11 @@ internal sealed class BrowserFactory
 
     public IWebDriver Create(AppConfig config)
     {
+        if (config.EffectiveMode != RunMode.Browser)
+        {
+            throw new InvalidOperationException("Browser creation is disabled in API mode.");
+        }
+
         IWebDriver driver = config.Browser.Trim().ToLowerInvariant() switch
         {
             "firefox" => CreateFirefox(config),

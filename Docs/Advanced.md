@@ -1,6 +1,6 @@
 # Advanced Configuration
 
-This page documents optional fields in `config.json`. Start with [Basic.md](Basic.md); most users only need credentials, browser, `headless`, `errorsPer100Words`, and `lessonCount`.
+This page documents optional fields in `config.json`. Start with [Basic.md](Basic.md); most users only need credentials, `errorsPer100Words`, and `lessonCount`. The default mode is browser-free API.
 
 ## Full Setting Reference
 
@@ -10,14 +10,15 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | `studentDashboardUrl` | `https://lingos.pl/student/dashboard` | Leave unchanged unless Lingos changes its dashboard URL. |
 | `credentials.email` | Required | Lingos account email. |
 | `credentials.password` | Required | Lingos account password in plain text. |
-| `browser` | `Chrome` | `Chrome`, `Firefox`, `Edge`, or `Safari`; case-insensitive. |
-| `browserBinaryPath` | `null` | Absolute path to a non-standard browser executable. |
-| `headless` | `false` | `false`: visible browser login, then close the browser and run through HTTP/API. `true`: keep the existing headless browser workflow for the entire run. Unsupported by Safari. With `useLessonApi: false`, both modes keep the browser and use UI input/clicks. |
-| `useLessonApi` | `true` | Send answers through Lingos's own endpoint. Set `false` to force the old UI workflow. In headless/browser mode, missing initial page data uses the UI; HTTP-only mode stops on unrecognized data. Failed API submissions never automatically retry or fall back to UI. |
+| `mode` | `api` | `api`: HTTP login and lessons, no browser. `browser`: enables Selenium and browser settings. Missing/null/blank also means `api`. |
+| `browser` | `Chrome` | Browser mode only: `Chrome`, `Firefox`, `Edge`, or `Safari`; case-insensitive. |
+| `browserBinaryPath` | `null` | Browser mode only: absolute path to a non-standard browser executable. |
+| `headless` | `false` | Browser mode only. `false`: visible login, then HTTP handoff. `true`: keep the headless browser workflow. Unsupported by Safari. With `useLessonApi: false`, keep the browser and use UI input/clicks. |
+| `useLessonApi` | `true` | Browser mode only: set `false` to force UI. Headless browser mode can use UI if initial lesson data is missing. API mode always uses HTTP and stops on unrecognized data; no browser fallback. Failed API submissions are never automatically retried. |
 | `errorsPer100Words` | `10` | Intentional wrong answers from `0` to `100`. |
 | `lessonCount` | `1` | Default number of lessons for every discovered class. Must be at least `1`. |
 | `classLessonCounts` | `{}` | Lesson-count overrides by stable class key (`group:<GroupId>` or `url:<change URL>`). A value of `0` skips a class. |
-| `defaultWaitTimeoutSeconds` | `15` | Standard Selenium wait and HTTP request timeout. |
+| `defaultWaitTimeoutSeconds` | `15` | Standard Selenium wait (browser mode only). |
 | `shortWaitTimeoutSeconds` | `4` | Short Selenium wait timeout. |
 | `lessonRestartReuseTimeoutMilliseconds` | `1500` | Delay used while reusing the lesson entry page. |
 | `pageLoadTimeoutSeconds` | `60` | Browser page-load timeout. |
@@ -25,7 +26,11 @@ This page documents optional fields in `config.json`. Start with [Basic.md](Basi
 | `lessonPromptSafetyCap` | `30` | Maximum prompts allowed in one lesson before stopping. API mode also limits total submissions to four times this value and wordset transitions to this value. |
 | `challengeLessonSafetyCap` | `40` | Reserved configuration field. It is accepted and validated but is not currently enforced by the application. Do not rely on it to limit challenge behavior. |
 
-Timing fields and `lessonPromptSafetyCap` must be positive. Only increase timeouts after observing a reproducible timeout on a slow connection or machine.
+Browser timing fields are ignored in API mode; in browser mode they must be positive. `lessonPromptSafetyCap` must always be positive. Only increase timeouts after observing a reproducible timeout on a slow connection or machine.
+
+Plain HTTP login and session requests use an independent 30-second timeout (also after a visible browser login). `defaultWaitTimeoutSeconds` does not change it. Ambiguous failed submissions are not retried.
+
+Migration: use `mode: "browser", "headless": true` instead of the removed `browser-headless` mode. Old configurations without `mode` now select API even if they contain `headless: true`. Explicitly set `mode: "browser"` to retain browser behavior.
 
 `--run_config` asks for `lessonCount` and, only when the first prompt is answered yes, signs in to discover classes and asks for a count for each class. Answering no preserves existing `classLessonCounts` overrides while changing the global default. When configuring classes separately, a blank class prompt keeps the current setting (or uses the global fallback for a new class); enter `default`, `fallback`, or `-` to remove an override. The fallback is not written as a separate override for every class, and overrides for classes missing from discovery are preserved.
 
@@ -35,6 +40,7 @@ Set `browserBinaryPath` only when the browser is portable, beta-channel, or inst
 
 ```json
 {
+  "mode": "browser",
   "browser": "Firefox",
   "browserBinaryPath": "/usr/bin/firefox"
 }
@@ -69,7 +75,7 @@ These files may contain account, class, vocabulary, and page-session data. Do no
 
 ## Run From Source
 
-Use a source checkout only if you want to develop or modify LingosBot. Install the .NET 10 SDK, Git, and a supported browser, then run:
+Use a source checkout only if you want to develop or modify LingosBot. Install the .NET 10 SDK and Git (a browser is needed only for browser mode), then run:
 
 ```bash
 git clone https://github.com/blestafist/LingosBot.git

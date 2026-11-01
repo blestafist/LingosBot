@@ -1,12 +1,12 @@
 # Linux Servers
 
-Run LingosBot on a Linux server only with a browser that supports headless automation. Firefox or Chrome are the practical choices. Do not use Safari, and do not schedule a visible browser session on a server.
+Use the default `mode: "api"` on a Linux server: no browser, driver or graphical display is required. If you explicitly need the older browser workflow, set `mode: "browser"` and `headless: true` with Firefox or Chrome. Do not schedule a visible browser session on a server.
 
 This guide uses a prebuilt Linux release. Replace paths and the `lingosbot` service account with values appropriate for your server.
 
 ## 1. Install Dependencies
 
-Install Firefox or Chrome and the standard libraries required by the downloaded release. Selenium Manager normally resolves the matching browser driver automatically on first startup, so the server needs outbound network access at least then.
+Install the standard runtime libraries required by the downloaded release. API mode needs outbound HTTPS access to Lingos, but no browser. The browser installation below is optional, for `mode: "browser"` only. Selenium Manager resolves the matching driver on first startup.
 
 On Debian or Ubuntu, Firefox is commonly installed with:
 
@@ -36,7 +36,7 @@ sudo chmod +x /opt/lingosbot/app/LingosBot
 sudo chown -R lingosbot:lingosbot /opt/lingosbot/app
 ```
 
-Create `/etc/lingosbot/config.json` with headless mode enabled:
+Create `/etc/lingosbot/config.json` with API mode enabled:
 
 ```json
 {
@@ -44,8 +44,7 @@ Create `/etc/lingosbot/config.json` with headless mode enabled:
     "email": "you@example.com",
     "password": "replace-with-your-password"
   },
-  "browser": "Firefox",
-  "headless": true,
+  "mode": "api",
   "errorsPer100Words": 0,
   "lessonCount": 1,
   "classLessonCounts": {}

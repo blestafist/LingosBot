@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace LingosBotApp;
 
-// Current-site backend for visible-login runs. Fail closed on changed payloads instead of
+// Current-site backend for API and browser-login HTTP runs. Fail closed on changed payloads instead of
 // silently skipping classes, challenges or vocabulary, or replaying a lesson.
 internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig config)
 {
@@ -18,14 +18,28 @@ internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig con
         return dashboard;
     }
 
+    internal IReadOnlyList<ClassInfo> ReadClasses(JsonElement dashboard)
+    {
+        if (dashboard.ValueKind != JsonValueKind.Object || !dashboard.TryGetProperty("groups", out var groups) ||
+            groups.ValueKind != JsonValueKind.Array) throw InvalidData();
+        var classes = new List<ClassInfo>();
+        var ids = new HashSet<long>();
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (group.ValueKind != JsonValueKind.Object || !group.TryGetProperty("id", out var idValue) ||
+                idValue.ValueKind != JsonValueKind.Number || !idValue.TryGetInt64(out var id) || id <= 0 || !ids.Add(id) ||
+                !group.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(name.GetString())) throw InvalidData();
+            classes.Add(new ClassInfo(TextNormalizer.Normalize(name.GetString()!), config.StudentDashboardUrl,
+                id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        if (classes.Count == 0) throw InvalidData();
+        return classes;
+    }
+
     public int Run(JsonElement initialDashboard)
     {
-        var classes = initialDashboard.GetProperty("groups").EnumerateArray().Select(group => new ClassInfo(
-            TextNormalizer.Normalize(group.GetProperty("name").GetString() ?? ""),
-            config.StudentDashboardUrl, group.GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture)))
-            .ToList();
-        if (classes.Count == 0 || classes.Any(c => string.IsNullOrWhiteSpace(c.Title) || !long.TryParse(c.GroupId, out var id) || id <= 0) ||
-            classes.Select(c => c.GroupId).Distinct().Count() != classes.Count) throw InvalidData();
+        var classes = ReadClasses(initialDashboard);
         Console.WriteLine($"Found {classes.Count} class(es) to process through HTTP.");
         var completed = 0;
         for (var index = 0; index < classes.Count; index++)
@@ -158,5 +172,5 @@ internal sealed class HttpSessionRunner(LingosHttpSession session, AppConfig con
     }
 
     private static string GroupId(JsonElement data) => data.GetProperty("currentGroup").GetProperty("id").GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture);
-    private static InvalidOperationException InvalidData() => new("Unrecognized or mismatched Lingos HTTP data. Stopped safely; headless=true restores browser mode.");
+    private static InvalidOperationException InvalidData() => new("Unrecognized or mismatched Lingos HTTP data. Stopped safely; use mode=browser and headless=true for the browser workflow.");
 }

@@ -1,13 +1,17 @@
 # Performance checks
 
-## Browser-free work after visible login
+## Browser-free API and browser-login handoff
 
-With `headless: false` and `useLessonApi: true`, the bot logs in using the visible
+The default `mode: "api"` logs in directly over HTTP using the login form's CSRF
+token and an in-memory cookie jar. It does not create a browser. Browser settings,
+including `headless` and `useLessonApi`, are ignored in this mode.
+
+With `mode: "browser"`, `headless: false` and `useLessonApi: true`, the bot logs in using the visible
 browser, transfers its cookies and user agent to a run-scoped .NET `HttpClient`,
 validates the HTTP dashboard, and closes the browser. Cookies are kept only in
 memory and updated by the HTTP handler; they are not exported to a file. No
-additional `useHttpSession` option is needed. `headless: true` deliberately retains
-the existing browser workflow. `useLessonApi: false` forces UI mode in either case.
+additional `useHttpSession` option is needed. In browser mode, `headless: true` retains
+the existing browser workflow. `useLessonApi: false` forces UI only in browser mode.
 
 HTTP mode reads inert `#app[data-props]` JSON from HTML instead of downloading and
 executing React, ads, analytics, CSS and fonts. It verifies the selected class
@@ -33,7 +37,7 @@ Actual speed and memory savings on a Celeron have not been measured.
 
 ## Direct lesson answers
 
-In browser mode (`headless: true`, `useLessonApi: true`), after entering a lesson the bot reads its initial
+In browser mode (`mode: "browser"`, `headless: true`, `useLessonApi: true`), after entering a lesson the bot reads its initial
 `#app[data-props]` state and sends sequential answers to
 `POST /learning/answer/{lessonId}` from the authenticated browser. It follows the
 server's returned step rather than waiting for input, feedback, and Continue DOM
@@ -45,12 +49,6 @@ If the initial payload is unavailable, the existing UI runner is used. After an
 API request, errors/timeouts stop the lesson without retry or UI fallback: the
 server may already have processed the answer. Set `useLessonApi: false` to force
 the old path. Completion reloads the dashboard to refresh challenges and counters.
-
-This optimization was informed by [teaquilish/Lingos](https://github.com/teaquilish/Lingos)
-(reviewed commit `58ad5f5a9c7507007ee7db33fc12468265bdeff6`). That bot uses the same
-endpoint and server page payloads. Our browser flags, bulk DOM reads, JS input,
-and bounded parallel vocabulary fetching were already present. The vocabulary
-fetcher now also recognizes the newer nested `wordset.flashcards` payload.
 
 Unit tests cover API step transitions, rejected alternatives, intentional errors,
 new-word cards, completion, caps, malformed responses, and request failures.
@@ -81,10 +79,10 @@ dotnet test LingosBot.Tests/LingosBot.Tests.csproj
 Local headless Chromium/Selenium microbenchmarks on the saved `dev_pages` pages
 (50 iterations after 5 warmups):
 
-| Operation | Previous | Optimized |
-| --- | ---: | ---: |
-| Lesson step state read | 30.17 ms | 1.38 ms |
-| Vocabulary readiness check, 84 rows | 424.68 ms | 14.98 ms |
+| Operation                           |  Previous | Optimized |
+| ----------------------------------- | --------: | --------: |
+| Lesson step state read              |  30.17 ms |   1.38 ms |
+| Vocabulary readiness check, 84 rows | 424.68 ms |  14.98 ms |
 
 These measure browser-command overhead, not end-to-end lesson speed or Lingos
 server latency. Actual performance varies by browser and machine.

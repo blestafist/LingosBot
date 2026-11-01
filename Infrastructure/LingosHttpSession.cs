@@ -10,6 +10,8 @@ namespace LingosBotApp;
 // needed after login. No automatic retries or cross-origin redirects.
 internal sealed class LingosHttpSession : ILessonApiClient, IDisposable
 {
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    internal const string UserAgent = "Mozilla/5.0 (X11; Linux x86_64) LingosBot/1.0";
     internal static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly HttpClient _http;
     private readonly Uri _origin;
@@ -18,7 +20,7 @@ internal sealed class LingosHttpSession : ILessonApiClient, IDisposable
     internal LingosHttpSession(AppConfig config, HttpMessageHandler handler, string userAgent)
     {
         _origin = new Uri(config.BaseUrl);
-        _http = new HttpClient(handler) { Timeout = config.DefaultWaitTimeout };
+        _http = new HttpClient(handler) { Timeout = RequestTimeout };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
     }
 
@@ -44,6 +46,16 @@ internal sealed class LingosHttpSession : ILessonApiClient, IDisposable
             CookieContainer = cookies, AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.All
         }, userAgent);
+    }
+
+    // Session created without any browser, from cookies obtained by HttpLoginService.
+    public static LingosHttpSession FromCookies(AppConfig config, CookieContainer cookies)
+    {
+        return new LingosHttpSession(config, new HttpClientHandler
+        {
+            CookieContainer = cookies, AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.All
+        }, UserAgent);
     }
 
     internal Uri SameOrigin(string url)
