@@ -7,7 +7,7 @@
   },
   "browserBinaryPath": null,
   "browser": "Chrome",
-  "headless": false,
+  "mode": "browser",
   "errorsPer100Words": 10,
   "lessonCount": 1,
   "classLessonCounts": {

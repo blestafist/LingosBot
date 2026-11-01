@@ -26,6 +26,8 @@ These options update the selected `config.json` and exit. They do not start a le
 | `--set_email <email>` | Text | `credentials.email` |
 | `--set_passwd <password>` | Text | `credentials.password` |
 | `--set_headless <true\|false>` | `true` or `false` | `headless` |
+| `--set_mode <browser-headless\|browser\|api>` | `browser-headless`, `browser`, or `api` | `mode` |
+| `--mode <browser-headless\|browser\|api>` | same values | `mode` (this run only) |
 | `--set_browser <name>` | Browser name | `browser` |
 | `--set_errors <0-100>` | Integer from 0 to 100 | `errorsPer100Words` |
 | `--set_browser_path <path>` | Executable path | `browserBinaryPath` |
