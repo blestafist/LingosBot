@@ -1,5 +1,7 @@
 # LingosBot
 
+> Новый автономный HTTP CLI-воркер на Rust: [worker-server-rust/README.md](worker-server-rust/README.md). Документация ниже относится к существующему C#-приложению.
+
 LingosBot is a .NET console application that automates lessons on [lingos.pl](https://lingos.pl/) through HTTP/API by default, with an optional Selenium browser workflow. It signs in, reads the vocabulary available in the selected class, and completes lessons using those collected translations.
 
 The bot can process every class listed in Lingos, assign a different lesson count to individual classes, choose an available challenge, and optionally make intentional mistakes.
