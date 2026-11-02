@@ -1,6 +1,19 @@
 # LingosBot
 
-> Новый автономный HTTP CLI-воркер на Rust: [worker-server-rust/README.md](worker-server-rust/README.md). Документация ниже относится к существующему C#-приложению.
+## HTTP-воркер на Rust
+
+Автономный Linux CLI в [`worker-server-rust/`](worker-server-rust/README.md): авторизация, словарь, классы, челленджи и уроки по HTTP, без .NET, браузера, БД и WebUI. Все тесты находятся в `worker-server-rust/tests/`; существующий `worker-desktop/` не изменяется.
+
+```bash
+cargo build --locked --release --manifest-path worker-server-rust/Cargo.toml
+./worker-server-rust/target/release/lingosbot --help
+```
+
+Готовые Linux musl-бинарники, безопасная передача учётных данных, конфигурация и JSON/exit-code контракт описаны в [инструкции воркера](worker-server-rust/README.md). Его релизы используют теги `worker-v<версия>` и не содержат desktop ZIP-архивов.
+
+## Legacy desktop (.NET)
+
+Документация ниже относится к существующему C#-приложению в `worker-desktop/`.
 
 LingosBot is a .NET console application that automates lessons on [lingos.pl](https://lingos.pl/) through HTTP/API by default, with an optional Selenium browser workflow. It signs in, reads the vocabulary available in the selected class, and completes lessons using those collected translations.
 
@@ -53,7 +66,7 @@ Run `./LingosBot --run_config` to configure the global lesson count interactivel
 ./LingosBot --scan_classes
 ```
 
-The exact command-line interface is documented in [Docs/CLI.md](Docs/CLI.md). When running from source, prepend `dotnet run --` to the same arguments.
+The exact command-line interface is documented in [Docs/CLI.md](Docs/CLI.md). When running from source at the repository root, prepend `dotnet run --project worker-desktop --` to the same arguments.
 
 ## Troubleshooting
 
