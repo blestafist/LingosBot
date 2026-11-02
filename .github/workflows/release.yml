@@ -1,0 +1,187 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.2.1-Stable). Required if triggered manually from a branch.'
+        required: false
+        type: string
+      draft:
+        description: 'Publish release as a draft'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Publish release as a prerelease'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run unit tests
+        run: dotnet test LingosBot.Tests/LingosBot.Tests.csproj -c Release
+
+  build:
+    name: Build (${{ matrix.asset }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            asset: win-x64
+            app: LingosBot.exe
+            manager: selenium-manager.exe
+          - rid: linux-x64
+            asset: linux-x64
+            app: LingosBot
+            manager: selenium-manager
+          - rid: osx-x64
+            asset: macos-x86_64
+            app: LingosBot
+            manager: selenium-manager
+          - rid: osx-arm64
+            asset: macos-arm64
+            app: LingosBot
+            manager: selenium-manager
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Ensure 7-Zip is installed
+        run: |
+          if ! command -v 7z &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y p7zip-full
+          fi
+
+      - name: Publish application for ${{ matrix.rid }}
+        run: |
+          dotnet publish LingosBot.csproj \
+            -c Release \
+            -r "${{ matrix.rid }}" \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false \
+            -o "publish/${{ matrix.rid }}"
+
+      - name: Verify binaries and package ZIP archive
+        run: |
+          set -euo pipefail
+          output="publish/${{ matrix.rid }}"
+          app="${{ matrix.app }}"
+          manager="${{ matrix.manager }}"
+
+          # Verify that both the application and Selenium Manager exist and are non-empty
+          test -s "$output/$app"
+          test -s "$output/$manager"
+
+          # Restore executable permissions for non-Windows platforms
+          if [ "${{ matrix.rid }}" != "win-x64" ]; then
+            chmod +x "$output/$app" "$output/$manager"
+          fi
+
+          # Archive exactly the two binaries at the ZIP root with maximum compression
+          mkdir -p dist
+          (
+            cd "$output"
+            7z a -tzip -mx=9 "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}.zip" "$app" "$manager"
+          )
+
+          # Verify archive integrity and listing
+          7z t "dist/${{ matrix.asset }}.zip"
+          7z l "dist/${{ matrix.asset }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && (startsWith(github.ref, 'refs/tags/') || inputs.tag_name != ''))
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify all assets and compute SHA-256 checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          test -s win-x64.zip
+          test -s linux-x64.zip
+          test -s macos-x86_64.zip
+          test -s macos-arm64.zip
+          sha256sum win-x64.zip linux-x64.zip macos-x86_64.zip macos-arm64.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Determine release tag and title
+        id: release_info
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ inputs.tag_name }}"
+          fi
+          # Replace hyphen with space in title (e.g. v1.2.1-Stable -> v1.2.1 Stable) to match docs
+          TITLE="${TAG/-/ }"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: ${{ steps.release_info.outputs.title }}
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            dist/win-x64.zip
+            dist/linux-x64.zip
+            dist/macos-x86_64.zip
+            dist/macos-arm64.zip
+            dist/SHA256SUMS.txt

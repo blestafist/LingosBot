@@ -18,6 +18,34 @@ Maintainer checklist for building and publishing the four GitHub release archive
 
 These are self-contained, single-file application builds: users do not need .NET installed. Selenium Manager remains a **separate binary** and must also be included for optional browser mode. The default API mode requires no browser or driver.
 
+## Automated Release (GitHub Actions)
+
+Releases can be built and published automatically using GitHub Actions (`.github/workflows/release.yml`):
+
+1. **Tag Push**:
+   Tag the release commit and push the tag to GitHub:
+   ```bash
+   git tag v1.2.1-Stable
+   git push origin v1.2.1-Stable
+   ```
+   The workflow will:
+   - Run the full test suite with .NET 10.
+   - Cross-publish self-contained single-file releases for Windows (`win-x64`), Linux (`linux-x64`), macOS Intel (`osx-x64`), and macOS Apple Silicon (`osx-arm64`).
+   - Package each pair of application and `selenium-manager` binaries into a root-level ZIP using 7-Zip (`-mx=9`).
+   - Generate SHA-256 checksums (`SHA256SUMS.txt`).
+   - Create a GitHub Release and attach all four archives and the checksum file.
+
+2. **Manual Dispatch**:
+   Under **Actions** > **Build and Release**, trigger the workflow manually with optional inputs for `tag_name`, `draft`, and `prerelease`.
+
+Pull requests and pushes to `main` also trigger the workflow to test and build artifacts for all platforms, verifying cross-platform builds without publishing a release.
+
+---
+
+## Manual Release Checklist
+
+Follow the steps below to build and publish release archives locally from a Linux workstation.
+
 ## 1. Select And Test The Release Commit
 
 Merge the intended changes into `main` first. Start with a clean working tree; do not switch branches over unfinished work.
