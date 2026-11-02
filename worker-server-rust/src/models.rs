@@ -84,4 +84,5 @@ pub struct LearningFeedback {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/models.rs"]
 mod tests;

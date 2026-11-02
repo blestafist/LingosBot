@@ -455,4 +455,5 @@ fn parse_dashboard(base: &Url, value: &str) -> Result<Url> {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/config.rs"]
 mod tests;

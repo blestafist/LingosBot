@@ -275,4 +275,5 @@ fn wrong_answer(answer: &str, candidates: &[String]) -> String {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/lesson.rs"]
 mod tests;

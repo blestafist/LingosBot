@@ -118,10 +118,14 @@ src/
   lesson.rs               последовательный движок урока
   challenge.rs            состояния челленджей и Perfekcjonizm
   workflow.rs             классы, сбор словаря и запуск уроков
-tests/                    сквозные HTTP/CLI-тесты с loopback-сервером
+tests/
+  unit/                   модульные тесты всех компонентов
+  common/                 локальный HTTP-сервер для тестов
+  http.rs                 интеграционные тесты HTTP-сессии
+  cli.rs                  сквозные тесты CLI
 ```
 
-Unit-тесты находятся отдельно от runtime-кода: `src/<module>/tests.rs`. Тесты не требуют аккаунта, браузера и доступа к lingos.pl.
+Весь тестовый код находится только в `tests/`. Модульные тесты из `tests/unit/` подключаются через `#[cfg(test)]` и `#[path]`: они проверяют и приватные функции, не расширяя публичный API и не попадая в обычную сборку. Тесты не требуют аккаунта, браузера и доступа к lingos.pl.
 
 Release-профиль использует `opt-level="z"`, LTO, strip и `panic="abort"`. Workflow `.github/workflows/rust-worker.yml` проверяет код и по тегу `worker-v<версия Cargo.toml>` собирает статические Linux musl-бинарники для x86_64 и aarch64 с SHA-256. Для локальной musl-сборки нужны соответствующий Rust target и `musl-gcc`.
 

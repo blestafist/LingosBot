@@ -80,4 +80,5 @@ fn insert_candidate(map: &mut HashMap<String, Vec<String>>, prompt: &str, answer
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/vocabulary.rs"]
 mod tests;

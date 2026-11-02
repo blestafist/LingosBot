@@ -257,4 +257,5 @@ fn find_max_error_limit<'a>(words: &[&'a str]) -> Option<&'a str> {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/challenge.rs"]
 mod tests;

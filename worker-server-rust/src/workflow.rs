@@ -444,4 +444,5 @@ fn optional_total(object: &Value) -> Result<Option<usize>> {
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/workflow.rs"]
 mod tests;

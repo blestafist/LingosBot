@@ -63,4 +63,5 @@ pub fn page_props<T: DeserializeOwned>(html: &str) -> Result<T> {
 }
 
 #[cfg(test)]
+#[path = "../../tests/unit/html.rs"]
 mod tests;
