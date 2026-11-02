@@ -1,8 +1,36 @@
 # Creating A Release
 
-Maintainer checklist for building and publishing the four GitHub release archives. Commands below use **Bash on Linux**, from the repository root. They replace the old build notes in `requirements.txt`.
+The Rust HTTP worker and legacy .NET desktop application have separate release assets and procedures. Commands below use **Bash on Linux**, from the repository root.
 
-## Prerequisites
+## Rust HTTP Worker (Linux)
+
+[`.github/workflows/rust-worker.yml`](../.github/workflows/rust-worker.yml) runs on branch pushes and pull requests matching its worker/workflow path filters, manual dispatches, and `worker-v*` tags. It runs fmt/clippy/test and builds and tests musl natively on x86_64 and aarch64. Before upload, each binary must pass ELF architecture/static-link checks (no `INTERP` or `NEEDED`), native `--version`/`--help` smoke checks, and `sha256sum -c`. These checks do not require a Lingos account or contact Lingos.
+
+Select the intended commit and a new, unused tag matching `version` in `worker-server-rust/Cargo.toml` exactly. Check `git status --short` before tagging; stop if there are unexpected local changes or the wrong commit is checked out:
+
+```bash
+git status --short
+TAG=worker-v0.1.0  # Example: must match worker-server-rust/Cargo.toml.
+git tag "$TAG"
+git push origin "$TAG"
+```
+
+The workflow rejects a version/tag mismatch. Branch runs, including manual dispatches on branches, validate both architectures without publishing. Manual dispatches on a `worker-v*` tag follow the same guarded publication path as tag pushes.
+
+Each matrix job uploads its checked binary and checksum as a workflow artifact. A single publish job waits for the checks and **both** native builds, downloads the artifacts, verifies both pairs with `sha256sum -c`, and uploads all four files into a draft release:
+
+```text
+lingosbot-x86_64-unknown-linux-musl
+lingosbot-x86_64-unknown-linux-musl.sha256
+lingosbot-aarch64-unknown-linux-musl
+lingosbot-aarch64-unknown-linux-musl.sha256
+```
+
+Only after all uploads succeed does that job publish the draft. A failed build cannot publish a partial release; a failed upload leaves a draft for investigation. These worker releases do not replace the desktop release marked latest. Review the workflow run and all four assets after publishing. Installation, architecture selection, checksum verification and executable permissions are documented in the [Rust worker README](../worker-server-rust/README.md). The assets are standalone Linux binaries, not desktop ZIP archives.
+
+## Legacy Desktop Prerequisites
+
+The remaining checklist builds and publishes the four archives for the existing .NET application in `worker-desktop/`.
 
 - .NET **10 SDK** (`dotnet --version`).
 - Git, GitHub CLI (`gh`), and **7-Zip** with the `7z` command available.
@@ -26,7 +54,7 @@ Merge the intended changes into `main` first. Start with a clean working tree; d
 git switch main
 git pull --ff-only https://github.com/blestafist/LingosBot.git main
 git status --short
-dotnet test LingosBot.Tests/LingosBot.Tests.csproj -c Release
+dotnet test worker-desktop/LingosBot.Tests/LingosBot.Tests.csproj -c Release
 ```
 
 Stop if there are unexpected local changes or failing tests. Choose a **new, unused** tag and record the exact commit. Keep using the same Bash session for the following commands.
@@ -56,7 +84,7 @@ for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
     esac
 
     output="$RELEASE_DIR/$rid"
-    dotnet publish LingosBot.csproj \
+    dotnet publish worker-desktop/LingosBot.csproj \
         -c Release -r "$rid" --self-contained true \
         -p:PublishSingleFile=true \
         -p:DebugType=None -p:DebugSymbols=false \
