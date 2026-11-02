@@ -90,6 +90,7 @@ struct Options {
     drop_answer: bool,
     drop_after_first: bool,
     missing_feedback: bool,
+    answer_override: Option<Value>,
     unknown_challenge: bool,
     legacy_switch: bool,
 }
@@ -166,6 +167,9 @@ fn site(options: Options) -> Server {
             ("POST", "/learning/answer/12") => {
                 if options.drop_answer || (options.drop_after_first && word > 1) {
                     return None;
+                }
+                if let Some(value) = &options.answer_override {
+                    return Some(Reply::json(value.clone()));
                 }
                 let body: Value = serde_json::from_str(&request.body).unwrap();
                 assert_eq!(body["identifier"].as_u64(), Some(word));
@@ -455,6 +459,28 @@ fn ambiguous_or_invalid_answer_never_gets_replayed() {
 }
 
 #[test]
+fn positional_arrays_cannot_acknowledge_an_answer_or_trigger_an_alternative() {
+    for payload in [
+        json!({"step":["exercise",null,["flashcard",1,"dom"]],"feedback":[0]}),
+        json!({"step":["finished",null,null],"feedback":{"result":1}}),
+        json!({"step":{"state":"exercise","exercise":["flashcard",1,"dom"]},"feedback":{"result":0}}),
+        json!({"step":{"state":"finished"},"feedback":[1]}),
+    ] {
+        let server = site(Options {
+            answer_override: Some(payload),
+            ..Default::default()
+        });
+        let config = TempConfig::new(&server.base, json!({}));
+        let (output, result) = run(&config);
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(result["error_code"], "PARSING_ERROR");
+        assert_eq!(count(&server, "/learning/start"), 1);
+        assert_eq!(count(&server, "/learning/answer"), 1);
+        assert_eq!(count(&server, "/student/context"), 0);
+    }
+}
+
+#[test]
 fn legacy_group_switch_is_supported() {
     let server = site(Options {
         legacy_switch: true,
@@ -547,23 +573,28 @@ fn fifo_config_is_rejected_without_waiting_for_a_writer() {
 #[cfg(target_os = "linux")]
 #[test]
 fn unwritable_stderr_cannot_abort_success_or_error_output() {
-    let server = site(Options::default());
-    let config = TempConfig::new(&server.base, json!({}));
-    let output = command()
-        .arg("--config")
-        .arg(&config.0)
-        .arg("--json")
-        .stderr(
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open("/dev/full")
-                .unwrap(),
-        )
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result["success"], true);
+    for limit in [false, true] {
+        let server = site(Options {
+            limit,
+            ..Default::default()
+        });
+        let config = TempConfig::new(&server.base, json!({}));
+        let output = command()
+            .arg("--config")
+            .arg(&config.0)
+            .arg("--json")
+            .stderr(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            )
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["success"], true);
+    }
 
     let output = command()
         .arg("--unknown")

@@ -2,6 +2,7 @@
 //! fresh dashboard before a lesson can start; vocabulary is never guessed.
 
 use std::collections::{BTreeMap, HashSet};
+use std::io::{self, Write};
 
 use serde_json::{Value, json};
 
@@ -291,7 +292,8 @@ pub fn run(
             Err(error) if error.is_limit() => {
                 stats.classes_limited += 1;
                 // No server error text, prompts, response bodies or credentials.
-                eprintln!(
+                let _ = writeln!(
+                    io::stderr().lock(),
                     "Daily lesson limit reached; skipping the remaining lessons for this class."
                 );
             }
