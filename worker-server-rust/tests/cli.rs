@@ -91,8 +91,12 @@ struct Options {
     drop_after_first: bool,
     missing_feedback: bool,
     answer_override: Option<Value>,
+    answer_raw: Option<&'static str>,
+    answer_login: bool,
     unknown_challenge: bool,
     legacy_switch: bool,
+    empty_group: Option<u64>,
+    limited_group: Option<u64>,
 }
 fn site(options: Options) -> Server {
     let mut group = 1;
@@ -116,7 +120,7 @@ fn site(options: Options) -> Server {
             ("GET", "/student/dashboard") => {
                 let mut data = json!({
                     "currentGroup":{"id":group},"groups":[{"id":1,"name":"A"},{"id":2,"name":"B"}],
-                    "lessonLimitReached":options.limit,
+                    "lessonLimitReached":options.limit || options.limited_group == Some(group),
                     "challenges":[
                         {"id":10,"title":"Perfekcjonizm","description":"Wykonaj 1 lekcję bez błędów","prize":20,
                             "status":if options.unknown_challenge {"paused"} else if completed>0 {"completed"} else if joined {"in_progress"} else {"available"}},
@@ -145,9 +149,16 @@ fn site(options: Options) -> Server {
                 completed = 0;
                 Reply::json(json!({}))
             }
-            ("GET", "/student/wordsets") => Reply::page(json!({"page":"wordsets","wordsets":{
-                "currentGroup":{"id":group},"wordsets":[{"id":55,"name":"Set","counts":{"total":if options.incomplete {3} else {2}}}]
-            }})),
+            ("GET", "/student/wordsets") => {
+                let sets = if options.empty_group == Some(group) {
+                    json!([])
+                } else {
+                    json!([{"id":55,"name":"Set","counts":{"total":if options.incomplete {3} else {2}}}])
+                };
+                Reply::page(json!({"page":"wordsets","wordsets":{
+                    "currentGroup":{"id":group},"wordsets":sets
+                }}))
+            }
             ("GET", "/student/wordsets/55") => Reply::page(json!({"page":"wordset","wordset":{
                 "group":{"id":group},"wordset":{"id":55},"flashcards":[{"word":"house","translation":"dom"},{"word":"home","translation":"dom"}]
             }})),
@@ -167,6 +178,16 @@ fn site(options: Options) -> Server {
             ("POST", "/learning/answer/12") => {
                 if options.drop_answer || (options.drop_after_first && word > 1) {
                     return None;
+                }
+                if options.answer_login {
+                    return Some(Reply::html(
+                        "<div id=app></div><input name=_csrf_token value=expired>",
+                    ));
+                }
+                if let Some(raw) = options.answer_raw {
+                    let mut reply = Reply::json(json!({}));
+                    reply.body = raw.into();
+                    return Some(reply);
                 }
                 if let Some(value) = &options.answer_override {
                     return Some(Reply::json(value.clone()));
@@ -228,6 +249,9 @@ fn complete_cli_runs_all_classes_challenges_and_lessons() {
     assert_eq!(count(&server, "/learning/answer"), 10);
     assert_eq!(count(&server, "/student/challenges"), 4);
     assert_eq!(count(&server, "/student/context"), 1);
+    // No extra dashboard GET immediately after login; post-lesson and
+    // post-mutation confirmations are still fetched afresh.
+    assert_eq!(count(&server, "/student/dashboard"), 11);
 }
 
 #[test]
@@ -328,6 +352,58 @@ fn daily_limit_is_success_without_starting_or_collecting_vocabulary() {
     assert_eq!(result["words_learned"], 0);
     assert_eq!(count(&server, "/learning"), 0);
     assert_eq!(count(&server, "/student/wordsets"), 0);
+}
+
+#[test]
+fn a_limit_in_one_group_does_not_prevent_lessons_in_another() {
+    let server = site(Options {
+        limited_group: Some(1),
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let (output, result) = run(&config);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(result["words_learned"], 1);
+    assert_eq!(count(&server, "/learning/start"), 1);
+    assert_eq!(count(&server, "/student/context"), 1);
+}
+
+#[test]
+fn a_valid_empty_class_does_not_block_the_next_class() {
+    let server = site(Options {
+        empty_group: Some(1),
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let (output, result) = run(&config);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(result["words_learned"], 1);
+    assert_eq!(count(&server, "/learning/start"), 1);
+    assert_eq!(count(&server, "/student/wordsets/55"), 1);
+}
+
+#[test]
+fn no_vocabulary_is_reported_without_starting_an_empty_lesson() {
+    let server = site(Options {
+        empty_group: Some(1),
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({"classLessonCounts":{"group:2":0}}));
+    let (output, result) = run(&config);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(result["words_learned"], 0);
+    assert!(
+        result["message"]
+            .as_str()
+            .unwrap()
+            .contains("No vocabulary")
+    );
+    assert_eq!(count(&server, "/learning"), 0);
 }
 
 #[test]
@@ -478,6 +554,40 @@ fn positional_arrays_cannot_acknowledge_an_answer_or_trigger_an_alternative() {
         assert_eq!(count(&server, "/learning/answer"), 1);
         assert_eq!(count(&server, "/student/context"), 0);
     }
+}
+
+#[test]
+fn duplicate_answer_fields_cannot_acknowledge_or_trigger_an_alternative() {
+    for raw in [
+        r#"{"feedback":{"result":0,"result":1},"step":{"state":"finished"}}"#,
+        r#"{"feedback":{"result":0},"feedback":{"result":1},"step":{"state":"finished"}}"#,
+        r#"{"feedback":{"result":0},"step":{"state":"finished"},"step":{"state":"exercise","exercise":{"type":"flashcard","identifier":1,"main":"dom"}}}"#,
+    ] {
+        let server = site(Options {
+            answer_raw: Some(raw),
+            ..Default::default()
+        });
+        let config = TempConfig::new(&server.base, json!({}));
+        let (output, result) = run(&config);
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(result["error_code"], "PARSING_ERROR");
+        assert_eq!(count(&server, "/learning/answer"), 1);
+        assert_eq!(count(&server, "/learning/start"), 1);
+    }
+}
+
+#[test]
+fn session_expiry_during_an_answer_is_auth_error_without_relogin_or_replay() {
+    let server = site(Options {
+        answer_login: true,
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let (output, result) = run(&config);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(result["error_code"], "AUTH_FAILED");
+    assert_eq!(count(&server, "/learning/answer"), 1);
+    assert_eq!(count(&server, "/h/login"), 2);
 }
 
 #[test]

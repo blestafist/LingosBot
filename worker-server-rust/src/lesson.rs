@@ -249,6 +249,11 @@ fn make_error(rate: u8, perfectionism: bool) -> bool {
 fn answer_delay(config: &Config) -> Duration {
     let min = config.answer_delay_min_ms;
     let max = config.answer_delay_max_ms;
+    // The default fast path does not sample randomness or sleep. Keep the
+    // client wait hook even for zero, so deadlines are still checked per POST.
+    if min == max {
+        return Duration::from_millis(min);
+    }
     // Two bounded samples give a gentle, humanlike central tendency rather than
     // a fixed cadence. Overflow-safe even for the full u64 range.
     let first = fastrand::u64(min..=max);

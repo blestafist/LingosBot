@@ -271,10 +271,12 @@ fn optional_flashcard_ids_must_be_positive_and_unique_when_present() {
     page["wordset"]["flashcards"][0]["id"] = json!(1);
     page["wordset"]["flashcards"][1]["id"] = json!(2);
     assert!(parse_wordset(&page, 1, &set()).is_ok());
-    for invalid in [json!(1), json!(0), json!("2"), Value::Null] {
+    for invalid in [json!(1), json!(0), json!("2")] {
         page["wordset"]["flashcards"][1]["id"] = invalid;
         assert!(parse_wordset(&page, 1, &set()).is_err());
     }
+    page["wordset"]["flashcards"][1]["id"] = Value::Null;
+    assert!(parse_wordset(&page, 1, &set()).is_ok());
 }
 
 #[test]
@@ -295,6 +297,9 @@ fn learning_page_limit_is_recognized_before_required_lesson_fields() {
     assert!(error.is_limit());
     let valid = json!({"status": "ok", "lessonId": 12, "step": {"state": "finished"}});
     assert!(parse_learning_page(valid.clone()).is_ok());
+    let mut large_id = valid.clone();
+    large_id["lessonId"] = json!(u64::MAX);
+    assert_eq!(parse_learning_page(large_id).unwrap().lesson_id, u64::MAX);
     let mut nullable_reason = valid.clone();
     nullable_reason["reason"] = Value::Null;
     assert!(parse_learning_page(nullable_reason).is_ok());
@@ -315,4 +320,52 @@ fn learning_page_limit_is_recognized_before_required_lesson_fields() {
         page[field] = value;
         assert!(parse_learning_page(page).is_err(), "{field}");
     }
+}
+
+#[test]
+fn resolved_counts_match_individual_lookup_including_case_insensitive_group_keys() {
+    let classes = [class("German", 1), class("gErMaN", 2), class("English", 3)];
+    let config = Config {
+        lesson_count: 4,
+        class_lesson_counts: BTreeMap::from([
+            ("GERMAN".into(), 8),
+            ("GROUP:1".into(), 2),
+            ("english".into(), 3),
+        ]),
+        ..Config::default()
+    };
+    let counts = resolve_counts(&config, &classes);
+    assert_eq!(counts, [2, 4, 3]);
+    for (class, count) in classes.iter().zip(counts) {
+        assert_eq!(
+            resolve_count(
+                config.lesson_count,
+                &config.class_lesson_counts,
+                class,
+                &classes
+            ),
+            count
+        );
+    }
+}
+
+#[test]
+fn oversized_discovery_arrays_are_rejected_before_indexing_or_fetching() {
+    let groups: Vec<_> = (1..=MAX_CLASSES + 1)
+        .map(|id| json!({"id":id,"name":"A"}))
+        .collect();
+    assert!(parse_classes(&json!({"groups":groups})).is_err());
+    let mut page = wordsets();
+    page["wordsets"]["wordsets"] = json!(
+        (1..=MAX_WORDSETS + 1)
+            .map(|id| json!({"id":id,"name":"Set"}))
+            .collect::<Vec<_>>()
+    );
+    assert!(parse_wordsets(&page, 1).is_err());
+    let mut page = wordset();
+    page["wordset"]["flashcards"] = json!(vec![
+        json!({"word":"house","translation":"dom"});
+        MAX_WORDSET_CARDS + 1
+    ]);
+    assert!(parse_wordset(&page, 1, &set()).is_err());
 }

@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
+#[cfg(unix)]
 use std::fs::OpenOptions;
+#[cfg(unix)]
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -20,7 +22,7 @@ pub(crate) const MAX_LESSONS: u32 = 10_000;
 const MAX_PROMPT_SAFETY_CAP: usize = 10_000;
 const MAX_DELAY_MS: u64 = 60_000;
 
-/// CLI values (including Clap's environment fallbacks) override JSON values.
+/// CLI values override nonempty environment credentials, then JSON values.
 #[derive(Parser, Default)]
 #[command(
     name = "lingosbot",
@@ -29,17 +31,11 @@ const MAX_DELAY_MS: u64 = 60_000;
 )]
 pub struct Cli {
     /// Login name; falls back to LINGOS_USERNAME.
-    #[arg(short = 'u', long, env = "LINGOS_USERNAME", hide_env_values = true)]
+    #[arg(short = 'u', long)]
     pub username: Option<String>,
 
     /// Password; prefer LINGOS_PASSWORD to avoid exposing it in process arguments.
-    #[arg(
-        short = 'p',
-        long,
-        env = "LINGOS_PASSWORD",
-        allow_hyphen_values = true,
-        hide_env_values = true
-    )]
+    #[arg(short = 'p', long, allow_hyphen_values = true)]
     pub password: Option<String>,
 
     /// Read this JSON file. No file is read or created unless explicitly requested.
@@ -130,8 +126,8 @@ impl Default for Config {
             class_lesson_counts: BTreeMap::new(),
             lesson_prompt_safety_cap: 30,
             errors_per100_words: 0,
-            answer_delay_min_ms: 800,
-            answer_delay_max_ms: 1800,
+            answer_delay_min_ms: 0,
+            answer_delay_max_ms: 0,
             request_timeout_seconds: 30,
             max_run_seconds: 900,
         }
@@ -205,7 +201,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for JsonObject<T> {
 }
 
 impl Cli {
-    /// Resolve CLI/env > top-level JSON > desktop credentials > defaults.
+    /// Resolve CLI > nonempty env > top-level JSON > desktop credentials > defaults.
     /// Only the explicitly supplied config file is read. Passwords are not trimmed.
     pub fn resolve(self) -> Result<Config> {
         let file = match self.config.as_deref() {
@@ -228,17 +224,23 @@ impl Cli {
                 .as_deref()
                 .unwrap_or(DEFAULT_DASHBOARD_PATH),
         )?;
+        let answer_delay_min_ms = self
+            .delay_min_ms
+            .or(file.answer_delay_min_ms)
+            .unwrap_or(defaults.answer_delay_min_ms);
+        let answer_delay_max_ms = self
+            .delay_max_ms
+            .or(file.answer_delay_max_ms)
+            .unwrap_or(defaults.answer_delay_max_ms.max(answer_delay_min_ms));
 
         let config = Config {
-            username: self
-                .username
+            username: credential(self.username, "LINGOS_USERNAME")?
                 .or(file.username)
                 .or(credentials.email)
                 .unwrap_or_default()
                 .trim()
                 .to_owned(),
-            password: self
-                .password
+            password: credential(self.password, "LINGOS_PASSWORD")?
                 .or(file.password)
                 .or(credentials.password)
                 .unwrap_or_default(),
@@ -255,14 +257,8 @@ impl Cli {
             errors_per100_words: file
                 .errors_per100_words
                 .unwrap_or(defaults.errors_per100_words),
-            answer_delay_min_ms: self
-                .delay_min_ms
-                .or(file.answer_delay_min_ms)
-                .unwrap_or(defaults.answer_delay_min_ms),
-            answer_delay_max_ms: self
-                .delay_max_ms
-                .or(file.answer_delay_max_ms)
-                .unwrap_or(defaults.answer_delay_max_ms),
+            answer_delay_min_ms,
+            answer_delay_max_ms,
             request_timeout_seconds: self
                 .timeout_seconds
                 .or(file.request_timeout_seconds)
@@ -350,16 +346,37 @@ impl Config {
     }
 }
 
+fn credential(cli: Option<String>, name: &str) -> Result<Option<String>> {
+    if cli.is_some() {
+        // An explicit empty CLI value must fail validation, not fall back.
+        return Ok(cli);
+    }
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value.into_string().map_err(|_| {
+                Error::config("credential environment variable must contain valid Unicode")
+            })
+        })
+        .transpose()
+}
+
+// Config files are supported only on Unix, matching the Linux-only distribution.
+// Do not open arbitrary device/pipe paths on platforms without O_NONBLOCK.
+#[cfg(not(unix))]
+fn read_config(_path: &Path) -> Result<FileConfig> {
+    Err(Error::config("config files are supported only on Unix"))
+}
+
+#[cfg(unix)]
 fn read_config(path: &Path) -> Result<FileConfig> {
+    use std::os::unix::fs::OpenOptionsExt;
+
     let mut options = OpenOptions::new();
     options.read(true);
     // A FIFO must not block before we can reject it. Inspect the opened file
     // rather than the path, so replacing a symlink cannot bypass this check.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
-    }
+    options.custom_flags(libc::O_NONBLOCK);
     let file = options
         .open(path)
         .map_err(|_| Error::config("could not open config file"))?;

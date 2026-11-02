@@ -70,8 +70,8 @@ fn defaults_are_safe_and_require_explicit_credentials() {
     assert!(config.class_lesson_counts.is_empty());
     assert_eq!(config.lesson_prompt_safety_cap, 30);
     assert_eq!(config.errors_per100_words, 0);
-    assert_eq!(config.answer_delay_min_ms, 800);
-    assert_eq!(config.answer_delay_max_ms, 1800);
+    assert_eq!(config.answer_delay_min_ms, 0);
+    assert_eq!(config.answer_delay_max_ms, 0);
     assert_eq!(config.request_timeout_seconds, 30);
     assert_eq!(config.max_run_seconds, 900);
     assert!(config.validate().is_err());
@@ -105,6 +105,84 @@ fn cli_overrides_json_and_preserves_password_whitespace() {
     assert_eq!(config.answer_delay_max_ms, 400);
     assert_eq!(config.request_timeout_seconds, 20);
     assert_eq!(config.max_run_seconds, 200);
+}
+
+#[test]
+fn missing_delay_bounds_adapt_without_increasing_the_minimum() {
+    for (settings, expected) in [
+        (serde_json::json!({}), (0, 0)),
+        (serde_json::json!({"answerDelayMinMs": 250}), (250, 250)),
+        (serde_json::json!({"answerDelayMaxMs": 250}), (0, 250)),
+        (serde_json::json!({"answerDelayMinMs": 0}), (0, 0)),
+        (serde_json::json!({"answerDelayMaxMs": 0}), (0, 0)),
+        (
+            serde_json::json!({"answerDelayMinMs": 800, "answerDelayMaxMs": 1800}),
+            (800, 1800),
+        ),
+    ] {
+        let mut value = serde_json::json!({"username": "user", "password": "secret"});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(settings.as_object().unwrap().clone());
+        let config = resolve_json(value).unwrap();
+        assert_eq!(
+            (config.answer_delay_min_ms, config.answer_delay_max_ms),
+            expected
+        );
+    }
+
+    for (flag, expected) in [("--delay-min-ms", (250, 250)), ("--delay-max-ms", (0, 250))] {
+        let config = Cli::try_parse_from(["lingosbot", "-u", "user", "-p", "secret", flag, "250"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(
+            (config.answer_delay_min_ms, config.answer_delay_max_ms),
+            expected
+        );
+    }
+}
+
+#[test]
+fn explicit_delay_bounds_are_not_adjusted_across_cli_and_config() {
+    let file = TestFile::new(
+        r#"{"username":"user","password":"secret","answerDelayMinMs":100,"answerDelayMaxMs":200}"#,
+    );
+    let config = Cli {
+        delay_min_ms: Some(0),
+        ..file.cli()
+    }
+    .resolve()
+    .unwrap();
+    assert_eq!(config.answer_delay_min_ms, 0);
+    assert_eq!(config.answer_delay_max_ms, 200);
+    assert!(
+        Cli {
+            delay_min_ms: Some(300),
+            ..file.cli()
+        }
+        .resolve()
+        .is_err()
+    );
+    assert!(
+        Cli {
+            delay_max_ms: Some(0),
+            ..file.cli()
+        }
+        .resolve()
+        .is_err()
+    );
+
+    let file = TestFile::new(r#"{"username":"user","password":"secret","answerDelayMinMs":100}"#);
+    let config = Cli {
+        delay_min_ms: Some(250),
+        ..file.cli()
+    }
+    .resolve()
+    .unwrap();
+    assert_eq!(config.answer_delay_min_ms, 250);
+    assert_eq!(config.answer_delay_max_ms, 250);
 }
 
 #[test]
@@ -298,6 +376,20 @@ fn config_size_is_limited_to_one_mib() {
     bytes.push(b' ');
     let error = TestFile::new(bytes).cli().resolve().unwrap_err();
     assert!(error.to_string().contains("1 MiB"));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_configs_are_supported_but_nonregular_files_are_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let file = TestFile::new(r#"{"username":"user","password":"secret"}"#);
+    let link = TestFile::new(b"");
+    fs::remove_file(&link.0).unwrap();
+    symlink(&file.0, &link.0).unwrap();
+    assert_eq!(link.cli().resolve().unwrap().username, "user");
+    assert!(read_config(Path::new("/dev/null")).is_err());
+    assert!(read_config(file.0.parent().unwrap()).is_err());
 }
 
 #[test]
@@ -624,6 +716,14 @@ fn cli_environment_variables_and_precedence() {
         .unwrap();
         assert_eq!(config.username, "explicit-user");
         assert_eq!(config.password, "explicit-password");
+        for flag in ["--username=", "--password="] {
+            assert!(
+                Cli::try_parse_from(["worker-server-rust", flag])
+                    .unwrap()
+                    .resolve()
+                    .is_err()
+            );
+        }
         let help = Cli::try_parse_from(["worker-server-rust", "--help"])
             .unwrap_err()
             .to_string();
@@ -647,4 +747,87 @@ fn cli_environment_variables_and_precedence() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[test]
+fn empty_environment_credentials_do_not_override_json() {
+    const MARKER: &str = "LINGOS_CONFIG_EMPTY_ENV_TEST_CHILD";
+    if std::env::var_os(MARKER).is_some() {
+        let file = TestFile::new(r#"{"username":"file-user","password":"file-password"}"#);
+        let config = Cli::try_parse_from(["lingosbot", "--config", file.0.to_str().unwrap()])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(config.username, "file-user");
+        assert_eq!(config.password, "file-password");
+        for flag in ["--username=", "--password="] {
+            assert!(
+                Cli::try_parse_from(["lingosbot", "--config", file.0.to_str().unwrap(), flag])
+                    .unwrap()
+                    .resolve()
+                    .is_err()
+            );
+        }
+        return;
+    }
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "empty_environment_credentials_do_not_override_json",
+            "--test-threads=1",
+        ])
+        .env(MARKER, "1")
+        .env("LINGOS_USERNAME", "")
+        .env("LINGOS_PASSWORD", "")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn nonunicode_environment_credentials_are_sanitized_and_cli_can_override_them() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    const MARKER: &str = "LINGOS_CONFIG_NONUNICODE_ENV_TEST_CHILD";
+    const SECRET: &str = "private-invalid-environment-credential";
+    if std::env::var_os(MARKER).is_some() {
+        let error = Cli::try_parse_from(["lingosbot"])
+            .unwrap()
+            .resolve()
+            .unwrap_err();
+        assert_eq!(error.exit_code(), 3);
+        assert!(!format!("{error:?}").contains(SECRET));
+        let config = Cli::try_parse_from([
+            "lingosbot",
+            "-u",
+            "explicit-user",
+            "-p",
+            "explicit-password",
+        ])
+        .unwrap()
+        .resolve()
+        .unwrap();
+        assert_eq!(config.username, "explicit-user");
+        assert_eq!(config.password, "explicit-password");
+        return;
+    }
+    let mut bytes = SECRET.as_bytes().to_vec();
+    bytes.push(0xff);
+    for name in ["LINGOS_USERNAME", "LINGOS_PASSWORD"] {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "nonunicode_environment_credentials_are_sanitized_and_cli_can_override_them",
+                "--test-threads=1",
+            ])
+            .env(MARKER, "1")
+            .env("LINGOS_USERNAME", "environment-user")
+            .env("LINGOS_PASSWORD", "environment-password")
+            .env(name, OsString::from_vec(bytes.clone()))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
 }

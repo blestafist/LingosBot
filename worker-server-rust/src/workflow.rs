@@ -1,7 +1,7 @@
 //! Sequential HTTP orchestration. Every selection and join is confirmed by a
 //! fresh dashboard before a lesson can start; vocabulary is never guessed.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{self, Write};
 
 use serde_json::{Value, json};
@@ -16,11 +16,17 @@ use crate::{
     vocabulary::Vocabulary,
 };
 
+// Bound allocation and work before constructing indices or scheduling requests.
+const MAX_CLASSES: usize = 256;
+const MAX_WORDSETS: usize = 256;
+const MAX_WORDSET_CARDS: usize = 10_000;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RunStats {
     pub words_learned: u64,
     pub lessons_completed: u64,
     pub classes_limited: u64,
+    pub classes_empty: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,7 +63,14 @@ pub fn resolve_count(
     class: &ClassInfo,
     discovered_classes: &[ClassInfo],
 ) -> u32 {
-    if let Some(count) = counts.get(&format!("group:{}", class.group_id)) {
+    if counts.is_empty() {
+        return default_count;
+    }
+    let stable_key = format!("group:{}", class.group_id);
+    if let Some((_, count)) = counts
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&stable_key))
+    {
         return *count;
     }
     // Legacy title settings may only apply when discovery makes them unique.
@@ -75,6 +88,40 @@ pub fn resolve_count(
         .map_or(default_count, |(_, count)| *count)
 }
 
+fn resolve_counts(config: &Config, classes: &[ClassInfo]) -> Vec<u32> {
+    if config.class_lesson_counts.is_empty() {
+        return vec![config.lesson_count; classes.len()];
+    }
+    let overrides: HashMap<_, _> = config
+        .class_lesson_counts
+        .iter()
+        .map(|(key, count)| (key.to_lowercase(), *count))
+        .collect();
+    let mut title_counts = HashMap::new();
+    let titles: Vec<_> = classes
+        .iter()
+        .map(|class| class.title.to_lowercase())
+        .collect();
+    for title in &titles {
+        *title_counts.entry(title.as_str()).or_insert(0_usize) += 1;
+    }
+    classes
+        .iter()
+        .zip(&titles)
+        .map(|(class, title)| {
+            overrides
+                .get(&format!("group:{}", class.group_id))
+                .or_else(|| {
+                    (title_counts.get(title.as_str()) == Some(&1))
+                        .then(|| overrides.get(title))
+                        .flatten()
+                })
+                .copied()
+                .unwrap_or(config.lesson_count)
+        })
+        .collect()
+}
+
 fn titles_equal(left: &str, right: &str) -> bool {
     left.to_lowercase() == right.to_lowercase()
 }
@@ -86,6 +133,11 @@ pub fn parse_classes(dashboard: &Value) -> Result<Vec<ClassInfo>> {
         .as_array()
         .filter(|groups| !groups.is_empty())
         .ok_or_else(|| Error::parsing("Missing, empty or invalid dashboard groups."))?;
+    if groups.len() > MAX_CLASSES {
+        return Err(Error::parsing(
+            "Dashboard exceeds the 256-class safety limit.",
+        ));
+    }
     let mut classes = Vec::with_capacity(groups.len());
     let mut ids = HashSet::with_capacity(groups.len());
     for group in groups {
@@ -168,6 +220,11 @@ pub fn parse_wordsets(page: &Value, expected_group: i64) -> Result<Vec<WordsetIn
     let sets = required(data, "wordsets")?
         .as_array()
         .ok_or_else(|| Error::parsing("Invalid HTTP wordset list."))?;
+    if sets.len() > MAX_WORDSETS {
+        return Err(Error::parsing(
+            "Vocabulary exceeds the 256-wordset safety limit.",
+        ));
+    }
     let mut ids = HashSet::with_capacity(sets.len());
     let mut result = Vec::with_capacity(sets.len());
     for set in sets {
@@ -198,6 +255,11 @@ pub fn parse_wordset(
     let cards = required(data, "flashcards")?
         .as_array()
         .ok_or_else(|| Error::parsing("Invalid HTTP flashcard array."))?;
+    if cards.len() > MAX_WORDSET_CARDS {
+        return Err(Error::parsing(
+            "Wordset exceeds the 10000-card safety limit.",
+        ));
+    }
     for total in [
         expected_set.expected_count,
         optional_total(metadata)?,
@@ -215,9 +277,9 @@ pub fn parse_wordset(
     let mut entries = Vec::with_capacity(cards.len());
     let mut ids = HashSet::new();
     for card in cards {
-        // Some site versions do not send card IDs. If supplied, they must be
-        // positive and unique within this wordset, never silently discarded.
-        if card.get("id").is_some() && !ids.insert(positive_id(card, "id")?) {
+        // Card IDs are optional metadata; absent/null IDs need no validation.
+        // A non-null ID must still be positive and unique within this set.
+        if card.get("id").is_some_and(|id| !id.is_null()) && !ids.insert(positive_id(card, "id")?) {
             return Err(Error::parsing("Duplicate HTTP flashcard ID."));
         }
         entries.push(VocabularyEntry {
@@ -243,7 +305,12 @@ pub fn parse_learning_page(page: Value) -> Result<LearningProps> {
     if required(&page, "status")?.as_str() != Some("ok") {
         return Err(Error::parsing("Unrecognized learning page status."));
     }
-    positive_id(&page, "lessonId")?;
+    if required(&page, "lessonId")?
+        .as_u64()
+        .is_none_or(|id| id == 0)
+    {
+        return Err(Error::parsing("Invalid HTTP lesson identifier."));
+    }
     if !required(&page, "step")?.is_object() {
         return Err(Error::parsing("Missing or invalid learning page step."));
     }
@@ -257,37 +324,34 @@ pub fn run(
     initial_dashboard_page: Value,
 ) -> Result<RunStats> {
     let initial = parse_dashboard(&initial_dashboard_page, None)?;
-    let classes = initial.classes;
+    let classes = initial.classes.clone();
     // Do not retain an initial page (or its stale challenge state) across runs.
     drop(initial_dashboard_page);
     let mut stats = RunStats::default();
+    let counts = resolve_counts(config, &classes);
+    // login() just fetched and validated this dashboard. Reuse it only for
+    // initial selection, never as a stale challenge snapshot after a lesson.
+    let mut initial = Some(initial);
 
     // Include default counts, not only explicit overrides, in the run budget.
-    classes.iter().try_fold(0_u32, |total, class| {
+    counts.iter().try_fold(0_u32, |total, count| {
         total
-            .checked_add(resolve_count(
-                config.lesson_count,
-                &config.class_lesson_counts,
-                class,
-                &classes,
-            ))
+            .checked_add(*count)
             .filter(|total| *total <= crate::config::MAX_LESSONS)
             .ok_or_else(|| {
                 Error::config("Total lessons across discovered classes must not exceed 10000.")
             })
     })?;
 
-    for class in &classes {
-        let count = resolve_count(
-            config.lesson_count,
-            &config.class_lesson_counts,
-            class,
-            &classes,
-        );
+    for (class, count) in classes.iter().zip(counts) {
         if count == 0 {
             continue;
         }
-        match run_class(session, config, class, count, &mut stats) {
+        let dashboard = match initial.take() {
+            Some(dashboard) => dashboard,
+            None => read_dashboard(session, config, None)?,
+        };
+        match run_class(session, config, class, count, &mut stats, dashboard) {
             Ok(()) => {}
             Err(error) if error.is_limit() => {
                 stats.classes_limited += 1;
@@ -310,9 +374,9 @@ fn run_class(
     class: &ClassInfo,
     count: u32,
     stats: &mut RunStats,
+    mut dashboard: Dashboard,
 ) -> Result<()> {
     let group_id = class.group_id;
-    let mut dashboard = read_dashboard(session, config, None)?;
     if dashboard.current_group_id != group_id {
         let (url, body) = group_switch_request(&dashboard, group_id)?;
         session.post(url, Some(&body))?;
@@ -320,6 +384,14 @@ fn run_class(
     }
     check_limit(&dashboard)?;
     let vocabulary = collect_vocabulary(session, group_id)?;
+    if vocabulary.is_empty() {
+        stats.classes_empty += 1;
+        let _ = writeln!(
+            io::stderr().lock(),
+            "Class has no vocabulary; skipping its lessons."
+        );
+        return Ok(());
+    }
 
     for _ in 0..count {
         // Always read afresh, including after lesson completion and joins.
@@ -377,14 +449,11 @@ fn collect_vocabulary(session: &Session, group_id: i64) -> Result<Vocabulary> {
     // detail page before the next request; never cache all wordset HTML/props.
     for set in sets {
         let page = session.get_page(&format!("/student/wordsets/{}", set.id))?;
-        for entry in parse_wordset(&page, group_id, &set)? {
+        let entries = parse_wordset(&page, group_id, &set)?;
+        drop(page);
+        for entry in entries {
             vocabulary.insert(&entry.word, &entry.translation)?;
         }
-    }
-    if vocabulary.is_empty() {
-        return Err(Error::parsing(
-            "No HTTP vocabulary collected; stopped without guessing.",
-        ));
     }
     Ok(vocabulary)
 }

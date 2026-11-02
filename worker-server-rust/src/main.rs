@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use serde::Serialize;
 use std::io::{self, Write};
 use std::process::ExitCode;
@@ -33,15 +33,12 @@ fn write_json(value: &impl Serialize) -> io::Result<()> {
 
 fn failure(error: Error, json: bool) -> ExitCode {
     if json {
-        if write_json(&Failure {
+        // Preserve the original failure even if its diagnostic cannot be written.
+        let _ = write_json(&Failure {
             success: false,
             error_code: error.code(),
             message: &error.message,
-        })
-        .is_err()
-        {
-            return ExitCode::from(2);
-        }
+        });
     } else {
         let _ = writeln!(io::stderr().lock(), "{}: {}", error.code(), error.message);
     }
@@ -66,8 +63,7 @@ fn run(config: &Config) -> Result<RunStats> {
 fn main() -> ExitCode {
     let start = Instant::now();
     let args: Vec<_> = std::env::args_os().collect();
-    let wants_json = args.iter().skip(1).any(|arg| arg == "--json");
-    let cli = match Cli::try_parse_from(args) {
+    let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
         Err(error)
             if matches!(
@@ -82,6 +78,12 @@ fn main() -> ExitCode {
             };
         }
         Err(_) => {
+            // Use only flags clap recognized before the first parse error. In
+            // particular, a password of "--json" is not an output-format flag.
+            let wants_json = Cli::command()
+                .ignore_errors(true)
+                .try_get_matches_from(args)
+                .is_ok_and(|matches| matches.get_flag("json"));
             // clap diagnostics may quote a supplied password or environment value.
             return failure(
                 Error::config("Invalid command-line arguments; use --help."),
@@ -100,6 +102,8 @@ fn main() -> ExitCode {
                 "Lesson completed successfully"
             } else if stats.classes_limited > 0 {
                 "Daily lesson limit reached; no lessons completed"
+            } else if stats.classes_empty > 0 {
+                "No vocabulary available; no lessons completed"
             } else {
                 "No lessons selected"
             };
