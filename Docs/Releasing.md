@@ -18,6 +18,7 @@ lingosbot-x86_64-unknown-linux-musl, lingosbot-aarch64-unknown-linux-musl (+ .sh
 
 - Desktop archives are self-contained single-file builds cross-compiled on Linux, each with exactly `LingosBot[.exe]` and `selenium-manager[.exe]` at the root. CI does not run them on Windows or macOS.
 - Rust binaries are static musl builds compiled natively on x86_64 and aarch64. Each passes ELF architecture/static-link checks (no `INTERP` or `NEEDED`), `--version`/`--help` smoke checks and `sha256sum -c`. None of these checks need a Lingos account.
+- On tag builds the tag version is stamped into the Rust binary (`v1.6.0` gives `lingosbot --version` = `lingosbot 1.6.0`) and verified; `Cargo.toml` in the repository stays unchanged. The tag must therefore be valid semver after the `v`, e.g. `v1.6.0` or `v1.6.0-beta.1`; otherwise the build fails.
 - The draft is created only if every test and build succeeded and the tagged commit is contained in `main`.
 - Tags containing `-alpha`, `-beta`, `-rc` or `-pre` are created as **pre-releases**.
 

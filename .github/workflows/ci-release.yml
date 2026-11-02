@@ -70,6 +70,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: worker-server-rust
+      - name: Stamp the tag version into the binary
+        # `lingosbot --version` must match the release tag (v1.6.0 -> 1.6.0).
+        # Done in the CI checkout only; Cargo.toml in the repository is untouched.
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
+          cargo update --workspace
+          cargo metadata --locked --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; v=json.load(sys.stdin)["packages"][0]["version"]; assert v == sys.argv[1], v' "$VERSION"
       - run: sudo apt-get update && sudo apt-get install -y musl-tools binutils
       - run: cargo test --locked --target ${{ matrix.target }}
       - run: cargo build --locked --release --target ${{ matrix.target }}
@@ -90,6 +102,9 @@ jobs:
           fi
           "$BINARY" --version
           "$BINARY" --help
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            test "$("$BINARY" --version)" = "lingosbot ${GITHUB_REF_NAME#v}"
+          fi
       - name: Package binary and checksum
         env:
           TARGET: ${{ matrix.target }}
