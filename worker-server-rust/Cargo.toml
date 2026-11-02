@@ -3,7 +3,6 @@ name = "worker-server-rust"
 version = "0.1.0"
 edition = "2024"
 description = "Small, fail-closed Lingos HTTP lesson worker"
-license = "MIT"
 
 [[bin]]
 name = "lingosbot"

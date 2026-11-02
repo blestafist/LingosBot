@@ -1,0 +1,650 @@
+use super::*;
+use clap::error::ErrorKind;
+use std::fs;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
+
+struct TestFile(PathBuf);
+
+impl TestFile {
+    fn new(contents: impl AsRef<[u8]>) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "lingos-config-{}-{}.json",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, contents.as_ref()).unwrap();
+        Self(path)
+    }
+
+    fn cli(&self) -> Cli {
+        Cli {
+            config: Some(self.0.clone()),
+            ..Cli::default()
+        }
+    }
+}
+
+impl Drop for TestFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn valid_config() -> Config {
+    Config {
+        username: "student@example.test".to_owned(),
+        password: "test-password".to_owned(),
+        ..Config::default()
+    }
+}
+
+fn resolve_json(value: serde_json::Value) -> Result<Config> {
+    TestFile::new(serde_json::to_vec(&value).unwrap())
+        .cli()
+        .resolve()
+}
+
+fn with_setting(name: &str, value: serde_json::Value) -> Result<Config> {
+    let mut settings = serde_json::json!({"username": "student", "password": "secret"});
+    settings[name] = value;
+    resolve_json(settings)
+}
+
+#[test]
+fn defaults_are_safe_and_require_explicit_credentials() {
+    let config = Config::default();
+    assert_eq!(config.base_url, "https://lingos.pl");
+    assert_eq!(
+        config.student_dashboard_url,
+        "https://lingos.pl/student/dashboard"
+    );
+    assert_eq!(config.lesson_count, 1);
+    assert!(config.class_lesson_counts.is_empty());
+    assert_eq!(config.lesson_prompt_safety_cap, 30);
+    assert_eq!(config.errors_per100_words, 0);
+    assert_eq!(config.answer_delay_min_ms, 800);
+    assert_eq!(config.answer_delay_max_ms, 1800);
+    assert_eq!(config.request_timeout_seconds, 30);
+    assert_eq!(config.max_run_seconds, 900);
+    assert!(config.validate().is_err());
+    assert!(Cli::default().resolve().is_err());
+    assert!(valid_config().validate().is_ok());
+}
+
+#[test]
+fn cli_overrides_json_and_preserves_password_whitespace() {
+    let file = TestFile::new(
+        r#"{"username":"file-user","password":"file-password","lessonCount":2,
+                "answerDelayMinMs":100,"answerDelayMaxMs":200,
+                "requestTimeoutSeconds":10,"maxRunSeconds":100}"#,
+    );
+    let config = Cli {
+        username: Some("  cli-user  ".to_owned()),
+        password: Some("  -cli-password  ".to_owned()),
+        lessons: Some(3),
+        delay_min_ms: Some(300),
+        delay_max_ms: Some(400),
+        timeout_seconds: Some(20),
+        max_run_seconds: Some(200),
+        ..file.cli()
+    }
+    .resolve()
+    .unwrap();
+    assert_eq!(config.username, "cli-user");
+    assert_eq!(config.password, "  -cli-password  ");
+    assert_eq!(config.lesson_count, 3);
+    assert_eq!(config.answer_delay_min_ms, 300);
+    assert_eq!(config.answer_delay_max_ms, 400);
+    assert_eq!(config.request_timeout_seconds, 20);
+    assert_eq!(config.max_run_seconds, 200);
+}
+
+#[test]
+fn desktop_shape_and_unrelated_browser_fields_are_supported() {
+    let config = resolve_json(serde_json::json!({
+        "credentials": {"email": "  desktop@example.test  ", "password": " pass "},
+        "browserBinaryPath": null, "browser": "Chrome", "headless": false,
+        "useLessonApi": true, "mode": "api", "lessonCount": 2,
+        "classLessonCounts": {"disabled": 0, "group:42": 3},
+        "lessonPromptSafetyCap": null
+    }))
+    .unwrap();
+    assert_eq!(config.username, "desktop@example.test");
+    assert_eq!(config.password, " pass ");
+    assert_eq!(config.class_lesson_counts["disabled"], 0);
+    assert_eq!(config.class_lesson_counts["group:42"], 3);
+    assert_eq!(config.lesson_prompt_safety_cap, 30);
+}
+
+#[test]
+fn top_level_credentials_override_desktop_per_field() {
+    let config = resolve_json(serde_json::json!({
+        "username": "top-user",
+        "credentials": {"email": "desktop-user", "password": "desktop-password"}
+    }))
+    .unwrap();
+    assert_eq!(config.username, "top-user");
+    assert_eq!(config.password, "desktop-password");
+    let config = resolve_json(serde_json::json!({
+        "password": "top-password",
+        "credentials": {"email": "desktop-user", "password": "desktop-password"}
+    }))
+    .unwrap();
+    assert_eq!(config.username, "desktop-user");
+    assert_eq!(config.password, "top-password");
+}
+
+#[test]
+fn numeric_login_strings_are_supported_without_coercing_json_numbers() {
+    let config = resolve_json(serde_json::json!({
+        "username": "  123456  ", "password": "secret"
+    }))
+    .unwrap();
+    assert_eq!(config.username, "123456");
+    assert!(
+        resolve_json(serde_json::json!({
+            "username": 123456, "password": "secret"
+        }))
+        .is_err()
+    );
+    assert!(
+        resolve_json(serde_json::json!({
+            "credentials": {"email": 123456, "password": "secret"}
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn json_must_be_an_object_even_when_cli_provides_credentials() {
+    for contents in [
+        "null",
+        "[]",
+        "[null,null,null,null,null,null,null,null,null,null,null,null,null,null]",
+        "123",
+        "\"not-an-object\"",
+    ] {
+        let file = TestFile::new(contents);
+        assert!(
+            Cli {
+                username: Some("user".into()),
+                password: Some("secret".into()),
+                ..file.cli()
+            }
+            .resolve()
+            .is_err(),
+            "accepted non-object JSON"
+        );
+    }
+}
+
+#[test]
+fn credentials_must_be_an_object_and_duplicate_fields_are_rejected() {
+    for contents in [
+        r#"{"credentials":["user","password"]}"#,
+        r#"{"username":"first","username":"second","password":"secret"}"#,
+        r#"{"credentials":{"email":"user","password":"first","password":"second"}}"#,
+        r#"{"username":"user","password":"secret","lessonCount":1,"lesson_count":2}"#,
+    ] {
+        let file = TestFile::new(contents);
+        assert!(
+            Cli {
+                username: Some("user".into()),
+                password: Some("secret".into()),
+                ..file.cli()
+            }
+            .resolve()
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn snake_case_aliases_cover_all_settings() {
+    let config = resolve_json(serde_json::json!({
+        "username": "user", "password": "secret",
+        "base_url": "https://example.test/",
+        "student_dashboard_url": "/student/../student/dashboard",
+        "lesson_count": 4, "class_lesson_counts": {"class": 5},
+        "lesson_prompt_safety_cap": 40, "errors_per100_words": 2,
+        "answer_delay_min_ms": 10, "answer_delay_max_ms": 20,
+        "request_timeout_seconds": 40, "max_run_seconds": 400
+    }))
+    .unwrap();
+    assert_eq!(config.base_url, "https://example.test");
+    assert_eq!(
+        config.student_dashboard_url,
+        "https://example.test/student/dashboard"
+    );
+    assert_eq!(config.lesson_count, 4);
+    assert_eq!(config.class_lesson_counts["class"], 5);
+    assert_eq!(config.lesson_prompt_safety_cap, 40);
+    assert_eq!(config.errors_per100_words, 2);
+    assert_eq!(config.answer_delay_min_ms, 10);
+    assert_eq!(config.answer_delay_max_ms, 20);
+    assert_eq!(config.request_timeout_seconds, 40);
+    assert_eq!(config.max_run_seconds, 400);
+}
+
+#[test]
+fn missing_and_blank_credentials_are_rejected_without_falling_back() {
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"username": "user"}),
+        serde_json::json!({"password": "secret"}),
+        serde_json::json!({"username": " \t", "password": "secret"}),
+        serde_json::json!({"username": "user", "password": " \n"}),
+        serde_json::json!({"username": "", "credentials": {"email": "fallback", "password": "pass"}}),
+        serde_json::json!({"password": "", "credentials": {"email": "fallback", "password": "pass"}}),
+    ] {
+        assert!(resolve_json(value).is_err());
+    }
+    let file = TestFile::new(r#"{"username":"user","password":"secret"}"#);
+    assert!(
+        Cli {
+            password: Some(" ".into()),
+            ..file.cli()
+        }
+        .resolve()
+        .is_err()
+    );
+}
+
+#[test]
+fn malformed_json_and_incorrect_credential_types_do_not_leak_values() {
+    let secret = "unique-sensitive-test-string";
+    for contents in [
+        format!(r#"{{"password":"{secret}","username":"user""#),
+        format!(r#"{{"username":123,"password":"{secret}"}}"#),
+        format!(r#"{{"username":"user","password":{{"value":"{secret}"}}}}"#),
+        format!(r#"{{"credentials":{{"email":123,"password":"{secret}"}}}}"#),
+        format!(r#"{{"credentials":"{secret}"}}"#),
+        format!(r#"{{"username":"user","password":"secret","lessonCount":"{secret}"}}"#),
+        format!(r#"{{"username":"user","password":"secret","mode":"{secret}"}}"#),
+        format!(
+            r#"{{"username":"user","password":"secret","baseUrl":"https://{secret}@example.test"}}"#
+        ),
+        "null".to_owned(),
+        "[]".to_owned(),
+        String::new(),
+    ] {
+        let error = TestFile::new(contents).cli().resolve().unwrap_err();
+        assert!(!error.to_string().contains(secret));
+        assert!(!format!("{error:?}").contains(secret));
+    }
+}
+
+#[test]
+fn missing_explicit_file_is_not_created() {
+    let file = TestFile::new(b"");
+    fs::remove_file(&file.0).unwrap();
+    assert!(file.cli().resolve().is_err());
+    assert!(!file.0.exists());
+}
+
+#[test]
+fn config_size_is_limited_to_one_mib() {
+    let mut bytes = br#"{"username":"user","password":"secret"}"#.to_vec();
+    bytes.resize(MAX_CONFIG_BYTES as usize, b' ');
+    assert!(TestFile::new(&bytes).cli().resolve().is_ok());
+    bytes.push(b' ');
+    let error = TestFile::new(bytes).cli().resolve().unwrap_err();
+    assert!(error.to_string().contains("1 MiB"));
+}
+
+#[test]
+fn only_api_or_unspecified_mode_is_supported() {
+    for mode in [
+        serde_json::Value::Null,
+        serde_json::json!(""),
+        serde_json::json!(" \t"),
+        serde_json::json!("api"),
+        serde_json::json!(" API "),
+    ] {
+        assert!(with_setting("mode", mode).is_ok());
+    }
+    for mode in [
+        serde_json::json!("browser"),
+        serde_json::json!("headless"),
+        serde_json::json!(42),
+    ] {
+        assert!(with_setting("mode", mode).is_err());
+    }
+}
+
+#[test]
+fn default_dashboard_follows_normalized_base_origin() {
+    let config = with_setting("baseUrl", serde_json::json!("HTTPS://EXAMPLE.TEST:443/")).unwrap();
+    assert_eq!(config.base_url, "https://example.test");
+    assert_eq!(
+        config.student_dashboard_url,
+        "https://example.test/student/dashboard"
+    );
+    for origin in [
+        "http://localhost:8080",
+        "http://127.0.0.1:1234",
+        "http://127.4.5.6:8080",
+        "http://[::1]:8080",
+    ] {
+        let config = with_setting("baseUrl", serde_json::json!(origin)).unwrap();
+        assert_eq!(
+            config.student_dashboard_url,
+            format!("{origin}/student/dashboard")
+        );
+        assert!(config.validate().is_ok());
+    }
+}
+
+#[test]
+fn unsafe_or_non_origin_base_urls_are_rejected() {
+    for origin in [
+        "",
+        "lingos.pl",
+        "https:lingos.pl",
+        "ftp://lingos.pl",
+        "http://lingos.pl",
+        "http://localhost.evil.test",
+        "http://192.168.1.1",
+        "http://0.0.0.0",
+        "http://[::]",
+        "https://user:secret@lingos.pl",
+        "https://@lingos.pl",
+        "https://lingos.pl/path",
+        "https://lingos.pl/a/..",
+        "https://lingos.pl?",
+        "https://lingos.pl?token=secret",
+        "https://lingos.pl#",
+        "https://lingos.pl/#fragment",
+        "https://lin\ngos.pl",
+        "https://lingos.pl\\path",
+    ] {
+        assert!(
+            with_setting("baseUrl", serde_json::json!(origin)).is_err(),
+            "accepted {origin:?}"
+        );
+    }
+}
+
+#[test]
+fn dashboard_accepts_same_origin_absolute_or_relative_urls_and_normalizes() {
+    for dashboard in [
+        "/student/../student/dashboard",
+        "student/dashboard",
+        "https://LINGOS.PL:443/student/dashboard",
+    ] {
+        let config = with_setting("studentDashboardUrl", serde_json::json!(dashboard)).unwrap();
+        assert_eq!(
+            config.student_dashboard_url,
+            "https://lingos.pl/student/dashboard"
+        );
+    }
+    for dashboard in [
+        "",
+        "https://evil.test/student/dashboard",
+        "//evil.test/student/dashboard",
+        "http://lingos.pl/student/dashboard",
+        "https://lingos.pl:444/student/dashboard",
+        "https://user:secret@lingos.pl/student/dashboard",
+        "https://@lingos.pl/student/dashboard",
+        "/student/dashboard?token=secret",
+        "/student/dashboard#fragment",
+        "javascript:alert(1)",
+    ] {
+        assert!(with_setting("studentDashboardUrl", serde_json::json!(dashboard)).is_err());
+    }
+}
+
+#[test]
+fn invalid_numeric_json_values_are_rejected() {
+    for (name, values) in [
+        (
+            "lessonCount",
+            vec![
+                serde_json::json!(0),
+                serde_json::json!(-1),
+                serde_json::json!(10001),
+                serde_json::json!(1.5),
+                serde_json::json!(4294967296_u64),
+            ],
+        ),
+        (
+            "lessonPromptSafetyCap",
+            vec![
+                serde_json::json!(0),
+                serde_json::json!(-1),
+                serde_json::json!(10001),
+            ],
+        ),
+        (
+            "errorsPer100Words",
+            vec![
+                serde_json::json!(-1),
+                serde_json::json!(101),
+                serde_json::json!(256),
+            ],
+        ),
+        (
+            "answerDelayMinMs",
+            vec![serde_json::json!(-1), serde_json::json!(60001)],
+        ),
+        (
+            "answerDelayMaxMs",
+            vec![serde_json::json!(-1), serde_json::json!(60001)],
+        ),
+        (
+            "requestTimeoutSeconds",
+            vec![
+                serde_json::json!(0),
+                serde_json::json!(-1),
+                serde_json::json!(301),
+            ],
+        ),
+        (
+            "maxRunSeconds",
+            vec![
+                serde_json::json!(0),
+                serde_json::json!(-1),
+                serde_json::json!(86401),
+            ],
+        ),
+    ] {
+        for value in values {
+            assert!(
+                with_setting(name, value).is_err(),
+                "accepted invalid {name}"
+            );
+        }
+    }
+    assert!(resolve_json(serde_json::json!({"username": "u", "password": "p", "answerDelayMinMs": 101, "answerDelayMaxMs": 100})).is_err());
+}
+
+#[test]
+fn numeric_boundaries_and_disabled_class_overrides_are_valid() {
+    let mut config = valid_config();
+    config.lesson_count = MAX_LESSONS;
+    config.class_lesson_counts.insert("disabled".into(), 0);
+    config
+        .class_lesson_counts
+        .insert("class".into(), MAX_LESSONS);
+    config.lesson_prompt_safety_cap = MAX_PROMPT_SAFETY_CAP;
+    config.errors_per100_words = 100;
+    config.answer_delay_min_ms = 0;
+    config.answer_delay_max_ms = MAX_DELAY_MS;
+    config.request_timeout_seconds = 300;
+    config.max_run_seconds = 86_400;
+    assert!(config.validate().is_ok());
+    config.answer_delay_max_ms = 0;
+    config.request_timeout_seconds = 1;
+    config.max_run_seconds = 1;
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn class_counts_require_nonblank_names_and_an_aggregate_budget() {
+    for counts in [
+        serde_json::json!({" ": 1}),
+        serde_json::json!({"class": -1}),
+        serde_json::json!({"class": 10001}),
+        serde_json::json!({"class": 1.5}),
+        serde_json::json!({"a": 6000, "b": 4001}),
+    ] {
+        assert!(with_setting("classLessonCounts", counts).is_err());
+    }
+    let mut config = valid_config();
+    config.class_lesson_counts = (0..=MAX_LESSONS)
+        .map(|index| (index.to_string(), 0))
+        .collect();
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn validate_checks_directly_constructed_configs() {
+    let mut config = valid_config();
+    config.base_url = "http://example.test".into();
+    assert!(config.validate().is_err());
+    config = valid_config();
+    config.student_dashboard_url = "https://evil.test/dashboard".into();
+    assert!(config.validate().is_err());
+    config = valid_config();
+    config.lesson_count = 0;
+    assert!(config.validate().is_err());
+    config = valid_config();
+    config.answer_delay_min_ms = u64::MAX;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn debug_output_does_not_expose_credentials_or_other_secret_strings() {
+    let secret = "unique-sensitive-test-string";
+    let cli = Cli {
+        username: Some(secret.into()),
+        password: Some(secret.into()),
+        config: Some(PathBuf::from(secret)),
+        ..Cli::default()
+    };
+    let config = Config {
+        username: secret.into(),
+        password: secret.into(),
+        base_url: secret.into(),
+        student_dashboard_url: secret.into(),
+        class_lesson_counts: BTreeMap::from([(secret.into(), 1)]),
+        ..Config::default()
+    };
+    assert!(!format!("{cli:?}").contains(secret));
+    assert!(!format!("{config:?}").contains(secret));
+    assert!(format!("{config:?}").contains("redacted"));
+}
+
+#[test]
+fn cli_parses_short_credentials_hyphen_passwords_and_extra_flags() {
+    let cli = Cli::try_parse_from([
+        "worker-server-rust",
+        "-u",
+        "user",
+        "-p",
+        "-starts-with-a-hyphen",
+        "--json",
+        "--lessons",
+        "4",
+        "--delay-min-ms",
+        "0",
+        "--delay-max-ms",
+        "0",
+        "--timeout-seconds",
+        "1",
+        "--max-run-seconds",
+        "2",
+    ])
+    .unwrap();
+    assert!(cli.json);
+    let config = cli.resolve().unwrap();
+    assert_eq!(config.password, "-starts-with-a-hyphen");
+    assert_eq!(config.lesson_count, 4);
+    assert_eq!(config.answer_delay_min_ms, 0);
+    assert_eq!(config.answer_delay_max_ms, 0);
+    assert_eq!(config.request_timeout_seconds, 1);
+    assert_eq!(config.max_run_seconds, 2);
+    assert!(Cli::try_parse_from(["worker-server-rust", "--lessons", "-1"]).is_err());
+    assert!(
+        Cli::try_parse_from(["worker-server-rust", "--base-url", "https://evil.test"]).is_err()
+    );
+}
+
+#[test]
+fn cli_help_and_automatic_version_are_available() {
+    let help = Cli::try_parse_from(["worker-server-rust", "--help"]).unwrap_err();
+    assert_eq!(help.kind(), ErrorKind::DisplayHelp);
+    assert!(help.to_string().contains("LINGOS_PASSWORD"));
+    assert_eq!(
+        Cli::try_parse_from(["worker-server-rust", "--version"])
+            .unwrap_err()
+            .kind(),
+        ErrorKind::DisplayVersion
+    );
+}
+
+#[test]
+fn cli_environment_variables_and_precedence() {
+    // Isolate environment changes in a child process instead of invoking
+    // unsafe set_var while other Rust tests may be reading the environment.
+    const MARKER: &str = "LINGOS_CONFIG_TEST_CHILD";
+    const PASSWORD: &str = "unique-password-only-in-child-environment";
+    if std::env::var_os(MARKER).is_some() {
+        let config = Cli::try_parse_from(["worker-server-rust"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(config.username, "environment-user");
+        assert_eq!(config.password, PASSWORD);
+        let file = TestFile::new(r#"{"username":"file-user","password":"file-password"}"#);
+        let config =
+            Cli::try_parse_from(["worker-server-rust", "--config", file.0.to_str().unwrap()])
+                .unwrap()
+                .resolve()
+                .unwrap();
+        assert_eq!(config.username, "environment-user");
+        assert_eq!(config.password, PASSWORD);
+        let config = Cli::try_parse_from([
+            "worker-server-rust",
+            "-u",
+            "explicit-user",
+            "-p",
+            "explicit-password",
+        ])
+        .unwrap()
+        .resolve()
+        .unwrap();
+        assert_eq!(config.username, "explicit-user");
+        assert_eq!(config.password, "explicit-password");
+        let help = Cli::try_parse_from(["worker-server-rust", "--help"])
+            .unwrap_err()
+            .to_string();
+        assert!(!help.contains(PASSWORD));
+        assert!(!help.contains("environment-user"));
+        return;
+    }
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "cli_environment_variables_and_precedence",
+            "--test-threads=1",
+        ])
+        .env(MARKER, "1")
+        .env("LINGOS_USERNAME", "  environment-user  ")
+        .env("LINGOS_PASSWORD", PASSWORD)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "environment subprocess failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}

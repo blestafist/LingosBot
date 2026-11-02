@@ -1,5 +1,7 @@
 use super::html;
 use crate::error::{Error, Result};
+use crate::lesson::LessonClient;
+use crate::models::{AnswerRequest, AnswerResult, LearningProps};
 use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION};
 use reqwest::{StatusCode, Url};
@@ -16,6 +18,24 @@ pub struct Session {
     origin: Url,
     timeout: Duration,
     deadline: Instant,
+}
+
+impl LessonClient for Session {
+    fn navigate(&mut self, url: &str) -> Result<LearningProps> {
+        serde_json::from_value(self.get_page(url)?)
+            .map_err(|_| Error::parsing("Invalid learning page data; stopped safely."))
+    }
+
+    fn answer(&mut self, lesson_id: u64, request: &AnswerRequest) -> Result<AnswerResult> {
+        let body = serde_json::to_value(request)
+            .map_err(|_| Error::parsing("Could not encode the answer request."))?;
+        serde_json::from_value(self.post(&format!("/learning/answer/{lesson_id}"), Some(&body))?)
+            .map_err(|_| Error::parsing("Invalid answer response; request was not replayed."))
+    }
+
+    fn wait(&mut self, duration: Duration) -> Result<()> {
+        Session::wait(self, duration)
+    }
 }
 
 impl Session {
