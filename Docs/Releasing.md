@@ -1,32 +1,55 @@
 # Creating A Release
 
-The Rust HTTP worker and legacy .NET desktop application have separate release assets and procedures. Commands below use **Bash on Linux**, from the repository root.
+Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../.github/workflows/ci-release.yml). One tag `v*` produces one draft containing both the legacy .NET desktop archives and the Rust worker binaries. Commands below use **Bash on Linux**, from the repository root.
 
-## Rust HTTP Worker (Linux)
+## What the workflow does
 
-[`.github/workflows/rust-worker.yml`](../.github/workflows/rust-worker.yml) runs on branch pushes and pull requests matching its worker/workflow path filters, manual dispatches, and `worker-v*` tags. It runs fmt/clippy/test and builds and tests musl natively on x86_64 and aarch64. Before upload, each binary must pass ELF architecture/static-link checks (no `INTERP` or `NEEDED`), native `--version`/`--help` smoke checks, and `sha256sum -c`. These checks do not require a Lingos account or contact Lingos.
+| Event | Result |
+| --- | --- |
+| Push to any branch, pull request | Rust (`fmt`, `clippy`, tests) and desktop (`dotnet test`) checks, plus a build of every artifact. **Nothing is published.** |
+| Push of a tag `v*`, or a manual run on such a tag | The same checks and builds, then a **draft** release. |
 
-Select the intended commit and a new, unused tag matching `version` in `worker-server-rust/Cargo.toml` exactly. Check `git status --short` before tagging; stop if there are unexpected local changes or the wrong commit is checked out:
-
-```bash
-git status --short
-TAG=worker-v0.1.0  # Example: must match worker-server-rust/Cargo.toml.
-git tag "$TAG"
-git push origin "$TAG"
-```
-
-The workflow rejects a version/tag mismatch. Branch runs, including manual dispatches on branches, validate both architectures without publishing. Manual dispatches on a `worker-v*` tag follow the same guarded publication path as tag pushes.
-
-Each matrix job uploads its checked binary and checksum as a workflow artifact. A single publish job waits for the checks and **both** native builds, downloads the artifacts, verifies both pairs with `sha256sum -c`, and uploads all four files into a draft release:
+Artifacts of a draft (12 files):
 
 ```text
-lingosbot-x86_64-unknown-linux-musl
-lingosbot-x86_64-unknown-linux-musl.sha256
-lingosbot-aarch64-unknown-linux-musl
-lingosbot-aarch64-unknown-linux-musl.sha256
+win-x64.zip, linux-x64.zip, macos-x86_64.zip, macos-arm64.zip           (+ .sha256 each)
+lingosbot-x86_64-unknown-linux-musl, lingosbot-aarch64-unknown-linux-musl (+ .sha256 each)
 ```
 
-Only after all uploads succeed does that job publish the draft. A failed build cannot publish a partial release; a failed upload leaves a draft for investigation. These worker releases do not replace the desktop release marked latest. Review the workflow run and all four assets after publishing. Installation, architecture selection, checksum verification and executable permissions are documented in the [Rust worker README](../worker-server-rust/README.md). The assets are standalone Linux binaries, not desktop ZIP archives.
+- Desktop archives are self-contained single-file builds cross-compiled on Linux, each with exactly `LingosBot[.exe]` and `selenium-manager[.exe]` at the root. CI does not run them on Windows or macOS.
+- Rust binaries are static musl builds compiled natively on x86_64 and aarch64. Each passes ELF architecture/static-link checks (no `INTERP` or `NEEDED`), `--version`/`--help` smoke checks and `sha256sum -c`. None of these checks need a Lingos account.
+- The draft is created only if every test and build succeeded and the tagged commit is contained in `main`.
+- Tags containing `-alpha`, `-beta`, `-rc` or `-pre` are created as **pre-releases**.
+
+## Release notes come from the tagged commit
+
+The title is the tag name. The description is the full message of the commit the tag points to, so write the notes in that commit message:
+
+```bash
+git switch main && git pull --ff-only
+git status --short
+git commit --allow-empty -F - <<'EOF_NOTES'
+Release v1.6.0
+
+## Changes
+- What changed for users.
+
+## Compatibility
+- Anything users must know.
+EOF_NOTES
+git tag v1.6.0
+git push origin main v1.6.0
+```
+
+You can also tag an ordinary last commit; its message then becomes the notes. Edited notes are never overwritten: rerunning the workflow for a tag whose draft exists only refreshes the files (`--clobber`). If a release for the tag is already published, the workflow fails without changing it.
+
+## Review and publish
+
+Open the draft in GitHub Releases, check the notes and all 12 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation of the worker binaries is documented in the [Rust worker README](../worker-server-rust/README.md).
+
+## Manual fallback
+
+The remaining sections describe the manual process used before the workflow existed. Use them only if the workflow is unavailable.
 
 ## Legacy Desktop Prerequisites
 

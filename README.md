@@ -9,7 +9,7 @@ cargo build --locked --release --manifest-path worker-server-rust/Cargo.toml
 ./worker-server-rust/target/release/lingosbot --help
 ```
 
-Готовые Linux musl-бинарники, безопасная передача учётных данных, конфигурация и JSON/exit-code контракт описаны в [инструкции воркера](worker-server-rust/README.md). Его релизы используют теги `worker-v<версия>` и не содержат desktop ZIP-архивов.
+Готовые Linux musl-бинарники, безопасная передача учётных данных, конфигурация и JSON/exit-code контракт описаны в [инструкции воркера](worker-server-rust/README.md). Его бинарники публикуются в общем релизе `v<версия>` вместе с desktop ZIP-архивами.
 
 ## Legacy desktop (.NET)
 

@@ -6,13 +6,13 @@
 
 ## Установка готового Linux-релиза
 
-В [GitHub Releases](https://github.com/blestafist/LingosBot/releases) выберите тег `worker-v<версия>`. Релизы Rust-воркера содержат отдельные статические musl-бинарники и файлы `.sha256`, **не ZIP**. Нужен Linux соответствующей архитектуры; Rust, .NET и Selenium для запуска не нужны.
+В [GitHub Releases](https://github.com/blestafist/LingosBot/releases) выберите релиз `v<версия>`. Среди его файлов есть отдельные статические musl-бинарники воркера и файлы `.sha256`, **не ZIP** (ZIP-архивы относятся к desktop). Нужен Linux соответствующей архитектуры; Rust, .NET и Selenium для запуска не нужны.
 
 В отдельном каталоге выполните в Bash (нужны `curl` и `sha256sum`):
 
 ```bash
 set -euo pipefail
-TAG=worker-v0.1.0  # Замените на выбранный опубликованный тег.
+TAG=v1.6.0  # Замените на выбранный опубликованный тег.
 case "$(uname -m)" in
     x86_64) TARGET=x86_64-unknown-linux-musl ;;
     aarch64|arm64) TARGET=aarch64-unknown-linux-musl ;;
@@ -154,9 +154,9 @@ tests/
 
 Весь тестовый код находится только в `tests/`. Модульные тесты из `tests/unit/` подключаются через `#[cfg(test)]` и `#[path]`: они проверяют и приватные функции, не расширяя публичный API и не попадая в обычную сборку. Тесты не требуют аккаунта, браузера и доступа к lingos.pl.
 
-Release-профиль использует `opt-level="z"`, LTO, strip и `panic="abort"`. [Workflow Rust-воркера](../.github/workflows/rust-worker.yml) запускается для push веток и PR с изменениями воркера/workflow, вручную и по тегам `worker-v*`. Он выполняет fmt/clippy/test, а также тестирует и собирает musl на native x86_64 и aarch64 runners. Для каждого release-бинарника проверяются ELF-архитектура, отсутствие `INTERP`/`NEEDED`, запуск `--version`/`--help` и SHA-256 через `sha256sum -c`.
+Release-профиль использует `opt-level="z"`, LTO, strip и `panic="abort"`. [Общий workflow](../.github/workflows/ci-release.yml) при каждом push в любую ветку и PR тестирует и собирает всё (в том числе musl на native x86_64 и aarch64), но ничего не публикует. Для каждого release-бинарника проверяются ELF-архитектура, отсутствие `INTERP`/`NEEDED`, запуск `--version`/`--help` и SHA-256 через `sha256sum -c`.
 
-Публикация разрешена только для тега `worker-v<версия Cargo.toml>` после успеха всех проверок и обеих сборок. Единая publish job повторно проверяет комплект из двух бинарников и двух checksums, загружает их в draft и лишь затем публикует релиз; при ошибке загрузки он остаётся черновиком. Rust-релиз не заменяет desktop-релиз с отметкой latest. Порядок создания тега описан в [Docs/Releasing.md](../Docs/Releasing.md).
+Черновик релиза создаётся только при push тега `v*`, если все проверки и сборки успешны, а коммит тега входит в `main`. Описание черновика берётся из сообщения коммита тега; публикует релиз человек. Порядок описан в [Docs/Releasing.md](../Docs/Releasing.md).
 
 Для локальной native musl-сборки нужны соответствующий Rust target и `musl-gcc`. Кросс-сборка для другой архитектуры дополнительно требует подходящего C-toolchain/linker; одного `rustup target add` недостаточно.
 

@@ -2,7 +2,7 @@
 
 This page documents optional fields in `config.json`. Start with [Basic.md](Basic.md); most users only need credentials, `errorsPer100Words`, and `lessonCount`. The default mode is browser-free API.
 
-This page covers the legacy .NET application in `worker-desktop/`. For the independent Rust HTTP worker, including binary installation and source builds, see its [README](../worker-server-rust/README.md); its CI and release workflow is [rust-worker.yml](../.github/workflows/rust-worker.yml).
+This page covers the legacy .NET application in `worker-desktop/`. For the independent Rust HTTP worker, including binary installation and source builds, see its [README](../worker-server-rust/README.md); the CI and release workflow is [ci-release.yml](../.github/workflows/ci-release.yml).
 
 ## Full Setting Reference
 
