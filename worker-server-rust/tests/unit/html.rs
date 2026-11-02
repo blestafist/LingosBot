@@ -2,6 +2,225 @@ use super::*;
 use serde_json::{Value, json};
 
 #[test]
+fn foreign_cdata_is_inert_even_with_gt_and_raw_text_closing_tags() {
+    for container in ["text", "title", "style", "script"] {
+        let html = format!(
+            "<svg><{container}><![CDATA[> </{container}><div id=app data-props='{{\"fake\":true}}'></div><input name=_csrf_token value=fake>]]></{container}></svg>"
+        );
+        assert!(csrf_token(&html).is_err(), "{container}");
+        assert_eq!(
+            page_props::<Value>(&html).unwrap_err().kind,
+            crate::error::ErrorKind::Parsing,
+            "{container}"
+        );
+        assert_eq!(
+            page_props::<Value>(&format!(
+                "{html}<main id=app data-props='{{\"real\":true}}'></main>"
+            ))
+            .unwrap(),
+            json!({"real":true})
+        );
+        assert_eq!(
+            csrf_token(&format!("{html}<input name=_csrf_token value=real>")).unwrap(),
+            "real"
+        );
+    }
+}
+
+#[test]
+fn self_closing_foreign_raw_elements_do_not_hide_following_html() {
+    for tag in ["title", "style", "script"] {
+        for attributes in ["", " class='icon'", " class=icon ", " hidden"] {
+            let html =
+                format!("<svg><{tag}{attributes}/></svg><main id=app data-props='{{}}'></main>");
+            assert_eq!(page_props::<Value>(&html).unwrap(), json!({}), "{html}");
+            let html =
+                format!("<svg><{tag}{attributes}/></svg><input name=_csrf_token value=real>");
+            assert_eq!(csrf_token(&html).unwrap(), "real", "{html}");
+        }
+    }
+}
+
+#[test]
+fn html_raw_elements_still_ignore_self_closing_syntax() {
+    for prefix in ["", "<svg/>", "<svg><svg/></svg>"] {
+        let html = format!(
+            "{prefix}<script/><input name=_csrf_token value=fake></script><input name=_csrf_token value=real>"
+        );
+        assert_eq!(csrf_token(&html).unwrap(), "real");
+    }
+}
+
+#[test]
+fn html_scripts_inside_foreign_integration_points_do_not_start_cdata() {
+    for (open, close) in [
+        ("<svg><foreignObject><div>", "</div></foreignObject></svg>"),
+        ("<svg><desc><div>", "</div></desc></svg>"),
+        ("<math><mtext><div>", "</div></mtext></math>"),
+        ("<math><mi>", "</mi></math>"),
+        ("<math><mo>", "</mo></math>"),
+        ("<math><mn>", "</mn></math>"),
+        ("<math><ms>", "</ms></math>"),
+        (
+            "<math><annotation-xml encoding='text/html'><div>",
+            "</div></annotation-xml></math>",
+        ),
+        (
+            "<math><annotation-xml encoding='APPLICATION/XHTML+XML'><div>",
+            "</div></annotation-xml></math>",
+        ),
+    ] {
+        for tail in ["", "]]>"] {
+            let html = format!("{open}<script>const text = \"<![CDATA[\";</script>{close}{tail}");
+            assert_eq!(
+                page_props::<Value>(&format!("{html}<main id=app data-props='{{}}'></main>"))
+                    .unwrap(),
+                json!({}),
+                "{html}"
+            );
+            assert_eq!(
+                csrf_token(&format!("{html}<input name=_csrf_token value=real>")).unwrap(),
+                "real",
+                "{html}"
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_foreign_roots_restore_the_html_integration_context() {
+    let svg =
+        "<svg><script><![CDATA[> </script><input name=_csrf_token value=fake>]]></script></svg>";
+    for (open, close) in [
+        ("<svg><foreignObject>", "</foreignObject></svg>"),
+        ("<math><mtext>", "</mtext></math>"),
+        (
+            "<svg><foreignObject><foreignobject></foreignobject>",
+            "</foreignObject></svg>",
+        ),
+        ("<math><mtext><span><span></span>", "</span></mtext></math>"),
+    ] {
+        let html = format!(
+            "{open}{svg}<script/>const text = \"<![CDATA[\";<input name=_csrf_token value=fake></script>{close}"
+        );
+        assert!(csrf_token(&html).is_err(), "{html}");
+        assert_eq!(
+            page_props::<Value>(&format!("{html}<main id=app data-props='{{}}'></main>")).unwrap(),
+            json!({}),
+            "{html}"
+        );
+        assert_eq!(
+            csrf_token(&format!("{html}<input name=_csrf_token value=real>")).unwrap(),
+            "real",
+            "{html}"
+        );
+    }
+}
+
+#[test]
+fn math_text_exceptions_keep_their_foreign_namespace() {
+    for tag in ["mglyph", "malignmark"] {
+        let html = format!(
+            "<math><mtext><{tag}><script><![CDATA[> </script><input name=_csrf_token value=fake>]]></script></{tag}><script>const text = \"<![CDATA[\";</script></mtext></math>"
+        );
+        assert!(csrf_token(&html).is_err(), "{html}");
+        assert_eq!(
+            page_props::<Value>(&format!("{html}<main id=app data-props='{{}}'></main>")).unwrap(),
+            json!({}),
+            "{html}"
+        );
+        assert_eq!(
+            csrf_token(&format!("{html}<input name=_csrf_token value=real>")).unwrap(),
+            "real",
+            "{html}"
+        );
+    }
+}
+
+#[test]
+fn namespace_scopes_are_bounded_and_cannot_return_partial_page_data() {
+    let prefix = "<main id=app data-props='{}'></main>";
+    for depth in [MAX_NAMESPACE_SCOPES, MAX_NAMESPACE_SCOPES + 1] {
+        let html = format!(
+            "{prefix}{}{}",
+            "<svg>".repeat(depth),
+            "</svg>".repeat(depth)
+        );
+        let props = page_props::<Value>(&html);
+        let token = csrf_token(&format!("{html}<input name=_csrf_token value=real>"));
+        if depth == MAX_NAMESPACE_SCOPES {
+            assert_eq!(props.unwrap(), json!({}));
+            assert_eq!(token.unwrap(), "real");
+        } else {
+            assert_eq!(props.unwrap_err().kind, crate::error::ErrorKind::Parsing);
+            assert_eq!(token.unwrap_err().kind, crate::error::ErrorKind::Parsing);
+        }
+    }
+}
+
+#[test]
+fn matching_html_tags_cannot_close_namespace_scopes_across_foreign_roots() {
+    for element in ["span", "div", "section"] {
+        for inner in [
+            format!("<{element}></{element}>"),
+            format!("<{element}><{element}></{element}></{element}>"),
+            format!("<div><{element}></{element}></div>"),
+        ] {
+            let html = format!(
+                "<math><mtext><{element}><svg><foreignObject>{inner}</foreignObject><script><![CDATA[> </script><input name=_csrf_token value=fake><div id=app data-props='{{\"fake\":true}}'></div>]]></script></svg></{element}></mtext></math>"
+            );
+            assert!(csrf_token(&html).is_err(), "{html}");
+            assert_eq!(
+                page_props::<Value>(&html).unwrap_err().kind,
+                crate::error::ErrorKind::Parsing,
+                "{html}"
+            );
+            assert_eq!(
+                csrf_token(&format!("{html}<input name=_csrf_token value=real>")).unwrap(),
+                "real",
+                "{html}"
+            );
+            assert_eq!(
+                page_props::<Value>(&format!(
+                    "{html}<main id=app data-props='{{\"real\":true}}'></main>"
+                ))
+                .unwrap(),
+                json!({"real":true}),
+                "{html}"
+            );
+        }
+    }
+}
+
+#[test]
+fn slash_in_an_unquoted_attribute_is_not_a_self_closing_marker() {
+    let mut tags = Tags::new("<title data-url=abc/><style class='icon'/><script hidden/>").unwrap();
+    // Test the attribute tokenizer directly, without raw-text skipping.
+    assert!(
+        !Tag {
+            name: "title",
+            attributes: " data-url=abc/"
+        }
+        .self_closing()
+    );
+    assert!(
+        Tag {
+            name: "style",
+            attributes: " class='icon'/"
+        }
+        .self_closing()
+    );
+    assert!(
+        Tag {
+            name: "script",
+            attributes: " hidden/"
+        }
+        .self_closing()
+    );
+    assert!(tags.next().is_none());
+}
+
+#[test]
 fn token_attributes_order_case_quotes_and_entities() {
     assert_eq!(
         csrf_token("<INPUT VALUE='a&amp;b&#x27;' NAME='_csrf_token'>").unwrap(),
