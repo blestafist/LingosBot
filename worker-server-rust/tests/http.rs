@@ -1,0 +1,161 @@
+mod common;
+use common::{Reply, Server};
+use serde_json::json;
+use std::time::Duration;
+use worker_server_rust::{error::ErrorKind, infrastructure::Session};
+
+fn session(server: &Server) -> Session {
+    Session::new(
+        &server.base,
+        Duration::from_secs(2),
+        Duration::from_secs(10),
+    )
+    .unwrap()
+}
+
+#[test]
+fn login_posts_encoded_csrf_and_carries_rotating_cookies() {
+    let server = Server::start(|request, index| {
+        Some(match index {
+            1 => {
+                assert_eq!(request.path, "/h/login");
+                Reply::html("<input value='a&amp;b' name='_csrf_token'>")
+                    .header("Set-Cookie", "session=initial; Path=/; HttpOnly")
+            }
+            2 => {
+                assert_eq!(request.method, "POST");
+                assert!(request.headers.contains("session=initial"));
+                assert!(request.body.contains("_csrf_token=a%26b"));
+                assert!(request.body.contains("_username=a%40b.pl"));
+                assert!(request.body.contains("_password=secret%26value"));
+                Reply::redirect("/app/start")
+                    .header("Set-Cookie", "session=authenticated; Path=/; HttpOnly")
+            }
+            3 => {
+                assert_eq!(request.path, "/student/dashboard");
+                assert!(request.headers.contains("session=authenticated"));
+                Reply::page(json!({"page":"dashboard"}))
+            }
+            _ => panic!("Unexpected request"),
+        })
+    });
+    session(&server)
+        .login("a@b.pl", "secret&value", "/student/dashboard")
+        .unwrap();
+    assert_eq!(server.count(), 3);
+}
+
+#[test]
+fn failed_login_does_not_request_dashboard() {
+    let server = Server::start(|_, index| {
+        Some(if index == 1 {
+            Reply::html("<input name=_csrf_token value=token>")
+        } else {
+            Reply::redirect("/h/login?failed=1")
+        })
+    });
+    let error = session(&server)
+        .login("user", "secret", "/student/dashboard")
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Auth);
+    assert_eq!(server.count(), 2);
+}
+
+#[test]
+fn expired_session_is_auth_error() {
+    let server = Server::start(|_, _| Some(Reply::redirect("/h/login")));
+    assert_eq!(
+        session(&server)
+            .get_page("/student/dashboard")
+            .unwrap_err()
+            .kind,
+        ErrorKind::Auth
+    );
+    assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn foreign_urls_and_redirects_cannot_receive_cookies() {
+    let server = Server::start(|_, _| Some(Reply::redirect("https://example.org/steal")));
+    let session = session(&server);
+    for target in [
+        "https://example.org",
+        "http://user@127.0.0.1/",
+        "//example.org/x",
+    ] {
+        assert!(session.get_page(target).is_err());
+        assert!(session.post(target, None).is_err());
+    }
+    assert_eq!(server.count(), 0);
+    assert!(session.get_page("/start").is_err());
+    assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn relative_redirect_is_resolved_against_current_url() {
+    let server = Server::start(|request, index| {
+        Some(if index == 1 {
+            Reply::redirect("next")
+        } else {
+            assert_eq!(request.path, "/nested/next");
+            Reply::page(json!({"ok":true}))
+        })
+    });
+    assert_eq!(
+        session(&server).get_page("/nested/start").unwrap(),
+        json!({"ok":true})
+    );
+}
+
+#[test]
+fn ambiguous_post_connection_drop_is_not_retried() {
+    let server = Server::start(|_, _| None);
+    let error = session(&server)
+        .post("/learning/answer/12", Some(&json!({"answer":"secret"})))
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Network);
+    assert!(!error.message.contains("secret"));
+    assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn post_redirect_and_invalid_response_are_never_replayed() {
+    for reply_kind in 0..4 {
+        let server = Server::start(move |_, _| {
+            Some(match reply_kind {
+                0 => Reply::redirect("/answer-again"),
+                1 => Reply::html("<html>Unexpected login</html>"),
+                2 => Reply {
+                    status: 200,
+                    headers: vec![("Content-Type".into(), "text/plain".into())],
+                    body: "{}".into(),
+                },
+                _ => Reply::json(json!(null)),
+            })
+        });
+        assert!(session(&server).post("/answer", None).is_err());
+        assert_eq!(server.count(), 1);
+    }
+}
+
+#[test]
+fn oversized_body_stops_before_reading_it() {
+    let server = Server::start(|_, _| Some(Reply::html("").header("Content-Length", "999999999")));
+    assert!(session(&server).get_page("/large").is_err());
+}
+
+#[test]
+fn global_deadline_covers_delays_without_sleeping_past_it() {
+    let server = Server::start(|_, _| panic!("No request expected"));
+    let session = Session::new(
+        &server.base,
+        Duration::from_secs(1),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+    assert_eq!(
+        session.wait(Duration::from_secs(1)).unwrap_err().kind,
+        ErrorKind::Network
+    );
+    assert_eq!(server.count(), 0);
+}
