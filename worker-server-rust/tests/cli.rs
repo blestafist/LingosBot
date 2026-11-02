@@ -52,6 +52,32 @@ fn run(config: &TempConfig) -> (Output, Value) {
     });
     assert!(!stdout.contains("fake-secret"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+    let mut keys: Vec<_> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    if output.status.success() {
+        assert_eq!(value["success"], true);
+        assert_eq!(
+            keys,
+            [
+                "duration_seconds",
+                "message",
+                "success",
+                "username",
+                "words_learned"
+            ]
+        );
+        assert!(value["duration_seconds"].as_f64().unwrap() >= 0.0);
+        assert!(value["words_learned"].is_u64());
+    } else {
+        assert_eq!(value["success"], false);
+        assert_eq!(keys, ["error_code", "message", "success"]);
+    }
+    assert!(!value["message"].as_str().unwrap().is_empty());
     (output, value)
 }
 
@@ -62,6 +88,7 @@ struct Options {
     unconfirmed_join: bool,
     unconfirmed_switch: bool,
     drop_answer: bool,
+    drop_after_first: bool,
     missing_feedback: bool,
     unknown_challenge: bool,
     legacy_switch: bool,
@@ -137,7 +164,7 @@ fn site(options: Options) -> Server {
                 Reply::page(json!({"status":"ok","lessonId":12,"step":step(word)}))
             }
             ("POST", "/learning/answer/12") => {
-                if options.drop_answer {
+                if options.drop_answer || (options.drop_after_first && word > 1) {
                     return None;
                 }
                 let body: Value = serde_json::from_str(&request.body).unwrap();
@@ -197,6 +224,92 @@ fn complete_cli_runs_all_classes_challenges_and_lessons() {
     assert_eq!(count(&server, "/learning/answer"), 10);
     assert_eq!(count(&server, "/student/challenges"), 4);
     assert_eq!(count(&server, "/student/context"), 1);
+}
+
+#[test]
+fn complete_cli_handles_alternatives_new_cards_and_a_fresh_wordset_lesson_id() {
+    let mut submission = 0;
+    let exercise = |identifier, kind: &str, main: &str| {
+        json!({"state":"exercise","exercise":{
+            "identifier":identifier,"type":kind,"main":main
+        }})
+    };
+    let server = Server::start(move |request, _| {
+        Some(match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/h/login") => Reply::html("<input name=_csrf_token value=token>"),
+            ("POST", "/h/login") => Reply::redirect("/student/dashboard"),
+            ("GET", "/student/dashboard") => Reply::page(json!({"page":"dashboard","dashboard":{
+                "currentGroup":{"id":1},"groups":[{"id":1,"name":"A"}],
+                "contexts":{},"lessonLimitReached":false,"challenges":[]
+            }})),
+            ("GET", "/student/wordsets") => Reply::page(json!({"page":"wordsets","wordsets":{
+                "currentGroup":{"id":1},"wordsets":[{"id":55,"name":"Set","counts":{"total":2}}]
+            }})),
+            ("GET", "/student/wordsets/55") => Reply::page(json!({"page":"wordset","wordset":{
+                "group":{"id":1},"wordset":{"id":55},
+                "flashcards":[{"word":"house","translation":"dom"},{"word":"home","translation":"dom"}]
+            }})),
+            ("GET", "/learning/start/0?groupId=1") => Reply::page(json!({
+                "status":"ok","lessonId":12,"step":exercise(1,"flashcard","dom")
+            })),
+            ("POST", "/learning/answer/12") => {
+                let (expected, response) = match submission {
+                    0 => (
+                        json!({"identifier":1,"answer":"house","skip":false}),
+                        json!({"feedback":{"result":0},"step":exercise(1,"flashcard","dom")}),
+                    ),
+                    1 => (
+                        json!({"identifier":1,"answer":"home","skip":false}),
+                        json!({"feedback":{"result":1},"step":exercise(2,"new_teacher","")}),
+                    ),
+                    2 => (
+                        json!({"identifier":2,"answer":"","skip":false}),
+                        json!({"step":exercise(3,"new_premium","")}),
+                    ),
+                    3 => (
+                        json!({"identifier":3,"answer":"","skip":false}),
+                        json!({"step":{"state":"change_wordset","continueUrl":"/learning/next?wordset=56"}}),
+                    ),
+                    _ => panic!("Unexpected submission to old lesson"),
+                };
+                assert_eq!(
+                    serde_json::from_str::<Value>(&request.body).unwrap(),
+                    expected
+                );
+                submission += 1;
+                Reply::json(response)
+            }
+            ("GET", "/learning/next?wordset=56") => {
+                assert_eq!(submission, 4);
+                Reply::page(
+                    json!({"status":"ok","lessonId":13,"step":exercise(1,"flashcard","house")}),
+                )
+            }
+            ("POST", "/learning/answer/13") => {
+                assert_eq!(submission, 4);
+                assert_eq!(
+                    serde_json::from_str::<Value>(&request.body).unwrap(),
+                    json!({"identifier":1,"answer":"dom","skip":false})
+                );
+                submission += 1;
+                Reply::json(json!({"feedback":{"result":2},"step":{"state":"finished"}}))
+            }
+            _ => panic!("Unexpected request {} {}", request.method, request.path),
+        })
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let (output, result) = run(&config);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(result["words_learned"], 2);
+    assert_eq!(count(&server, "/learning/start"), 1);
+    assert_eq!(count(&server, "/learning/answer/12"), 4);
+    assert_eq!(count(&server, "/learning/next"), 1);
+    assert_eq!(count(&server, "/learning/answer/13"), 1);
 }
 
 #[test]
@@ -279,6 +392,37 @@ fn malformed_or_unconfirmed_state_stops_before_lesson() {
         assert_eq!(result["error_code"], "PARSING_ERROR");
         assert_eq!(count(&server, "/learning"), 0);
     }
+}
+
+#[test]
+fn an_unconfirmed_switch_cannot_collect_vocabulary_or_start_a_lesson() {
+    let server = site(Options {
+        unconfirmed_switch: true,
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({"classLessonCounts":{"group:1":0}}));
+    let (output, result) = run(&config);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(result["error_code"], "PARSING_ERROR");
+    assert_eq!(count(&server, "/student/context"), 1);
+    assert_eq!(count(&server, "/student/wordsets"), 0);
+    assert_eq!(count(&server, "/student/challenges"), 0);
+    assert_eq!(count(&server, "/learning"), 0);
+}
+
+#[test]
+fn failure_after_a_confirmed_answer_returns_no_partial_statistics_or_replay() {
+    let server = site(Options {
+        drop_after_first: true,
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let (output, result) = run(&config);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(result["error_code"], "NETWORK_ERROR");
+    assert_eq!(count(&server, "/learning/start"), 1);
+    assert_eq!(count(&server, "/learning/answer"), 2);
+    assert_eq!(count(&server, "/student/context"), 0);
 }
 
 #[test]
