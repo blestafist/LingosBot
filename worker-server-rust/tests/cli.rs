@@ -505,3 +505,76 @@ fn help_version_and_argument_errors_do_not_require_credentials() {
     assert_eq!(result["error_code"], "CONFIG_ERROR");
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
 }
+
+#[cfg(unix)]
+#[test]
+fn fifo_config_is_rejected_without_waiting_for_a_writer() {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let config = TempConfig::new("https://lingos.pl", json!({}));
+    std::fs::remove_file(&config.0).unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(&config.0)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut child = command()
+        .arg("--config")
+        .arg(&config.0)
+        .arg("--json")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("opening a FIFO config blocked the CLI");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["error_code"], "CONFIG_ERROR");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unwritable_stderr_cannot_abort_success_or_error_output() {
+    let server = site(Options::default());
+    let config = TempConfig::new(&server.base, json!({}));
+    let output = command()
+        .arg("--config")
+        .arg(&config.0)
+        .arg("--json")
+        .stderr(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["success"], true);
+
+    let output = command()
+        .arg("--unknown")
+        .stderr(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+}

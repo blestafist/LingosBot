@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -351,7 +351,18 @@ impl Config {
 }
 
 fn read_config(path: &Path) -> Result<FileConfig> {
-    let file = File::open(path).map_err(|_| Error::config("could not open config file"))?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    // A FIFO must not block before we can reject it. Inspect the opened file
+    // rather than the path, so replacing a symlink cannot bypass this check.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| Error::config("could not open config file"))?;
     let metadata = file
         .metadata()
         .map_err(|_| Error::config("could not inspect config file"))?;
@@ -375,7 +386,7 @@ fn read_config(path: &Path) -> Result<FileConfig> {
         .map_err(|_| Error::config("config file must contain a valid JSON configuration object"))
 }
 
-fn parse_origin(value: &str) -> Result<Url> {
+pub(crate) fn parse_origin(value: &str) -> Result<Url> {
     let invalid = || {
         Error::config(
             "baseUrl must be an HTTPS origin (HTTP is allowed only on loopback), without credentials, path, query, or fragment",

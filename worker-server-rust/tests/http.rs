@@ -62,6 +62,54 @@ fn failed_login_does_not_request_dashboard() {
 }
 
 #[test]
+fn login_distinguishes_rejected_credentials_http_errors_and_changed_pages() {
+    for (status, body, kind) in [
+        (200, "<input name=_csrf_token value=token>", ErrorKind::Auth),
+        (200, "<html>changed-login-page</html>", ErrorKind::Parsing),
+        (204, "", ErrorKind::Parsing),
+        (400, "", ErrorKind::Network),
+        (401, "", ErrorKind::Auth),
+        (403, "", ErrorKind::Auth),
+        (404, "", ErrorKind::Network),
+        (429, "", ErrorKind::Network),
+        (503, "", ErrorKind::Network),
+    ] {
+        let server = Server::start(move |_, index| {
+            Some(if index == 1 {
+                Reply::html("<input name=_csrf_token value=token>")
+            } else {
+                let mut reply = Reply::html(body);
+                reply.status = status;
+                reply
+            })
+        });
+        let error = session(&server)
+            .login("user", "secret", "/student/dashboard")
+            .unwrap_err();
+        assert_eq!(error.kind, kind, "HTTP {status}");
+        assert!(!error.message.contains("changed-login-page"));
+        assert_eq!(server.count(), 2);
+    }
+}
+
+#[test]
+fn direct_sessions_enforce_the_same_safe_origin_rules_as_the_cli() {
+    for base in [
+        "http://example.test",
+        "http://localhost.evil.test",
+        "https://user:secret@example.test",
+        "https://@example.test",
+        "https://example.test/path",
+        "https://example.test/a/..",
+        "https://example.test?",
+        "https://example.test#fragment",
+    ] {
+        let result = Session::new(base, Duration::from_secs(1), Duration::from_secs(2));
+        assert_eq!(result.err().unwrap().kind, ErrorKind::Config, "{base}");
+    }
+}
+
+#[test]
 fn expired_session_is_auth_error() {
     let server = Server::start(|_, _| Some(Reply::redirect("/h/login")));
     assert_eq!(

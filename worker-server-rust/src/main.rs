@@ -43,7 +43,7 @@ fn failure(error: Error, json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     } else {
-        eprintln!("{}: {}", error.code(), error.message);
+        let _ = writeln!(io::stderr().lock(), "{}: {}", error.code(), error.message);
     }
     ExitCode::from(error.exit_code())
 }
@@ -54,7 +54,7 @@ fn run(config: &Config) -> Result<RunStats> {
         Duration::from_secs(config.request_timeout_seconds),
         Duration::from_secs(config.max_run_seconds),
     )?;
-    eprintln!("Logging in over HTTP...");
+    let _ = writeln!(io::stderr().lock(), "Logging in over HTTP...");
     let initial = session.login(
         &config.username,
         &config.password,

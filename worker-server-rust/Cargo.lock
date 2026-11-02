@@ -1370,6 +1370,7 @@ dependencies = [
  "clap",
  "fastrand",
  "html-escape",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",

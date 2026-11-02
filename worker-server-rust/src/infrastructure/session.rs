@@ -40,14 +40,7 @@ impl LessonClient for Session {
 
 impl Session {
     pub fn new(base_url: &str, timeout: Duration, max_run: Duration) -> Result<Self> {
-        let origin = Url::parse(base_url).map_err(|_| Error::config("Invalid base URL."))?;
-        if !origin.username().is_empty()
-            || origin.password().is_some()
-            || origin.host_str().is_none()
-            || !matches!(origin.scheme(), "http" | "https")
-        {
-            return Err(Error::config("Invalid HTTP origin."));
-        }
+        let origin = crate::config::parse_origin(base_url)?;
         let client = Client::builder()
             .cookie_store(true)
             .redirect(reqwest::redirect::Policy::none())
@@ -271,12 +264,19 @@ impl Session {
                 ]),
             true,
         )?;
-        if response.status().is_server_error() || response.status() == StatusCode::TOO_MANY_REQUESTS
-        {
+        if !response.status().is_redirection() {
             Self::require_success(&response)?;
+            let page = Self::body(response, "text/html")?;
+            return if html::csrf_token(&page).is_ok() {
+                Err(Error::auth("Nieprawidłowy login lub hasło"))
+            } else {
+                Err(Error::parsing(
+                    "Login returned an unexpected page; stopped safely.",
+                ))
+            };
         }
         if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
-            return Err(Error::auth("Nieprawidłowy login lub hasło"));
+            return Err(Error::parsing("Unexpected login redirect; stopped safely."));
         }
         let location = response
             .headers()
