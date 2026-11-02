@@ -58,14 +58,26 @@ pub(crate) fn normalize_whitespace(value: &str) -> String {
 }
 
 pub(crate) fn normalized_key(value: &str) -> String {
-    // Unicode case conversion also handles non-ASCII vocabulary and final
-    // sigma. Keep diacritics: distinct words must not be conflated.
+    // Fold case without expanding a character into several: Maße/Masse and
+    // ligatures are different words, not duplicate answer candidates. Applying
+    // single-character upper then lower also unifies final sigma and ß/ẞ.
     normalize_whitespace(value)
         .nfc()
-        .collect::<String>()
-        .to_uppercase()
+        .map(|character| {
+            let upper = single_character(character.to_uppercase(), character);
+            single_character(upper.to_lowercase(), upper)
+        })
         .nfc()
         .collect()
+}
+
+fn single_character(mut mapped: impl Iterator<Item = char>, original: char) -> char {
+    let first = mapped.next().unwrap_or(original);
+    if mapped.next().is_none() {
+        first
+    } else {
+        original
+    }
 }
 
 fn insert_candidate(map: &mut HashMap<String, Vec<String>>, prompt: &str, answer: &str) {

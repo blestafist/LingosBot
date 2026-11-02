@@ -63,9 +63,45 @@ fn unicode_reverse_lookup_is_case_insensitive_without_dropping_accents() {
     vocabulary.insert("Café", "kawiarnia").unwrap();
     assert_eq!(answers(&vocabulary, "\u{2003}łódź\u{a0}"), ["船"]);
     assert_eq!(answers(&vocabulary, "ς"), ["sigma"]);
-    assert_eq!(answers(&vocabulary, "STRASSE"), ["ulica"]);
+    assert_eq!(answers(&vocabulary, "STRAẞE"), ["ulica"]);
+    assert!(vocabulary.resolve("STRASSE").is_none());
     assert_eq!(answers(&vocabulary, "CAFE\u{301}"), ["kawiarnia"]);
     assert!(vocabulary.resolve("lodz").is_none());
+}
+
+#[test]
+fn expanding_case_mappings_do_not_remove_distinct_answer_candidates() {
+    let mut vocabulary = Vocabulary::new();
+    vocabulary.insert("Maße", "rozmiar").unwrap();
+    vocabulary.insert("Masse", "rozmiar").unwrap();
+    vocabulary.insert("MAẞE", "rozmiar").unwrap();
+    assert_eq!(answers(&vocabulary, "ROZMIAR"), ["Maße", "Masse"]);
+
+    vocabulary.insert("ﬃ", "litery").unwrap();
+    vocabulary.insert("ffi", "litery").unwrap();
+    assert_eq!(answers(&vocabulary, "litery"), ["ﬃ", "ffi"]);
+}
+
+#[test]
+fn expanding_case_mappings_do_not_merge_different_reverse_prompts() {
+    let mut vocabulary = Vocabulary::new();
+    vocabulary.insert("Maße", "wymiary").unwrap();
+    vocabulary.insert("Masse", "masa").unwrap();
+    vocabulary.insert("ﬃ", "ligatura").unwrap();
+    vocabulary.insert("ffi", "litery").unwrap();
+    vocabulary.insert("İ", "kropka").unwrap();
+    vocabulary.insert("i", "litera").unwrap();
+    for (prompt, expected) in [
+        ("maße", "wymiary"),
+        ("MAẞE", "wymiary"),
+        ("MASSE", "masa"),
+        ("ﬃ", "ligatura"),
+        ("FFI", "litery"),
+        ("İ", "kropka"),
+        ("I", "litera"),
+    ] {
+        assert_eq!(answers(&vocabulary, prompt), [expected], "{prompt}");
+    }
 }
 
 #[test]
