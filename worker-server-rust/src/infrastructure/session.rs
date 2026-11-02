@@ -1,15 +1,15 @@
-use super::html;
+use super::{html, json};
 use crate::error::{Error, Result};
 use crate::lesson::LessonClient;
 use crate::models::{AnswerRequest, AnswerResult, LearningProps};
 use reqwest::blocking::{Client, RequestBuilder, Response};
-use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER};
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-const MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 
 /// One client, cookie jar and connection pool per process. Nothing is persisted.
@@ -46,9 +46,8 @@ impl Session {
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .user_agent(concat!(
-                "LingosBot/",
-                env!("CARGO_PKG_VERSION"),
-                " (HTTP worker)"
+                "Mozilla/5.0 (X11; Linux x86_64) LingosBot/",
+                env!("CARGO_PKG_VERSION")
             ))
             .connect_timeout(timeout.min(Duration::from_secs(10)))
             .timeout(timeout)
@@ -100,7 +99,9 @@ impl Session {
                 "Run deadline would be exceeded by the answer delay.",
             ));
         }
-        std::thread::sleep(duration);
+        if !duration.is_zero() {
+            std::thread::sleep(duration);
+        }
         Ok(())
     }
 
@@ -138,36 +139,51 @@ impl Session {
         }
     }
 
-    fn body(response: Response, expected: &str) -> Result<String> {
-        let content_type = response
+    fn is_content_type(response: &Response, expected: &str) -> bool {
+        response
             .headers()
             .get(CONTENT_TYPE)
             .and_then(|header| header.to_str().ok())
             .and_then(|header| header.split(';').next())
             .unwrap_or("")
-            .trim();
-        if !content_type.eq_ignore_ascii_case(expected) {
+            .trim()
+            .eq_ignore_ascii_case(expected)
+    }
+
+    fn body(response: Response, expected: &str) -> Result<String> {
+        if !Self::is_content_type(&response, expected) {
             return Err(Error::parsing(
                 "Unexpected HTTP content type; stopped without retrying.",
             ));
         }
-        if response
-            .content_length()
-            .is_some_and(|size| size > MAX_BODY_BYTES)
-        {
+        let length = response.content_length();
+        if length.is_some_and(|size| size > MAX_BODY_BYTES as u64) {
             return Err(Error::parsing(
-                "HTTP response exceeds the 8 MiB safety limit.",
+                "HTTP response exceeds the 1 MiB safety limit.",
             ));
         }
-        let mut bytes = Vec::new();
-        response
-            .take(MAX_BODY_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| Error::network("Could not read HTTP response; request not replayed."))?;
-        if bytes.len() as u64 > MAX_BODY_BYTES {
-            return Err(Error::parsing(
-                "HTTP response exceeds the 8 MiB safety limit.",
-            ));
+        let capacity = length.unwrap_or(8192).min(64 * 1024) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+        let mut body = response.take(MAX_BODY_BYTES as u64 + 1);
+        let mut chunk = [0; 8192];
+        loop {
+            let count = body.read(&mut chunk).map_err(|_| {
+                Error::network("Could not read HTTP response; request not replayed.")
+            })?;
+            if count == 0 {
+                break;
+            }
+            let needed = bytes.len() + count;
+            if needed > MAX_BODY_BYTES {
+                return Err(Error::parsing(
+                    "HTTP response exceeds the 1 MiB safety limit.",
+                ));
+            }
+            if needed > bytes.capacity() {
+                let capacity = (bytes.capacity().max(8192) * 2).min(MAX_BODY_BYTES);
+                bytes.reserve_exact(capacity.max(needed) - bytes.len());
+            }
+            bytes.extend_from_slice(&chunk[..count]);
         }
         String::from_utf8(bytes).map_err(|_| Error::parsing("HTTP response is not valid UTF-8."))
     }
@@ -190,22 +206,24 @@ impl Session {
                 self.client.get(target.clone()).header(ACCEPT, "text/html"),
                 false,
             )?;
-            if response.status().is_redirection() {
+            if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
                 if redirects == MAX_REDIRECTS {
-                    return Err(Error::parsing("Too many HTTP redirects; stopped safely."));
+                    break;
                 }
                 let location = response
                     .headers()
                     .get(LOCATION)
                     .and_then(|v| v.to_str().ok())
-                    .ok_or_else(|| Error::parsing("HTTP redirect has no valid destination."))?;
-                target = self.resolve_from(&target, location)?;
+                    .ok_or_else(|| Error::network("HTTP redirect has no valid destination."))?;
+                target = self.resolve_from(&target, location).map_err(|_| {
+                    Error::network("Refusing HTTP redirect outside the configured origin.")
+                })?;
                 continue;
             }
             Self::require_success(&response)?;
             return Self::body(response, "text/html");
         }
-        unreachable!()
+        Err(Error::network("Too many HTTP redirects; stopped safely."))
     }
 
     pub fn get_page(&self, url: &str) -> Result<Value> {
@@ -218,7 +236,10 @@ impl Session {
         let mut request = self
             .client
             .post(target.clone())
-            .header(ACCEPT, "application/json");
+            .header(ACCEPT, "application/json")
+            .header(ORIGIN, self.origin.origin().ascii_serialization())
+            .header(REFERER, self.origin.as_str())
+            .header("X-Requested-With", "XMLHttpRequest");
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -228,7 +249,8 @@ impl Session {
                 .headers()
                 .get(LOCATION)
                 .and_then(|v| v.to_str().ok())
-                && Self::login_path(&self.resolve_from(&target, location)?)
+                && let Ok(destination) = self.resolve_from(&target, location)
+                && Self::login_path(&destination)
             {
                 return Err(Error::auth("Session expired; POST was not replayed."));
             }
@@ -237,8 +259,18 @@ impl Session {
             ));
         }
         Self::require_success(&response)?;
+        if Self::is_content_type(&response, "text/html") {
+            let page = Self::body(response, "text/html")?;
+            return if html::csrf_token(&page).is_ok() {
+                Err(Error::auth("Session expired; POST was not replayed."))
+            } else {
+                Err(Error::parsing(
+                    "API returned unexpected HTML; request was not replayed.",
+                ))
+            };
+        }
         let text = Self::body(response, "application/json")?;
-        let value: Value = serde_json::from_str(&text)
+        let value = json::parse(&text)
             .map_err(|_| Error::parsing("Invalid API JSON; request was not replayed."))?;
         if !value.is_object() {
             return Err(Error::parsing(
@@ -257,6 +289,8 @@ impl Session {
             self.client
                 .post(login_url.clone())
                 .header(ACCEPT, "text/html")
+                .header(ORIGIN, self.origin.origin().ascii_serialization())
+                .header(REFERER, login_url.as_str())
                 .form(&[
                     ("_username", username),
                     ("_password", password),
@@ -283,13 +317,17 @@ impl Session {
             .get(LOCATION)
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| Error::parsing("Login redirect has no destination."))?;
-        let target = self.resolve_from(&login_url, location)?;
+        let target = self.resolve_from(&login_url, location).map_err(|_| {
+            Error::network("Refusing login redirect outside the configured origin.")
+        })?;
         if Self::login_path(&target) {
             return Err(Error::auth("Nieprawidłowy login lub hasło"));
         }
         let dashboard = self.get_page(dashboard_url.as_str())?;
         if dashboard.get("page").and_then(Value::as_str) != Some("dashboard") {
-            return Err(Error::auth("Authenticated student dashboard did not load."));
+            return Err(Error::parsing(
+                "Authenticated student dashboard has an unexpected schema.",
+            ));
         }
         Ok(dashboard)
     }
