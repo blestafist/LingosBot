@@ -186,6 +186,35 @@ fn confirmed_rejection_allows_an_alternative_only_for_the_same_exercise() {
 }
 
 #[test]
+fn rejected_flashcard_resumes_candidates_after_another_exercise() {
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(flashcard(2), Some(0)),
+        result(flashcard(1), Some(1)),
+        result(state("finished"), Some(1)),
+    ]);
+    let stats = run(&mut client, &config(), flashcard(1)).unwrap();
+    assert_eq!(submitted(&client), ["house", "house", "home"]);
+    assert_eq!(
+        client
+            .requests
+            .iter()
+            .map(|(_, request)| request.identifier)
+            .collect::<Vec<_>>(),
+        [1, 2, 1]
+    );
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 2,
+            answers_submitted: 3
+        }
+    );
+    assert_eq!(client.waits.len(), 3);
+    assert!(client.navigations.is_empty());
+}
+
+#[test]
 fn accepted_flashcard_is_not_submitted_again() {
     let mut client = MockClient::default();
     client.results.push_back(result(flashcard(1), Some(1)));
@@ -274,24 +303,24 @@ fn changed_main_with_the_same_identifier_is_a_distinct_learned_exercise() {
 }
 
 #[test]
-fn changed_type_with_the_same_identifier_resets_error_consideration() {
+fn changed_type_with_the_same_identifier_preserves_prior_error_consideration() {
     let mut settings = config();
     settings.errors_per100_words = 100;
     let mut client = MockClient::default();
     client.results.extend([
         result(exercise(1, "new_teacher", "dom"), Some(0)),
         result(flashcard(1), None),
-        result(state("finished"), Some(0)),
+        result(state("finished"), Some(1)),
     ]);
     let stats = run(&mut client, &settings, flashcard(1)).unwrap();
     let answers = submitted(&client);
     assert!(!["house", "home"].contains(&answers[0]));
     assert_eq!(answers[1], "");
-    assert!(!["house", "home"].contains(&answers[2]));
+    assert_eq!(answers[2], "house");
     assert_eq!(
         stats,
         LessonStats {
-            words_learned: 0,
+            words_learned: 1,
             answers_submitted: 3
         }
     );
@@ -307,6 +336,25 @@ fn exhausted_candidates_stop_before_another_post_or_delay() {
     assert!(error.to_string().contains("rejected"));
     assert_eq!(submitted(&client), ["house", "home"]);
     assert_eq!(client.waits.len(), 2);
+}
+
+#[test]
+fn exhausted_candidates_stay_exhausted_after_another_exercise() {
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(flashcard(1), Some(0)),
+        result(flashcard(2), Some(0)),
+        result(flashcard(1), Some(1)),
+    ]);
+    let error = run(&mut client, &config(), flashcard(1)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("All 2 stored answers were rejected")
+    );
+    assert_eq!(submitted(&client), ["house", "home", "house"]);
+    assert_eq!(client.waits.len(), 3);
+    assert!(client.navigations.is_empty());
 }
 
 #[test]
@@ -330,6 +378,41 @@ fn intentional_error_is_injected_once_and_does_not_consume_a_candidate() {
             answers_submitted: 3
         }
     );
+}
+
+#[test]
+fn intentional_error_is_not_repeated_after_another_exercise() {
+    let mut settings = config();
+    settings.errors_per100_words = 100;
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(flashcard(2), Some(0)),
+        result(flashcard(2), Some(0)),
+        result(flashcard(1), Some(1)),
+        result(state("finished"), Some(1)),
+    ]);
+    let stats = run(&mut client, &settings, flashcard(1)).unwrap();
+    let answers = submitted(&client);
+    assert!(!["house", "home"].contains(&answers[0]));
+    assert!(!["house", "home"].contains(&answers[1]));
+    assert_eq!(&answers[2..], ["house", "house"]);
+    assert_eq!(
+        client
+            .requests
+            .iter()
+            .map(|(_, request)| request.identifier)
+            .collect::<Vec<_>>(),
+        [1, 2, 2, 1]
+    );
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 2,
+            answers_submitted: 4
+        }
+    );
+    assert_eq!(client.waits.len(), 4);
+    assert!(client.navigations.is_empty());
 }
 
 #[test]
@@ -505,6 +588,68 @@ fn wordset_transition_reads_a_fresh_lesson_id_and_resets_candidates() {
             answers_submitted: 3
         }
     );
+}
+
+#[test]
+fn wordset_transition_clears_exhausted_candidates_for_the_same_fingerprint() {
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(flashcard(1), Some(0)),
+        result(flashcard(2), Some(0)),
+        result(transition(), Some(1)),
+        result(state("finished"), Some(1)),
+    ]);
+    client.pages.push_back(Ok(props(flashcard(1), 12)));
+    let stats = run(&mut client, &config(), flashcard(1)).unwrap();
+    assert_eq!(submitted(&client), ["house", "home", "house", "house"]);
+    assert!(
+        client
+            .requests
+            .iter()
+            .all(|(lesson_id, _)| *lesson_id == 12)
+    );
+    assert_eq!(client.navigations, ["/learning/next"]);
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 2,
+            answers_submitted: 4
+        }
+    );
+    assert_eq!(client.waits.len(), 4);
+}
+
+#[test]
+fn wordset_transition_resets_intentional_error_for_the_same_fingerprint() {
+    let mut settings = config();
+    settings.errors_per100_words = 100;
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(transition(), Some(0)),
+        result(flashcard(1), Some(0)),
+        result(state("finished"), Some(1)),
+    ]);
+    client.pages.push_back(Ok(props(flashcard(1), 12)));
+    let stats = run(&mut client, &settings, flashcard(1)).unwrap();
+    let answers = submitted(&client);
+    assert!(!["house", "home"].contains(&answers[0]));
+    assert!(!["house", "home"].contains(&answers[1]));
+    assert_eq!(answers[2], "house");
+    assert!(
+        client
+            .requests
+            .iter()
+            .all(|(lesson_id, _)| *lesson_id == 12)
+    );
+    assert_eq!(client.navigations, ["/learning/next"]);
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 1,
+            answers_submitted: 3
+        }
+    );
+    assert_eq!(client.waits.len(), 3);
 }
 
 #[test]
@@ -728,6 +873,20 @@ fn prompt_cap_counts_changed_main_with_the_same_identifier() {
     let error = run(&mut client, &settings, flashcard(1)).unwrap_err();
     assert!(error.to_string().contains("prompt safety cap"));
     assert_eq!(client.requests.len(), 1);
+}
+
+#[test]
+fn prompt_cap_still_counts_a_returning_unacknowledged_flashcard() {
+    let mut settings = config();
+    settings.lesson_prompt_safety_cap = 2;
+    let mut client = MockClient::default();
+    client
+        .results
+        .extend([result(flashcard(2), Some(0)), result(flashcard(1), Some(1))]);
+    let error = run(&mut client, &settings, flashcard(1)).unwrap_err();
+    assert!(error.to_string().contains("prompt safety cap"));
+    assert_eq!(submitted(&client), ["house", "house"]);
+    assert_eq!(client.waits.len(), 2);
 }
 
 #[test]

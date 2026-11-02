@@ -1,7 +1,10 @@
 //! Sequential learning state machine. Only a confirmed rejection permits trying
 //! another candidate; a failed or ambiguous POST is always propagated as-is.
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use crate::{
     config::Config,
@@ -33,6 +36,12 @@ struct ExerciseFingerprint {
     main: String,
 }
 
+#[derive(Default)]
+struct ExerciseProgress {
+    candidate_index: usize,
+    error_considered: bool,
+}
+
 pub fn run_lesson(
     client: &mut impl LessonClient,
     config: &Config,
@@ -47,11 +56,10 @@ pub fn run_lesson(
     let submission_cap = u64::try_from(cap).unwrap_or(u64::MAX).saturating_mul(4);
     let mut stats = LessonStats::default();
     let mut acknowledged = HashSet::new();
+    let mut exercise_progress = HashMap::<ExerciseFingerprint, ExerciseProgress>::new();
     let mut prompts = 0usize;
     let mut transitions = 0usize;
     let mut current_exercise = None;
-    let mut candidate_index = 0usize;
-    let mut error_considered = false;
 
     loop {
         match step.state.as_str() {
@@ -74,6 +82,7 @@ pub fn run_lesson(
                 (lesson_id, step) = validate(client.navigate(url)?)?;
                 current_exercise = None;
                 acknowledged.clear();
+                exercise_progress.clear();
                 continue;
             }
             "select_level" => {
@@ -114,8 +123,6 @@ pub fn run_lesson(
         }
         if current_exercise.as_ref() != Some(&fingerprint) {
             current_exercise = Some(fingerprint.clone());
-            candidate_index = 0;
-            error_considered = false;
             if exercise.kind == "flashcard" {
                 if prompts >= cap {
                     return Err(Error::parsing("Lesson exceeded the prompt safety cap."));
@@ -124,6 +131,7 @@ pub fn run_lesson(
             }
         }
 
+        let progress = exercise_progress.entry(fingerprint.clone()).or_default();
         let is_flashcard = exercise.kind == "flashcard";
         let mut intentional_error = false;
         let answer = match exercise.kind.as_str() {
@@ -136,14 +144,14 @@ pub fn run_lesson(
                         "No collected translation exists for this prompt. Stopped without guessing.",
                     )
                 })?;
-                let candidate = candidates.get(candidate_index).ok_or_else(|| {
+                let candidate = candidates.get(progress.candidate_index).ok_or_else(|| {
                     Error::parsing(format!(
                         "All {} stored answers were rejected for this prompt.",
                         candidates.len()
                     ))
                 })?;
-                if !error_considered {
-                    error_considered = true;
+                if !progress.error_considered {
+                    progress.error_considered = true;
                     intentional_error = make_error(config.errors_per100_words, perfectionism);
                 }
                 if intentional_error {
@@ -183,7 +191,7 @@ pub fn run_lesson(
             }
             if !intentional_error {
                 if feedback.result <= 0 {
-                    candidate_index += 1;
+                    progress.candidate_index += 1;
                 } else {
                     acknowledged.insert(fingerprint);
                     stats.words_learned += 1;
