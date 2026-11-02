@@ -1,6 +1,6 @@
 //! Explicit configuration loading. This module never creates configuration files.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -16,13 +16,17 @@ use crate::error::{Error, Result};
 const DEFAULT_BASE_URL: &str = "https://lingos.pl";
 const DEFAULT_DASHBOARD_PATH: &str = "/student/dashboard";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
-const MAX_LESSONS: u32 = 10_000;
+pub(crate) const MAX_LESSONS: u32 = 10_000;
 const MAX_PROMPT_SAFETY_CAP: usize = 10_000;
 const MAX_DELAY_MS: u64 = 60_000;
 
 /// CLI values (including Clap's environment fallbacks) override JSON values.
 #[derive(Parser, Default)]
-#[command(version, about = "Run Lingos lessons using the HTTP API")]
+#[command(
+    name = "lingosbot",
+    version,
+    about = "Run Lingos lessons using the HTTP API"
+)]
 pub struct Cli {
     /// Login name; falls back to LINGOS_USERNAME.
     #[arg(short = 'u', long, env = "LINGOS_USERNAME", hide_env_values = true)]
@@ -302,10 +306,16 @@ impl Config {
             ));
         }
         let mut total = 0_u32;
+        let mut keys = HashSet::new();
         for (name, &count) in &self.class_lesson_counts {
             if name.trim().is_empty() || count > MAX_LESSONS {
                 return Err(Error::config(
                     "classLessonCounts requires nonblank keys and counts between 0 and 10000",
+                ));
+            }
+            if !keys.insert(name.to_lowercase()) {
+                return Err(Error::config(
+                    "classLessonCounts keys must be unique ignoring case",
                 ));
             }
             total = total

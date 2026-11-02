@@ -75,6 +75,48 @@ fn expired_session_is_auth_error() {
 }
 
 #[test]
+fn relative_post_login_redirect_is_auth_error_without_following_it() {
+    let server = Server::start(|_, _| Some(Reply::redirect("login")));
+    let error = session(&server).post("/h/action", None).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Auth);
+    assert_eq!(server.count(), 1);
+}
+
+#[test]
+fn slow_response_body_is_bounded_by_request_and_global_deadlines() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    for (request_timeout, run_timeout) in [
+        (Duration::from_millis(30), Duration::from_secs(2)),
+        (Duration::from_secs(2), Duration::from_millis(30)),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 1\r\nConnection: close\r\n\r\n").unwrap();
+            thread::sleep(Duration::from_millis(120));
+            let _ = stream.write_all(b"x");
+        });
+        let session = Session::new(&base, request_timeout, run_timeout).unwrap();
+        let error = session.get_page("/slow").unwrap_err();
+        worker.join().unwrap();
+        assert_eq!(error.kind, ErrorKind::Network);
+    }
+}
+
+#[test]
 fn foreign_urls_and_redirects_cannot_receive_cookies() {
     let server = Server::start(|_, _| Some(Reply::redirect("https://example.org/steal")));
     let session = session(&server);

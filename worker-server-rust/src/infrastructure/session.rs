@@ -222,7 +222,10 @@ impl Session {
 
     pub fn post(&self, url: &str, body: Option<&Value>) -> Result<Value> {
         let target = self.same_origin(url)?;
-        let mut request = self.client.post(target).header(ACCEPT, "application/json");
+        let mut request = self
+            .client
+            .post(target.clone())
+            .header(ACCEPT, "application/json");
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -232,7 +235,7 @@ impl Session {
                 .headers()
                 .get(LOCATION)
                 .and_then(|v| v.to_str().ok())
-                && Self::login_path(&self.same_origin(location)?)
+                && Self::login_path(&self.resolve_from(&target, location)?)
             {
                 return Err(Error::auth("Session expired; POST was not replayed."));
             }
