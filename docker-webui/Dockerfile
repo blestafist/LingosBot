@@ -14,10 +14,13 @@ COPY docker-webui/internal ./internal
 RUN CGO_ENABLED=0 go build -o /lingos-webui .
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S webui && adduser -S -G webui webui \
+    && mkdir /data && chown webui:webui /data
 COPY --from=build /lingos-webui /usr/local/bin/webui
 COPY --from=worker /src/worker-server-rust/target/release/lingosbot /usr/local/bin/lingosbot
 VOLUME /data
+USER webui
 ENV DB_PATH=/data/webui.db LISTEN=:8080 WORKER_BIN=/usr/local/bin/lingosbot
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/webui"]
