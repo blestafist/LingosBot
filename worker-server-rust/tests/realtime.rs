@@ -45,6 +45,20 @@ fn events(output: &Arc<Mutex<Output>>) -> Vec<Value> {
         .collect()
 }
 
+fn without_durations(mut events: Vec<Value>) -> Vec<Value> {
+    for event in &mut events {
+        if event["type"] == "http_request" {
+            let duration = event
+                .as_object_mut()
+                .unwrap()
+                .remove("duration_ms")
+                .unwrap();
+            assert!(duration.is_u64(), "duration_ms must be nonnegative integer");
+        }
+    }
+    events
+}
+
 #[test]
 fn ndjson_tracks_login_redirects_http_errors_and_flushes_without_secrets() {
     let server = Server::start(|_, index| {
@@ -74,21 +88,22 @@ fn ndjson_tracks_login_redirects_http_errors_and_flushes_without_secrets() {
     assert_eq!(client.api_call_count(), 3);
     assert!(client.get_page("/start?token=query_secret").is_err());
     assert_eq!(client.api_call_count(), 5);
-    let lines = events(&output);
+    let lines = without_durations(events(&output));
     assert_eq!(lines.len(), 5);
-    for (i, (method, status)) in [
-        ("GET", 200),
-        ("POST", 302),
-        ("GET", 200),
-        ("GET", 302),
-        ("GET", 503),
+    for (i, (method, status, operation)) in [
+        ("GET", 200, "sign_in"),
+        ("POST", 302, "sign_in"),
+        ("GET", 200, "load_page"),
+        ("GET", 302, "load_page"),
+        ("GET", 503, "load_page"),
     ]
     .into_iter()
     .enumerate()
     {
         assert_eq!(
             lines[i],
-            json!({"type":"http_request", "api_calls":i + 1, "method":method, "status":status, "error":null})
+            json!({"type":"http_request", "api_calls":i + 1, "method":method,
+                "operation":operation, "status":status, "error":null})
         );
     }
     let output = output.lock().unwrap();
@@ -114,9 +129,10 @@ fn transport_failure_emits_one_event_and_preflight_failures_do_not_count() {
     assert_eq!(client.api_call_count(), 1);
     assert_eq!(server.count(), 1);
     assert_eq!(
-        events(&output),
+        without_durations(events(&output)),
         vec![
-            json!({"type":"http_request", "api_calls":1, "method":"POST", "status":null, "error":"request"})
+            json!({"type":"http_request", "api_calls":1, "method":"POST",
+                "operation":"load_page", "status":null, "error":"request"})
         ]
     );
 
@@ -142,14 +158,81 @@ fn lesson_and_application_events_are_opt_in_and_share_the_writer() {
     client.post("/last", None).unwrap();
     assert_eq!(client.api_call_count(), 3);
     assert_eq!(
-        events(&output),
+        without_durations(events(&output)),
         vec![
             json!({"type":"login_success"}),
             json!({"type":"lesson_answer", "word":"дом", "correct":true, "intentional":false, "words_learned":42}),
-            json!({"type":"http_request", "api_calls":2, "method":"POST", "status":200, "error":null}),
+            json!({"type":"http_request", "api_calls":2, "method":"POST",
+                "operation":"load_page", "status":200, "error":null}),
         ]
     );
     assert_eq!(output.lock().unwrap().flushes, 3);
+}
+
+#[test]
+fn operations_are_fixed_labels_without_url_ids_headers_or_body_data() {
+    let server = Server::start(|request, _| {
+        Some(
+            if request.method == "GET" {
+                Reply::page(json!({"page":"ok"}))
+            } else {
+                Reply::json(json!({}))
+            }
+            .header("Set-Cookie", "session=header_secret; Path=/; HttpOnly"),
+        )
+    });
+    let mut client = session(&server);
+    let output = Arc::new(Mutex::new(Output::default()));
+    client.set_ndjson_writer(Writer(Arc::clone(&output)));
+    let cases = [
+        ("POST", "/h/login", "sign_in"),
+        ("GET", "/student/dashboard", "load_dashboard"),
+        ("GET", "/student/wordsets", "load_vocabulary"),
+        ("GET", "/student/wordsets/987654321", "load_vocabulary"),
+        ("GET", "/learning/start/0", "start_lesson"),
+        ("POST", "/learning/answer/987654321", "submit_answer"),
+        ("GET", "/learning/next", "continue_lesson"),
+        ("POST", "/student/context", "select_class"),
+        ("POST", "/student/group", "select_class"),
+        ("POST", "/student/challenges/987654321", "join_challenge"),
+        ("GET", "/path_secret/987654321", "load_page"),
+        ("POST", "/learning/answer/path_secret", "load_page"),
+        (
+            "GET",
+            "/student/wordsets/987654321/path_secret",
+            "load_page",
+        ),
+        ("GET", "/learning/answer/987654321", "load_page"),
+        ("POST", "/student/dashboard", "load_page"),
+    ];
+    for (method, path, _) in cases {
+        let url = format!("{path}?token=query_secret&groupId=987654321");
+        if method == "GET" {
+            client.get_page(&url).unwrap();
+        } else {
+            client
+                .post(
+                    &url,
+                    Some(&json!({"answer":"body_secret","groupId":987654321})),
+                )
+                .unwrap();
+        }
+    }
+    let lines = without_durations(events(&output));
+    assert_eq!(lines.len(), cases.len());
+    for (index, (method, _, operation)) in cases.into_iter().enumerate() {
+        assert_eq!(
+            lines[index],
+            json!({"type":"http_request", "api_calls":index + 1,
+            "method":method, "operation":operation, "status":200, "error":null})
+        );
+    }
+    let output = output.lock().unwrap();
+    let wire = std::str::from_utf8(&output.bytes).unwrap();
+    assert!(!wire.contains("secret"));
+    assert!(!wire.contains("987654321"));
+    assert!(!wire.contains(&server.base));
+    assert!(!wire.contains('/'));
 }
 
 #[test]
@@ -185,6 +268,7 @@ fn event_is_delivered_before_response_body_is_available() {
             stream.read_exact(&mut byte).unwrap();
             request.push(byte[0]);
         }
+        std::thread::sleep(Duration::from_millis(30));
         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n").unwrap();
         rx.recv_timeout(Duration::from_secs(1))
             .expect("event must precede body");
@@ -193,6 +277,8 @@ fn event_is_delivered_before_response_body_is_available() {
     let mut client = Session::new(&base, Duration::from_secs(2), Duration::from_secs(5)).unwrap();
     client.set_event_callback(move |event| {
         assert_eq!(event["status"], 200);
+        assert_eq!(event["operation"], "load_page");
+        assert!(event["duration_ms"].as_u64().unwrap() >= 20);
         tx.send(()).unwrap();
         Ok(())
     });
