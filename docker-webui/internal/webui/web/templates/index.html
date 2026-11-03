@@ -3,97 +3,117 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LingosBot</title>
+  <meta name="color-scheme" content="light">
+  <title>Your workspace</title>
   <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js" type="module"></script>
 </head>
 <body>
 {{if not .In}}
   <main class="login-wrap">
-    <div class="login-panel">
-      <a class="brand" href="/" aria-label="LingosBot home"><span class="brand-symbol">L</span><span>Lingos<span class="brand-light">Bot</span></span></a>
-      <h1>Sign in</h1>
-      <p class="description">Enter your administrator credentials.</p>
-      {{if .LoginError}}<p class="notice error" role="alert">Incorrect username or password.</p>{{end}}
-      <form action="/login" method="post" class="form-stack">
-        <label>Username<input name="user" autocomplete="username" required autofocus></label>
-        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <section class="login-panel" aria-labelledby="login-heading">
+      <a class="brand" href="/">Lingos<span class="brand-dot" aria-hidden="true"></span></a>
+      <h1 id="login-heading">Welcome back.</h1>
+      <p class="description">Sign in to your private workspace.</p>
+      <p id="login-error" class="message error" role="alert" {{if not .LoginError}}hidden{{end}}>Sign-in failed. Check your email and password, then try again.</p>
+      <form id="login-form" action="/login" method="post" class="form-stack">
+        <label for="login-email">Email or administrator login<input id="login-email" name="email" type="text" inputmode="email" autocomplete="username" aria-describedby="login-hint" required autofocus><span id="login-hint">Your email or the initial administrator login.</span></label>
+        <label for="login-password">Password</label>
+        <div class="secret-field"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button type="button" data-reveal="login-password" aria-controls="login-password" aria-pressed="false">Show</button></div>
         <button class="button primary" type="submit">Sign in</button>
       </form>
-    </div>
+      <p class="footnote">Accounts are created by your administrator.</p>
+    </section>
   </main>
 {{else}}
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="layout">
     <aside class="sidebar">
-      <a class="brand" href="#worker"><span class="brand-symbol">L</span><span>Lingos<span class="brand-light">Bot</span></span></a>
-      <div class="sidebar-label">WORKSPACE</div>
+      <a class="brand" href="#lessons">Lingos<span class="brand-dot" aria-hidden="true"></span></a>
       <nav class="navigation" aria-label="Main navigation">
-        <a href="#worker" data-page-link="worker"><span class="nav-number">01</span> Worker</a>
-        <a href="#vocabulary" data-page-link="vocabulary"><span class="nav-number">02</span> Vocabulary</a>
-        <a href="#schedule" data-page-link="schedule"><span class="nav-number">03</span> Schedule</a>
-        <a href="#account" data-page-link="account"><span class="nav-number">04</span> Account</a>
+        <a href="#lessons" data-page-link="lessons"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7a3 3 0 0 1 3 3v14a4 4 0 0 0-4-3H4zM14 7a3 3 0 0 1 3-3h3v14h-2a4 4 0 0 0-4 3"/></svg>Lessons</a>
+        <a href="#library" data-page-link="library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16M9 4v16M14 4v16M18 5l3 14M3 20h13"/></svg>Library</a>
+        <a href="#schedule" data-page-link="schedule"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M8 15h3"/></svg>Schedule</a>
+        <a href="#account" data-page-link="account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>Account</a>
+        {{if .User.Admin}}<a href="#users" data-page-link="users"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M2 21v-3a7 7 0 0 1 14 0v3M16 5a3 3 0 0 1 0 6M19 15a6 6 0 0 1 3 5"/></svg>Users</a>{{end}}
       </nav>
-      <form action="/logout" method="post" class="logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Sign out <span aria-hidden="true">↗</span></button></form>
+      <div class="sidebar-bottom"><span class="private-label">Private workspace</span><form action="/logout" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="signout" type="submit">Sign out <span aria-hidden="true">↗</span></button></form></div>
     </aside>
-    <main class="main">
-      <div class="topbar"><span>WORKSPACE</span><span class="topbar-name">LINGOSBOT</span></div>
+    <main class="main" id="main-content" tabindex="-1">
+      <header class="topbar"><span id="page-context">Your workspace</span><span class="account-email" title="{{.User.Email}}">{{.User.Email}}</span></header>
       <div class="content">
         <input type="hidden" id="csrf-token" value="{{.CSRF}}">
-        <section id="worker" class="page" data-page>
-          <div class="page-heading"><div><p class="overline">01 / WORKER</p><h1>Worker</h1><p class="description">Configure and run lessons manually.</p></div><span class="status {{if .CredentialsSaved}}status-good{{end}}">{{if .CredentialsSaved}}Credentials saved{{else}}Credentials not saved{{end}}</span></div>
-          <div class="panel">
-            <div class="panel-heading"><div><h2>Run configuration</h2><p>Settings for a manual run.</p></div></div>
-            <div class="fields two-columns">
-              <label>Lessons per class<input id="lesson-count" type="number" min="1" max="10000" step="1" value="1" required><span>Number of lessons to complete in each class.</span></label>
-              <label>Intentional errors per 100 words<input id="error-rate" type="number" min="0" max="100" step="1" value="0" required><span>Use 0 for no intentional errors.</span></label>
+        <noscript><p class="message error">JavaScript is required to manage this workspace. Sign out remains available.</p></noscript>
+        <div id="notice" class="message" role="status" tabindex="-1" hidden></div>
+
+        <section id="lessons" class="page" data-page aria-labelledby="lessons-heading">
+          <div class="page-heading"><div><h1 id="lessons-heading" tabindex="-1">Lessons</h1><p class="description">A little progress, on your terms.</p></div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
+          <div class="workspace-grid">
+            <div class="primary-column">
+              <form id="settings-form" class="panel">
+                <div class="panel-heading"><div><h2>Lesson plan</h2><p>Set a default, then adjust individual classes.</p></div><span class="status" id="settings-state">Loading…</span></div>
+                <p id="settings-error" class="message error" role="alert" hidden></p>
+                <fieldset id="settings-fields" disabled>
+                  <div class="fields two-columns">
+                    <label for="lesson-count">Default lessons per class<input id="lesson-count" name="lessonCount" type="number" min="1" max="10000" step="1" value="1" required><span>Used for classes without an override.</span></label>
+                    <label for="error-rate">Errors per 100 words<input id="error-rate" name="errorsPer100Words" type="number" min="0" max="100" step="1" value="0" required><span>Intentional errors. Set to 0 for none.</span></label>
+                  </div>
+                  <div class="section-heading"><div><h3>Class overrides</h3><p>Leave blank to use the default. Use 0 to skip.</p></div><button type="button" class="button quiet" data-start="classes">Sync classes</button></div>
+                  <div id="class-counts" class="override-list"><p class="empty">Loading saved classes…</p></div>
+                  <div class="inset"><button id="add-override" class="button quiet" type="button">+ Add a class by title</button></div>
+                  <details class="settings-details"><summary>Timing &amp; limits</summary><div class="fields two-columns">
+                    <label>Minimum answer delay (ms)<input name="answerDelayMinMs" type="number" min="0" max="60000" step="1" value="0" required></label>
+                    <label>Maximum answer delay (ms)<input name="answerDelayMaxMs" type="number" min="0" max="60000" step="1" value="0" required></label>
+                    <label>Request timeout (seconds)<input name="requestTimeoutSeconds" type="number" min="1" max="300" step="1" value="30" required></label>
+                    <label>Maximum run time (seconds)<input name="maxRunSeconds" type="number" min="1" max="86400" step="1" value="900" aria-describedby="execution-limit-hint" required><span id="execution-limit-hint" hidden></span></label>
+                    <label>Lesson prompt safety cap<input name="lessonPromptSafetyCap" type="number" min="1" max="10000" step="1" value="30" required><span>Maximum prompts requested for one lesson.</span></label>
+                  </div></details>
+                  <details class="settings-details"><summary>Connection endpoints</summary><div class="inset"><p class="muted">Managed by your administrator. Endpoints are read-only to prevent requests to unsafe destinations.</p><dl class="endpoint-list"><dt>Service URL</dt><dd id="base-url">—</dd><dt>Student dashboard</dt><dd id="dashboard-url">—</dd></dl></div></details>
+                </fieldset>
+                <div class="panel-footer"><p id="settings-hint">Loading your saved plan…</p><div class="actions"><button id="retry-settings" class="button" type="button" hidden>Retry</button><button id="save-settings" class="button" type="submit" disabled>Save plan</button><button id="run-lessons" class="button primary" type="button" disabled>Run lessons <span aria-hidden="true">→</span></button></div></div>
+              </form>
+              <section class="panel" aria-labelledby="classes-heading"><div class="panel-heading"><div><h2 id="classes-heading">Your classes</h2><p>Collect words here; read and export them in <a class="text-link" href="#library">Library</a>.</p></div><button class="button quiet" type="button" data-start="classes">Sync classes</button></div><div id="lesson-classes" class="class-list"><p class="empty">Loading classes…</p></div><details class="settings-details"><summary>Use a class ID instead</summary><form id="manual-collect" class="manual-form"><label for="manual-class-id">Class ID<input id="manual-class-id" inputmode="numeric" pattern="[0-9]+" required placeholder="e.g. 26083"></label><button type="submit" class="button" data-run-control>Collect words</button></form></details></section>
             </div>
-            <div class="panel-footer"><span>Manual run</span><button class="button primary" data-action="run" type="button">Run worker <span aria-hidden="true">↗</span></button></div>
+            <aside class="activity-column" aria-label="Run activity">
+              <section class="panel activity" aria-labelledby="activity-heading"><div class="panel-heading"><h2 id="activity-heading">Activity</h2><span id="run-status" class="status">Loading…</span></div><div class="activity-body"><p id="run-title" class="activity-title" aria-live="polite">Restoring your latest run…</p><p id="run-meta" class="muted"></p><div id="run-progress" class="progress-copy"></div><button id="cancel-run" class="button danger" type="button" hidden>Stop run</button><p id="poll-error" class="message error" role="alert" hidden></p><ol id="activity-log" class="activity-log" aria-label="Run events"></ol><details class="http-details"><summary id="http-summary">HTTP requests (0)</summary><ol id="http-log" class="http-log" aria-label="HTTP requests"></ol></details></div></section>
+              <section class="panel history" aria-labelledby="history-heading"><div class="panel-heading"><h2 id="history-heading">Run history</h2><button id="refresh-runs" class="button quiet" type="button" aria-label="Refresh run history">Refresh</button></div><div id="run-history"><p class="empty">Loading history…</p></div></section>
+            </aside>
           </div>
         </section>
-        <section id="vocabulary" class="page" data-page hidden>
-          <div class="page-heading"><div><p class="overline">02 / VOCABULARY</p><h1>Vocabulary</h1><p class="description">Download a class dictionary as Markdown.</p></div></div>
-          <div class="panel">
-            <div class="panel-heading"><div><h2>Classes</h2><p>Sync classes or enter a class ID below.</p></div><button class="button secondary" type="button" data-action="classes">Sync classes</button></div>
-            <div id="class-results" class="class-results"><p class="empty">No classes loaded.</p></div>
-            <div class="download-row"><label>Class ID<input id="class-id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 26083"></label><button class="button primary" type="button" data-action="scrape">Download Markdown <span aria-hidden="true">↓</span></button></div>
-          </div>
+
+        <section id="library" class="page" data-page hidden aria-labelledby="library-heading">
+          <div class="page-heading"><div><h1 id="library-heading" tabindex="-1">Library</h1><p class="description">Your words, gathered in one place.</p></div><button class="button" type="button" data-start="classes">Sync classes</button></div>
+          <div class="library-toolbar"><label class="search-field" for="library-search">Find a topic<input id="library-search" type="search" placeholder="Search topic names…" autocomplete="off"></label><div class="bundle-links"><span>Download bundle</span><a class="button" href="/api/library/export?format=md">Markdown <span aria-hidden="true">↓</span></a><a class="button" href="/api/library/export?format=json">JSON <span aria-hidden="true">↓</span></a></div></div>
+          <p class="footnote">Bundle exports combine all collected topics into one file.</p>
+          <div id="library-collection" class="collection"><p class="empty">Loading your library…</p></div>
+          <section class="panel"><div class="panel-heading"><div><h2>Collect more words</h2><p>Collection is saved to your library. Nothing downloads automatically.</p></div></div><div id="library-classes" class="class-list"><p class="empty">Loading classes…</p></div><p id="library-run-status" class="footnote inset" role="status"></p><a class="button quiet inset-link" href="#lessons">View activity &amp; history <span aria-hidden="true">→</span></a></section>
         </section>
-        <section id="schedule" class="page" data-page hidden>
-          <div class="page-heading"><div><p class="overline">03 / SCHEDULE</p><h1>Schedule</h1><p class="description">Run lessons automatically each day.</p></div><span class="status {{if .Schedule.Enabled}}status-good{{end}}">{{if .Schedule.Enabled}}Enabled{{else}}Disabled{{end}}</span></div>
-          <form class="panel" action="/schedule" method="post">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <div class="panel-heading"><div><h2>Daily schedule</h2><p>Server timezone{{if .ServerTimezone}}: {{.ServerTimezone}}{{end}}. Runs are skipped if the service is offline, the worker is busy, or credentials are missing. Results are in the server logs.</p></div></div>
-            <label class="check-row"><input type="checkbox" name="enabled" value="1" {{if .Schedule.Enabled}}checked{{end}}><span><strong>Enable schedule</strong><small>Start the worker once a day.</small></span></label>
-            <div class="fields schedule-fields">
-              <label>Time<input type="time" name="time" value="{{.Schedule.Time}}" required></label>
-              <label>Lessons per class<input type="number" name="lessons" min="1" max="10000" step="1" value="{{.Schedule.Lessons}}" required></label>
-              <label>Errors per 100 words<input type="number" name="errors" min="0" max="100" step="1" value="{{.Schedule.Errors}}" required></label>
-            </div>
-            <div class="panel-footer"><span>Saved on this server</span><button class="button primary" type="submit">Save schedule</button></div>
-          </form>
+
+        <section id="schedule" class="page narrow-page" data-page hidden aria-labelledby="schedule-heading">
+          <div class="page-heading"><div><h1 id="schedule-heading" tabindex="-1">Schedule</h1><p class="description">Make room for a steady routine.</p></div><span id="schedule-status" class="status">Loading…</span></div>
+          <form id="schedule-form" class="panel"><div class="panel-heading"><div><h2>Your routine</h2><p>Scheduled runs use the same <a href="#lessons" class="text-link">saved lesson plan</a>. Save plan changes before they are used here.</p></div></div><p id="schedule-error" class="message error" role="alert" hidden></p><fieldset id="schedule-fields" disabled>
+            <label class="check-row"><input id="schedule-enabled" type="checkbox"><span><strong>Run automatically</strong><small>Your schedule stays saved when switched off.</small></span></label>
+            <div class="fields two-columns"><label for="schedule-time">Start time<input id="schedule-time" type="time" value="09:00" required></label><label for="schedule-timezone">Timezone<input id="schedule-timezone" type="text" required placeholder="Europe/London" autocomplete="off"><span>An IANA timezone, for example Europe/London.</span></label></div>
+            <fieldset class="weekdays"><legend>Repeat on</legend><div class="day-options"><label><input type="checkbox" name="day" value="1"><span>Mon</span></label><label><input type="checkbox" name="day" value="2"><span>Tue</span></label><label><input type="checkbox" name="day" value="3"><span>Wed</span></label><label><input type="checkbox" name="day" value="4"><span>Thu</span></label><label><input type="checkbox" name="day" value="5"><span>Fri</span></label><label><input type="checkbox" name="day" value="6"><span>Sat</span></label><label><input type="checkbox" name="day" value="0"><span>Sun</span></label></div></fieldset>
+            <details class="settings-details"><summary>Advanced: cron expression</summary><div class="inset"><label for="schedule-cron">Five-field cron<input id="schedule-cron" type="text" placeholder="e.g. 0 9 * * 1-5" autocomplete="off"><span>Minute, hour, day of month, month, day of week. A non-empty expression replaces the time and weekday controls, in the timezone above. Clear it to use the simple schedule.</span></label></div></details>
+          </fieldset><div class="panel-footer"><p id="schedule-summary">Loading schedule…</p><div class="actions"><button id="retry-schedule" class="button" type="button" hidden>Retry</button><button id="save-schedule" class="button primary" type="submit" disabled>Save schedule</button></div></div></form>
+          <section class="schedule-outlook" aria-labelledby="next-heading"><h2 id="next-heading">What happens next</h2><dl class="fact-list"><div><dt>Next run</dt><dd id="schedule-next">—</dd></div><div><dt>Latest result</dt><dd id="schedule-last">—</dd></div></dl><a id="schedule-history" class="text-link" href="#lessons">View run history →</a><p class="footnote">Keep the service running. If it is offline, the worker is busy or credentials are missing, one overdue run starts as soon as the service is ready—even outside the chosen time. Turn the schedule off to discard a pending occurrence.</p></section>
         </section>
-        <section id="account" class="page" data-page hidden>
-          <div class="page-heading"><div><p class="overline">04 / ACCOUNT</p><h1>Account</h1><p class="description">Manage your Lingos credentials.</p></div><span class="status {{if .CredentialsSaved}}status-good{{end}}">{{if .CredentialsSaved}}Saved{{else}}Not saved{{end}}</span></div>
-          <form action="/credentials" method="post" class="panel">
-            <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <div class="panel-heading"><div><h2>Lingos credentials</h2><p>{{if .CredentialsSaved}}Credentials are saved but not verified. Submit both fields to replace them.{{else}}Save your Lingos credentials to run the worker.{{end}}</p></div></div>
-            <div class="fields two-columns">
-              <label>Username<input name="username" autocomplete="username" required></label>
-              <label>Password<input name="password" type="password" autocomplete="new-password" required></label>
-            </div>
-            <div class="panel-footer"><span>Password encrypted at rest</span><button class="button primary" type="submit">Save credentials</button></div>
-          </form>
+
+        <section id="account" class="page narrow-page" data-page hidden aria-labelledby="account-heading">
+          <div class="page-heading"><div><h1 id="account-heading" tabindex="-1">Account</h1><p class="description">Your access and connected account.</p></div></div>
+          <form id="credentials-form" class="panel"><div class="panel-heading"><div><h2>Lingos credentials</h2><p>Used only to connect to your learning account.</p></div><span id="credentials-state" class="status">Loading…</span></div><p id="credentials-error" class="message error" role="alert" hidden></p><fieldset id="credentials-fields" disabled><div class="fields two-columns"><label for="credentials-email">Lingos email<input id="credentials-email" type="email" autocomplete="username" required></label><div class="field"><label for="credentials-password">Lingos password</label><div class="secret-field"><input id="credentials-password" type="password" autocomplete="current-password" required><button type="button" data-reveal="credentials-password" aria-controls="credentials-password" aria-pressed="false">Show</button></div><span class="field-hint">Enter both fields to save or replace credentials.</span></div></div></fieldset><div class="panel-footer"><button id="remove-credentials" class="button danger" type="button" disabled>Remove credentials</button><div class="actions"><button id="retry-credentials" class="button" type="button" hidden>Retry</button><button id="save-credentials" class="button primary" type="submit" disabled>Save credentials</button></div></div></form>
+          <form id="password-form" class="panel"><div class="panel-heading"><div><h2>Workspace password</h2><p id="account-identity">Signed in as {{.User.Email}}</p></div></div><input type="email" class="visually-hidden" name="username" value="{{.User.Email}}" autocomplete="username" tabindex="-1" aria-label="Workspace email" readonly><div class="fields two-columns"><div class="field"><label for="current-password">Current password</label><div class="secret-field"><input id="current-password" type="password" autocomplete="current-password" required><button type="button" data-reveal="current-password" aria-controls="current-password" aria-pressed="false">Show</button></div></div><div class="field"><label for="new-password">New password</label><div class="secret-field"><input id="new-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" data-reveal="new-password" aria-controls="new-password" aria-pressed="false">Show</button></div><span class="field-hint">At least 12 characters.</span></div><div class="field"><label for="confirm-password">Confirm new password</label><div class="secret-field"><input id="confirm-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" data-reveal="confirm-password" aria-controls="confirm-password" aria-pressed="false">Show</button></div></div></div><p id="password-error" class="message error" role="alert" hidden></p><div class="panel-footer"><p>Changing your password signs out all your sessions.</p><button class="button" type="submit">Change password</button></div></form>
         </section>
-        <section class="activity panel" id="activity" aria-label="Worker activity">
-          <div class="activity-heading"><div><span class="activity-dot"></span><h2>Activity</h2></div><span id="live-indicator" role="status">Ready</span></div>
-          <p id="terminal-title" class="activity-title" aria-live="polite">Worker output appears here.</p>
-          <div id="worker-output" class="terminal" role="log" aria-live="off"><span class="empty">No activity yet.</span></div>
-        </section>
-        <div class="bottom-note"><span>LINGOSBOT</span><span>PRIVATE WORKSPACE</span></div>
+
+        {{if .User.Admin}}
+        <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading"><div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div><section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section><form id="create-user-form" class="panel"><div class="panel-heading"><div><h2>Add a user</h2><p>No public registration. Share the initial password securely.</p></div></div><div class="fields two-columns"><label for="user-email">Email<input id="user-email" type="email" autocomplete="off" required></label><div class="field"><label for="user-password">Initial password</label><div class="secret-field"><input id="user-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" data-reveal="user-password" aria-controls="user-password" aria-pressed="false">Show</button></div><span class="field-hint">At least 12 characters.</span></div></div><label class="check-row"><input id="user-admin" type="checkbox"><span>Administrator access</span></label><p id="users-error" class="message error" role="alert" hidden></p><div class="panel-footer"><p>Administrators can manage other users.</p><button class="button primary" type="submit">Create user</button></div></form></section>
+        {{end}}
+        <footer class="workspace-footer"><span>A quieter place to make progress.</span><span>Saved on your server</span></footer>
       </div>
     </main>
   </div>
-  <div id="toast" class="toast" role="status"></div>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description"><form method="dialog"><h2 id="confirm-title">Are you sure?</h2><p id="confirm-description"></p><div class="actions"><button class="button" value="cancel" autofocus>Cancel</button><button id="confirm-accept" class="button danger" value="confirm">Confirm</button></div></form></dialog>
 {{end}}
 </body>
 </html>
