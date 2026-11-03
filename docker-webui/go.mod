@@ -2,7 +2,10 @@ module lingosbot/docker-webui
 
 go 1.24
 
-require modernc.org/sqlite v1.38.2
+require (
+	github.com/robfig/cron/v3 v3.0.1
+	modernc.org/sqlite v1.38.2
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

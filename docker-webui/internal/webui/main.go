@@ -1,24 +1,22 @@
 package webui
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
-	"fmt"
+	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -30,256 +28,179 @@ type app struct {
 	worker          string
 	admin, password string
 	workerMu        sync.Mutex
-}
-type creds struct {
-	Username          string `json:"username"`
-	Password          string `json:"password"`
-	LessonCount       int    `json:"lessonCount,omitempty"`
-	ErrorsPer100Words int    `json:"errorsPer100Words,omitempty"`
-}
-
-var classID = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
-
-func workerArgs(mode, id string) ([]string, error) {
-	args := []string{"--realtime", "--config-json-stdin"}
-	switch mode {
-	case "classes":
-		return append(args, "--list-classes"), nil
-	case "scrape":
-		if !classID.MatchString(id) {
-			return nil, fmt.Errorf("class must be a positive numeric ID")
-		}
-		if _, err := strconv.ParseInt(id, 10, 64); err != nil {
-			return nil, fmt.Errorf("class ID is out of range")
-		}
-		return append(args, "--scrape-class", id), nil
-	case "run":
-		return args, nil
-	default:
-		return nil, fmt.Errorf("invalid mode")
-	}
+	runMu           sync.Mutex
+	cancels         map[int64]context.CancelFunc
+	workers         sync.WaitGroup
+	ctx             context.Context
 }
 
 func Run() {
-	key := os.Getenv("ENCRYPTION_KEY")
-	if key == "" {
-		log.Fatal("ENCRYPTION_KEY (base64-encoded 32 bytes) required")
+	if err := serve(); err != nil {
+		log.Fatal(err)
 	}
-	raw, e := base64.StdEncoding.DecodeString(key)
-	if e != nil || len(raw) != 32 {
-		log.Fatal("ENCRYPTION_KEY must be base64 for exactly 32 bytes")
+}
+
+func serve() error {
+	if _, err := workerExecutionLimit(); err != nil {
+		return err
 	}
-	b, e := aes.NewCipher(raw)
-	if e != nil {
-		log.Fatal(e)
+	raw, err := base64.StdEncoding.DecodeString(os.Getenv("ENCRYPTION_KEY"))
+	if err != nil || len(raw) != 32 {
+		return errors.New("ENCRYPTION_KEY must be base64 for exactly 32 bytes; keep the same key across restarts")
 	}
-	a, e := cipher.NewGCM(b)
-	if e != nil {
-		log.Fatal(e)
+	b, err := aes.NewCipher(raw)
+	if err != nil {
+		return err
 	}
-	admin, pw := os.Getenv("ADMIN_USER"), os.Getenv("ADMIN_PASSWORD")
-	if admin == "" || pw == "" {
-		log.Fatal("ADMIN_USER and ADMIN_PASSWORD required")
+	a, err := cipher.NewGCM(b)
+	if err != nil {
+		return err
 	}
-	path := os.Getenv("DB_PATH")
-	if path == "" {
-		path = "data/webui.db"
+	path := env("DB_PATH", "data/webui.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
 	}
-	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
-		log.Fatal(e)
+	// One server owns this database: recovery must never interrupt another server's runs.
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
 	}
-	db, e := sql.Open("sqlite", path)
-	if e != nil {
-		log.Fatal(e)
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return errors.New("another WebUI process is already using this database")
+	}
+	// Set permissions before SQLite creates WAL/SHM files, which inherit the database mode.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	err = file.Chmod(0600)
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	dsn := url.URL{Scheme: "file", Path: absolute, RawQuery: "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"}
+	db, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		return err
 	}
 	defer db.Close()
-	if e = initDB(db); e != nil {
-		log.Fatal(e)
+	if err := initDB(db); err != nil {
+		return err
 	}
-	x := &app{db: db, aead: a, worker: env("WORKER_BIN", "/usr/local/bin/lingosbot"), admin: admin, password: pw}
-	mux := http.NewServeMux()
-	mux.Handle("/static/", staticFiles())
-	mux.HandleFunc("/", x.home)
-	mux.HandleFunc("/login", x.login)
-	mux.HandleFunc("/logout", x.logout)
-	mux.HandleFunc("/credentials", x.credentials)
-	mux.HandleFunc("/events", x.events)
-	mux.HandleFunc("/schedule", x.saveSchedule)
-	go x.scheduleLoop()
-	log.Fatal(http.ListenAndServe(env("LISTEN", ":8080"), mux))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	x := &app{db: db, aead: a, worker: env("WORKER_BIN", "/usr/local/bin/lingosbot"), admin: os.Getenv("ADMIN_USER"), password: os.Getenv("ADMIN_PASSWORD"), ctx: ctx}
+	if err := x.bootstrapAdmin(); err != nil {
+		return err
+	}
+	if err := initSettingsDB(db); err != nil {
+		return err
+	}
+	if err := initRunnerDB(db); err != nil {
+		return err
+	}
+	if err := initLibraryDB(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`UPDATE runs SET status='interrupted',summary='The server stopped during this run. Check Lingos before retrying.',finished_at=? WHERE status='running'`, time.Now().Unix()); err != nil {
+		return err
+	}
+	server := &http.Server{Addr: env("LISTEN", "127.0.0.1:8080"), Handler: x.secure(x.routes()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	scheduleDone := make(chan struct{})
+	go func() {
+		defer close(scheduleDone)
+		x.scheduleLoop(ctx)
+	}()
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdown); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
+	log.Printf("WebUI listening on %s", server.Addr)
+	err = server.ListenAndServe()
+	stop()
+	<-shutdownDone
+	<-scheduleDone
+	x.workers.Wait()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
+
+func (x *app) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /static/", staticFiles())
+	mux.HandleFunc("GET /{$}", x.home)
+	mux.HandleFunc("POST /login", x.login)
+	mux.HandleFunc("POST /logout", x.logout)
+	mux.HandleFunc("/api/account", x.accountAPI)
+	mux.HandleFunc("/api/credentials", x.credentialsAPI)
+	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
+	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
+	mux.HandleFunc("/api/settings", x.settingsAPI)
+	mux.HandleFunc("/api/schedule", x.scheduleAPI)
+	mux.HandleFunc("/api/runs", x.runsAPI)
+	mux.HandleFunc("/api/runs/", x.runsAPI)
+	mux.HandleFunc("GET /api/classes", x.classesAPI)
+	mux.HandleFunc("GET /api/library", x.libraryAPI)
+	mux.HandleFunc("GET /api/library/topics/{id}", x.topicAPI)
+	mux.HandleFunc("GET /api/library/export", x.exportAPI)
+	return mux
+}
+
 func env(k, d string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
 	}
 	return d
 }
-func (x *app) session(r *http.Request) (string, string) {
-	c, e := r.Cookie("session")
-	if e != nil {
-		return "", ""
-	}
-	var csrf string
-	var exp int64
-	if x.db.QueryRow(`SELECT csrf,expires FROM sessions WHERE token=?`, c.Value).Scan(&csrf, &exp) != nil || exp < time.Now().Unix() {
-		return "", ""
-	}
-	return c.Value, csrf
-}
+
 func (x *app) home(w http.ResponseWriter, r *http.Request) {
-	_, c := x.session(r)
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	data, ok := x.homeData(w, r, c)
-	if !ok {
-		return
-	}
-	if c != "" {
-		s, err := x.loadSchedule()
-		if err != nil {
-			http.Error(w, "storage error", http.StatusInternalServerError)
-			return
-		}
-		data["Schedule"] = s
-		data["ServerTimezone"] = fmt.Sprintf("%s (%s)", time.Local.String(), time.Now().Format("MST UTC-07:00"))
-	}
+	u, in := x.user(r)
+	_, csrf := x.session(r)
+	data := map[string]any{"In": in, "User": u, "CSRF": csrf, "LoginError": r.URL.Query().Get("error") == "1"}
 	if err := page.ExecuteTemplate(w, "index.html", data); err != nil {
 		log.Printf("render page: %v", err)
 	}
 }
-func (x *app) login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "method", 405)
-		return
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write response: %v", err)
 	}
-	if r.ParseForm() != nil || r.Form.Get("user") != x.admin || r.Form.Get("password") != x.password {
-		http.Redirect(w, r, "/?error=1", http.StatusSeeOther)
-		return
-	}
-	tok := make([]byte, 32)
-	csrf := make([]byte, 32)
-	rand.Read(tok)
-	rand.Read(csrf)
-	t, c := base64.RawURLEncoding.EncodeToString(tok), base64.RawURLEncoding.EncodeToString(csrf)
-	x.db.Exec(`INSERT INTO sessions VALUES(?,?,?)`, t, c, time.Now().Add(12*time.Hour).Unix())
-	http.SetCookie(w, &http.Cookie{Name: "session", Value: t, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: os.Getenv("COOKIE_SECURE") == "1", MaxAge: 43200})
-	http.Redirect(w, r, "/", 303)
 }
-func (x *app) authorize(w http.ResponseWriter, r *http.Request) bool {
-	tok, csrf := x.session(r)
-	if tok == "" {
-		http.Error(w, "unauthorized", 401)
+
+func apiError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(v); err != nil {
+		apiError(w, 400, "Enter a valid JSON object with the expected fields.")
 		return false
 	}
-	if r.FormValue("csrf") != csrf && r.Header.Get("X-CSRF-Token") != csrf {
-		http.Error(w, "forbidden", 403)
+	if err := d.Decode(new(any)); err != io.EOF {
+		apiError(w, 400, "Send one JSON object only.")
 		return false
 	}
 	return true
-}
-func (x *app) logout(w http.ResponseWriter, r *http.Request) {
-	if !x.authorize(w, r) {
-		return
-	}
-	c, _ := r.Cookie("session")
-	x.db.Exec(`DELETE FROM sessions WHERE token=?`, c.Value)
-	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
-	http.Redirect(w, r, "/", 303)
-}
-func (x *app) credentials(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" || !x.authorize(w, r) {
-		if r.Method != "POST" {
-			http.Error(w, "method", 405)
-		}
-		return
-	}
-	p := r.FormValue("password")
-	if r.FormValue("username") == "" || p == "" {
-		http.Error(w, "credentials required", 400)
-		return
-	}
-	nonce := make([]byte, x.aead.NonceSize())
-	rand.Read(nonce)
-	enc := x.aead.Seal(nonce, nonce, []byte(p), nil)
-	_, e := x.db.Exec(`INSERT INTO credentials VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username,password=excluded.password`, r.FormValue("username"), enc)
-	if e != nil {
-		http.Error(w, "storage error", 500)
-		return
-	}
-	http.Redirect(w, r, "/?saved=1", 303)
-}
-func (x *app) events(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" || !x.authorize(w, r) {
-		if r.Method != "GET" {
-			http.Error(w, "method", 405)
-		}
-		return
-	}
-	args, err := workerArgs(r.URL.Query().Get("mode"), r.URL.Query().Get("class"))
-	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	lessons, errorsPer100 := 1, 0
-	if value := r.URL.Query().Get("lessons"); value != "" {
-		lessons, err = strconv.Atoi(value)
-		if err != nil {
-			http.Error(w, "invalid lesson settings", 400)
-			return
-		}
-	}
-	if value := r.URL.Query().Get("errors"); value != "" {
-		errorsPer100, err = strconv.Atoi(value)
-	}
-	if err != nil || lessons < 1 || lessons > 10000 || errorsPer100 < 0 || errorsPer100 > 100 {
-		http.Error(w, "invalid lesson settings", 400)
-		return
-	}
-	cfg, err := x.workerConfig(lessons, errorsPer100)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "save Lingos credentials first", 400)
-		} else {
-			http.Error(w, "credential storage error", 500)
-		}
-		return
-	}
-	if !x.workerMu.TryLock() {
-		http.Error(w, "worker already running", http.StatusConflict)
-		return
-	}
-	defer x.workerMu.Unlock()
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, x.worker, args...)
-	cmd.Stdin = bytes.NewReader(cfg)
-	out, e := cmd.StdoutPipe()
-	if e != nil {
-		http.Error(w, "worker error", 500)
-		return
-	}
-	cmd.Stderr = io.Discard
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	fl, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", 500)
-		return
-	}
-	if e = cmd.Start(); e != nil {
-		http.Error(w, "worker unavailable", 500)
-		return
-	}
-	defer cmd.Wait()
-	scanner := bufio.NewScanner(out)
-	scanner.Buffer(make([]byte, 4096), 2<<20)
-	for scanner.Scan() {
-		fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
-		fl.Flush()
-	}
-	if scanner.Err() != nil {
-		cancel()
-		fmt.Fprint(w, "event: error\ndata: {\"message\":\"Could not read the worker stream.\"}\n\n")
-		fl.Flush()
-	}
 }
