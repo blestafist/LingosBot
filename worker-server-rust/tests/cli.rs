@@ -472,6 +472,122 @@ fn realtime_flushes_api_events_before_finishing_and_emits_one_final_result() {
 }
 
 #[test]
+fn realtime_reports_class_and_lesson_sequence_with_local_counts() {
+    let server = site(Options::default());
+    let config = TempConfig::new(
+        &server.base,
+        json!({"classLessonCounts":{"group:1":2,"group:2":1}}),
+    );
+    let events = run_realtime(&config, 0);
+    let mut expected = Vec::new();
+    for (class_id, class_title, total) in [("1", "A", 2), ("2", "B", 1)] {
+        expected.push(json!({"type":"class_start", "class_id":class_id,
+            "class_title":class_title, "lessons_total":total}));
+        for lesson in 1..=total {
+            expected.push(json!({"type":"lesson_start", "class_id":class_id,
+                "class_title":class_title, "lesson":lesson, "lessons_total":total}));
+            expected.push(json!({"type":"lesson_complete", "class_id":class_id,
+                "class_title":class_title, "lesson":lesson, "lessons_total":total,
+                "words_learned":1}));
+        }
+        expected.push(json!({"type":"class_complete", "class_id":class_id,
+            "class_title":class_title, "lessons_completed":total}));
+    }
+    assert_eq!(progress_events(&events), expected);
+    assert_eq!(events.last().unwrap()["lessons_completed"], 3);
+    assert_eq!(events.last().unwrap()["words_learned"], 3);
+    assert_eq!(count(&server, "/learning/start"), 3);
+}
+
+fn run_realtime(config: &TempConfig, exit_code: i32) -> Vec<Value> {
+    let output = command()
+        .arg("--config")
+        .arg(&config.0)
+        .arg("--realtime")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(exit_code), "{output:?}");
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(!stdout.contains("fake-secret"));
+    assert!(!stdout.contains("csrf&token"));
+    assert!(!stdout.contains("\"answer\""));
+    assert!(output.stderr.is_empty());
+    let events: Vec<Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.last().unwrap()["type"], "result");
+    events
+}
+
+fn progress_events(events: &[Value]) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(event["type"].as_str(), Some(kind) if kind.starts_with("class_")
+                || matches!(kind, "lesson_start" | "lesson_complete"))
+        })
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn realtime_reports_skips_and_never_completes_a_failed_lesson() {
+    for (options, lessons_total, reason) in [
+        (Options::default(), 0, "disabled"),
+        (
+            Options {
+                empty_group: Some(1),
+                ..Default::default()
+            },
+            1,
+            "empty_vocabulary",
+        ),
+        (
+            Options {
+                limited_group: Some(1),
+                ..Default::default()
+            },
+            1,
+            "lesson_limit",
+        ),
+    ] {
+        let server = site(options);
+        let config = TempConfig::new(
+            &server.base,
+            json!({"classLessonCounts":{"group:1":lessons_total,"group:2":0}}),
+        );
+        let events = run_realtime(&config, 0);
+        let mut expected = Vec::new();
+        if lessons_total > 0 {
+            expected.push(json!({"type":"class_start", "class_id":"1",
+                "class_title":"A", "lessons_total":lessons_total}));
+        }
+        expected.push(json!({"type":"class_skipped", "class_id":"1",
+            "class_title":"A", "reason":reason}));
+        expected.push(json!({"type":"class_skipped", "class_id":"2",
+            "class_title":"B", "reason":"disabled"}));
+        assert_eq!(progress_events(&events), expected);
+        assert_eq!(count(&server, "/learning"), 0);
+    }
+
+    let server = site(Options {
+        drop_answer: true,
+        ..Default::default()
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let events = run_realtime(&config, 2);
+    assert_eq!(
+        progress_events(&events),
+        vec![
+            json!({"type":"class_start", "class_id":"1", "class_title":"A", "lessons_total":1}),
+            json!({"type":"lesson_start", "class_id":"1", "class_title":"A", "lesson":1, "lessons_total":1}),
+        ]
+    );
+    assert_eq!(count(&server, "/learning/answer"), 1);
+}
+
+#[test]
 fn realtime_config_failure_is_one_raw_result_event() {
     let output = command()
         .args(["--realtime", "--config-json", "invalid fake-secret"])

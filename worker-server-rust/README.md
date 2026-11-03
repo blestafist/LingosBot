@@ -169,13 +169,48 @@ chmod 600 private-config.json
 Примеры строк, не полный протокол конкретного запуска:
 
 ```json
-{"type":"http_request","api_calls":1,"method":"GET","status":200,"error":null}
+{"type":"http_request","api_calls":1,"method":"GET","operation":"sign_in","duration_ms":42,"status":200,"error":null}
 {"type":"login_success"}
+{"type":"class_start","class_title":"English","class_id":"12345","lessons_total":2}
+{"type":"lesson_start","class_title":"English","class_id":"12345","lesson":1,"lessons_total":2}
 {"type":"lesson_answer","word":"house","correct":true,"intentional":false,"words_learned":1}
+{"type":"lesson_complete","class_title":"English","class_id":"12345","lesson":1,"lessons_total":2,"words_learned":1}
+{"type":"class_complete","class_title":"English","class_id":"12345","lessons_completed":2}
+{"type":"class_skipped","class_title":"German","class_id":"67890","reason":"disabled"}
 {"type":"result","success":false,"error_code":"NETWORK_ERROR","message":"HTTP request timed out; not retried."}
 ```
 
-`http_request` приходит после получения заголовков или транспортной ошибки, до чтения тела; `api_calls` — текущий счётчик, `status` — HTTP-код или `null`, `error` — `null`, `timeout`, `connection` или `request`. В событии нет URL, заголовков и тела. `lesson_answer` содержит текст упражнения `word`, результат проверки, признак намеренной ошибки и число правильных ответов **в текущем уроке**. Эти слова и данные экспорта могут быть конфиденциальными: защищайте stdout, логи и получателя потока. Прогресс мог быть выдан до последующей ошибки и не означает завершения урока.
+`http_request` приходит после получения заголовков или транспортной ошибки, до чтения тела. Поля: `type`, `api_calls`, `method`, `operation`, `duration_ms`, `status`, `error`. `api_calls` — текущий счётчик, `status` — HTTP-код или `null`, `error` — `null`, `timeout`, `connection` или `request`. `duration_ms` — неотрицательное целое число миллисекунд по монотонным часам, от сборки запроса до заголовков ответа/ошибки; чтение тела и запись события в это время не входят. Каждый redirect учитывается отдельно. В событии нет URL/path, query, ID классов/уроков, заголовков или тела.
+
+`operation` определяется только по методу и пути в памяти и всегда является одной из фиксированных строк:
+
+| `operation` | Действие |
+| --- | --- |
+| `sign_in` | Загрузка формы входа или отправка авторизации |
+| `load_dashboard` | Загрузка стандартного dashboard |
+| `load_vocabulary` | Загрузка списка наборов или карточек набора |
+| `start_lesson` | Запрос начала урока |
+| `submit_answer` | Отправка ответа |
+| `continue_lesson` | Переход к следующему набору урока |
+| `select_class` | Переключение выбранного класса (context или legacy group) |
+| `join_challenge` | Вступление в челлендж |
+| `load_page` | Прочий/нераспознанный запрос, в том числе нестандартный URL dashboard |
+
+Query, ID и другие данные не включаются в эти строки. Отдельного HTTP-запроса завершения урока нет: завершение подтверждается состоянием ответа и событием `lesson_complete`.
+
+`lesson_answer` содержит текст упражнения `word`, результат проверки, признак намеренной ошибки и число правильных ответов **в текущем уроке**. Эти слова и данные экспорта могут быть конфиденциальными: защищайте stdout, логи и получателя потока. Прогресс мог быть выдан до последующей ошибки и не означает завершения урока.
+
+Дополнительные события прогресса уроков (клиенты должны игнорировать неизвестные типы):
+
+| `type` | Поля помимо `type` |
+| --- | --- |
+| `class_start` | `class_title`, `class_id`, `lessons_total` |
+| `lesson_start` | `class_title`, `class_id`, `lesson`, `lessons_total` |
+| `lesson_complete` | `class_title`, `class_id`, `lesson`, `lessons_total`, `words_learned` |
+| `class_complete` | `class_title`, `class_id`, `lessons_completed` |
+| `class_skipped` | `class_title`, `class_id`, `reason` |
+
+`class_id` — десятичная строка group ID; `class_title` — недоверенный текст dashboard, отображайте его как текст, не HTML. `lesson` — номер с 1 внутри текущего класса, `lessons_total` — запланированное число уроков класса. `class_start` выдаётся до подготовки класса, `lesson_start` — перед запросом начала урока, после проверок dashboard и челленджа. `lesson_complete` подтверждает завершение и содержит `words_learned` только этого урока. `class_complete` выдаётся только после всех запланированных уроков; `lessons_completed` относится только к этому классу. `class_skipped.reason`: `disabled` (настроено 0 уроков, без `class_start`), `empty_vocabulary` или `lesson_limit`. Лимит может остановить класс после части завершённых уроков; тогда выдаётся `class_skipped`, но не `class_complete`. Сетевые/parse-ошибки завершаются обычным `result`, без ложного события завершения. Прежние поля существующих событий сохранены; новые события/поля не содержат credentials или запросов ответов. В режимах списка классов и экспорта события прогресса уроков не выдаются.
 
 ## Поведение при сбое
 

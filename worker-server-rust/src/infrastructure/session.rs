@@ -2,7 +2,7 @@ use super::{html, json};
 use crate::error::{Error, Result};
 use crate::lesson::LessonClient;
 use crate::models::{AnswerRequest, AnswerResult, LearningProps};
-use reqwest::blocking::{Client, RequestBuilder, Response};
+use reqwest::blocking::{Client, Request, RequestBuilder, Response};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER};
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
@@ -16,6 +16,34 @@ use std::time::{Duration, Instant};
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 type EventCallback = dyn Fn(&Value) -> io::Result<()> + Send + Sync;
+
+// Only fixed labels leave the process; URL components are never event fields.
+fn request_operation(request: &Request) -> &'static str {
+    let method = request.method().as_str();
+    let path = request.url().path().trim_end_matches('/');
+    match (method, path) {
+        ("GET" | "POST", "/h/login") => "sign_in",
+        ("GET", "/student/dashboard") => "load_dashboard",
+        ("GET", "/student/wordsets") => "load_vocabulary",
+        ("GET", "/learning/next") => "continue_lesson",
+        ("POST", "/student/context" | "/student/group") => "select_class",
+        _ => {
+            let Some((prefix, id)) = path.rsplit_once('/') else {
+                return "load_page";
+            };
+            if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+                return "load_page";
+            }
+            match (method, prefix) {
+                ("GET", "/student/wordsets") => "load_vocabulary",
+                ("GET", "/learning/start") => "start_lesson",
+                ("POST", "/learning/answer") => "submit_answer",
+                ("POST", "/student/challenges") => "join_challenge",
+                _ => "load_page",
+            }
+        }
+    }
+}
 
 /// One client, cookie jar and connection pool per process. Nothing is persisted.
 pub struct Session {
@@ -100,8 +128,9 @@ impl Session {
 
     /// Install an optional synchronous observer for HTTP and application events.
     /// HTTP events arrive when headers arrive or on transport failure, before the
-    /// response body is read. They include status and transport error categories,
-    /// never URLs, headers or bodies. Observer errors stop request processing
+    /// response body is read. They include fixed operation labels, elapsed
+    /// milliseconds, status and transport error categories, never URLs, headers
+    /// or bodies. Observer errors stop request processing
     /// without replaying.
     pub fn set_event_callback<F>(&mut self, callback: F)
     where
@@ -183,7 +212,11 @@ impl Session {
 
     fn send(&self, request: RequestBuilder, is_post: bool) -> Result<Response> {
         let timeout = self.timeout.min(self.remaining()?);
-        let result = request.timeout(timeout).send();
+        let started = Instant::now();
+        let request = request.timeout(timeout).build();
+        let operation = request.as_ref().map_or("load_page", request_operation);
+        let result = request.and_then(|request| self.client.execute(request));
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let count = self.http_calls.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some(callback) = &self.event_callback {
             let (status, error) = match &result {
@@ -196,6 +229,8 @@ impl Session {
                 "type": "http_request",
                 "api_calls": count,
                 "method": if is_post { "POST" } else { "GET" },
+                "operation": operation,
+                "duration_ms": duration_ms,
                 "status": status,
                 "error": error,
             });

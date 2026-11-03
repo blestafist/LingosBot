@@ -512,8 +512,16 @@ pub fn run(
 
     for (class, count) in classes.iter().zip(counts) {
         if count == 0 {
+            session.emit_event(&json!({
+                "type": "class_skipped", "class_title": class.title,
+                "class_id": class.group_id.to_string(), "reason": "disabled",
+            }))?;
             continue;
         }
+        session.emit_event(&json!({
+            "type": "class_start", "class_title": class.title,
+            "class_id": class.group_id.to_string(), "lessons_total": count,
+        }))?;
         let dashboard = match initial.take() {
             Some(dashboard) => dashboard,
             None => {
@@ -526,6 +534,10 @@ pub fn run(
             Ok(()) => {}
             Err(error) if error.is_limit() => {
                 stats.classes_limited += 1;
+                session.emit_event(&json!({
+                    "type": "class_skipped", "class_title": class.title,
+                    "class_id": class.group_id.to_string(), "reason": "lesson_limit",
+                }))?;
             }
             Err(error) => return Err(error),
         }
@@ -553,20 +565,37 @@ fn run_class(
     let vocabulary = collect_vocabulary(session, group_id)?;
     if vocabulary.is_empty() {
         stats.classes_empty += 1;
+        session.emit_event(&json!({
+            "type": "class_skipped", "class_title": class.title,
+            "class_id": group_id.to_string(), "reason": "empty_vocabulary",
+        }))?;
         return Ok(());
     }
 
-    for _ in 0..count {
+    for lesson_number in 1..=count {
         // Always read afresh, including after lesson completion and joins.
         let dashboard = read_dashboard(session, config, Some(group_id))?;
         observe_dashboard(stats, &dashboard);
         check_limit(&dashboard)?;
         let perfectionism = ensure_challenge(session, config, dashboard, group_id, stats)?;
+        session.emit_event(&json!({
+            "type": "lesson_start", "class_title": class.title,
+            "class_id": group_id.to_string(), "lesson": lesson_number, "lessons_total": count,
+        }))?;
         let page = session.get_page(&format!("/learning/start/0?groupId={group_id}"))?;
         let initial = parse_learning_page(page)?;
         let lesson = run_lesson(session, config, &vocabulary, perfectionism, initial)?;
         record_lesson(stats, &lesson)?;
+        session.emit_event(&json!({
+            "type": "lesson_complete", "class_title": class.title,
+            "class_id": group_id.to_string(), "lesson": lesson_number, "lessons_total": count,
+            "words_learned": lesson.words_learned,
+        }))?;
     }
+    session.emit_event(&json!({
+        "type": "class_complete", "class_title": class.title,
+        "class_id": group_id.to_string(), "lessons_completed": count,
+    }))?;
     Ok(())
 }
 
