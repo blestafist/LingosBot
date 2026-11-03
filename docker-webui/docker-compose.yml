@@ -1,0 +1,18 @@
+services:
+  webui:
+    build:
+      context: ..
+      dockerfile: docker-webui/Dockerfile
+    environment:
+      LISTEN: :8080
+      DB_PATH: /data/webui.db
+      ADMIN_USER: ${ADMIN_USER:?set ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY to base64 of 32 random bytes}
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - webui-data:/data
+volumes:
+  webui-data:

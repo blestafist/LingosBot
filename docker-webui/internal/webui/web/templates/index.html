@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LingosBot</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+{{if not .In}}
+  <main class="login-wrap">
+    <div class="login-panel">
+      <a class="brand" href="/" aria-label="LingosBot home"><span class="brand-symbol">L</span><span>Lingos<span class="brand-light">Bot</span></span></a>
+      <h1>Sign in</h1>
+      <p class="description">Enter your administrator credentials.</p>
+      {{if .LoginError}}<p class="notice error" role="alert">Incorrect username or password.</p>{{end}}
+      <form action="/login" method="post" class="form-stack">
+        <label>Username<input name="user" autocomplete="username" required autofocus></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="button primary" type="submit">Sign in</button>
+      </form>
+    </div>
+  </main>
+{{else}}
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="#worker"><span class="brand-symbol">L</span><span>Lingos<span class="brand-light">Bot</span></span></a>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav class="navigation" aria-label="Main navigation">
+        <a href="#worker" data-page-link="worker"><span class="nav-number">01</span> Worker</a>
+        <a href="#vocabulary" data-page-link="vocabulary"><span class="nav-number">02</span> Vocabulary</a>
+        <a href="#schedule" data-page-link="schedule"><span class="nav-number">03</span> Schedule</a>
+        <a href="#account" data-page-link="account"><span class="nav-number">04</span> Account</a>
+      </nav>
+      <form action="/logout" method="post" class="logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Sign out <span aria-hidden="true">↗</span></button></form>
+    </aside>
+    <main class="main">
+      <div class="topbar"><span>WORKSPACE</span><span class="topbar-name">LINGOSBOT</span></div>
+      <div class="content">
+        <input type="hidden" id="csrf-token" value="{{.CSRF}}">
+        <section id="worker" class="page" data-page>
+          <div class="page-heading"><div><p class="overline">01 / WORKER</p><h1>Worker</h1><p class="description">Configure and run lessons manually.</p></div><span class="status {{if .CredentialsSaved}}status-good{{end}}">{{if .CredentialsSaved}}Credentials saved{{else}}Credentials not saved{{end}}</span></div>
+          <div class="panel">
+            <div class="panel-heading"><div><h2>Run configuration</h2><p>Settings for a manual run.</p></div></div>
+            <div class="fields two-columns">
+              <label>Lessons per class<input id="lesson-count" type="number" min="1" max="10000" step="1" value="1" required><span>Number of lessons to complete in each class.</span></label>
+              <label>Intentional errors per 100 words<input id="error-rate" type="number" min="0" max="100" step="1" value="0" required><span>Use 0 for no intentional errors.</span></label>
+            </div>
+            <div class="panel-footer"><span>Manual run</span><button class="button primary" data-action="run" type="button">Run worker <span aria-hidden="true">↗</span></button></div>
+          </div>
+        </section>
+        <section id="vocabulary" class="page" data-page hidden>
+          <div class="page-heading"><div><p class="overline">02 / VOCABULARY</p><h1>Vocabulary</h1><p class="description">Download a class dictionary as Markdown.</p></div></div>
+          <div class="panel">
+            <div class="panel-heading"><div><h2>Classes</h2><p>Sync classes or enter a class ID below.</p></div><button class="button secondary" type="button" data-action="classes">Sync classes</button></div>
+            <div id="class-results" class="class-results"><p class="empty">No classes loaded.</p></div>
+            <div class="download-row"><label>Class ID<input id="class-id" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 26083"></label><button class="button primary" type="button" data-action="scrape">Download Markdown <span aria-hidden="true">↓</span></button></div>
+          </div>
+        </section>
+        <section id="schedule" class="page" data-page hidden>
+          <div class="page-heading"><div><p class="overline">03 / SCHEDULE</p><h1>Schedule</h1><p class="description">Run lessons automatically each day.</p></div><span class="status {{if .Schedule.Enabled}}status-good{{end}}">{{if .Schedule.Enabled}}Enabled{{else}}Disabled{{end}}</span></div>
+          <form class="panel" action="/schedule" method="post">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <div class="panel-heading"><div><h2>Daily schedule</h2><p>Server timezone{{if .ServerTimezone}}: {{.ServerTimezone}}{{end}}. Runs are skipped if the service is offline, the worker is busy, or credentials are missing. Results are in the server logs.</p></div></div>
+            <label class="check-row"><input type="checkbox" name="enabled" value="1" {{if .Schedule.Enabled}}checked{{end}}><span><strong>Enable schedule</strong><small>Start the worker once a day.</small></span></label>
+            <div class="fields schedule-fields">
+              <label>Time<input type="time" name="time" value="{{.Schedule.Time}}" required></label>
+              <label>Lessons per class<input type="number" name="lessons" min="1" max="10000" step="1" value="{{.Schedule.Lessons}}" required></label>
+              <label>Errors per 100 words<input type="number" name="errors" min="0" max="100" step="1" value="{{.Schedule.Errors}}" required></label>
+            </div>
+            <div class="panel-footer"><span>Saved on this server</span><button class="button primary" type="submit">Save schedule</button></div>
+          </form>
+        </section>
+        <section id="account" class="page" data-page hidden>
+          <div class="page-heading"><div><p class="overline">04 / ACCOUNT</p><h1>Account</h1><p class="description">Manage your Lingos credentials.</p></div><span class="status {{if .CredentialsSaved}}status-good{{end}}">{{if .CredentialsSaved}}Saved{{else}}Not saved{{end}}</span></div>
+          <form action="/credentials" method="post" class="panel">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <div class="panel-heading"><div><h2>Lingos credentials</h2><p>{{if .CredentialsSaved}}Credentials are saved but not verified. Submit both fields to replace them.{{else}}Save your Lingos credentials to run the worker.{{end}}</p></div></div>
+            <div class="fields two-columns">
+              <label>Username<input name="username" autocomplete="username" required></label>
+              <label>Password<input name="password" type="password" autocomplete="new-password" required></label>
+            </div>
+            <div class="panel-footer"><span>Password encrypted at rest</span><button class="button primary" type="submit">Save credentials</button></div>
+          </form>
+        </section>
+        <section class="activity panel" id="activity" aria-label="Worker activity">
+          <div class="activity-heading"><div><span class="activity-dot"></span><h2>Activity</h2></div><span id="live-indicator" role="status">Ready</span></div>
+          <p id="terminal-title" class="activity-title" aria-live="polite">Worker output appears here.</p>
+          <div id="worker-output" class="terminal" role="log" aria-live="off"><span class="empty">No activity yet.</span></div>
+        </section>
+        <div class="bottom-note"><span>LINGOSBOT</span><span>PRIVATE WORKSPACE</span></div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+{{end}}
+</body>
+</html>
