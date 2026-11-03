@@ -175,8 +175,8 @@ pub fn normalize_for_matching(value: &str) -> String {
     normalized
 }
 
-/// Port of ChallengeMatcher.IsPerfectionism. Token matching implements its
-/// normalized word-boundary regexes without requiring another regex dependency.
+/// Match the desktop's normalized keywords, but conservatively retain protection
+/// when any explicit limit is strict, even if another limit is more permissive.
 pub fn is_perfectionism(title: &str, description: &str) -> bool {
     let title = normalize_for_matching(title);
     let description = normalize_for_matching(description);
@@ -196,21 +196,21 @@ pub fn is_perfectionism(title: &str, description: &str) -> bool {
         return false;
     }
 
-    let max_errors = find_max_error_limit(&words);
+    let max_errors = find_max_error_limits(&words);
     let no_errors = words
         .windows(2)
         .any(|pair| pair[0] == "bez" && is_error_word(pair[1]));
-    if max_errors.is_none() && !no_errors {
+    if max_errors.is_empty() && !no_errors {
         return keyword_in_title;
     }
 
     let one_or_fewer = no_errors
-        || max_errors.is_some_and(|count| match count.parse::<i32>() {
+        || max_errors.iter().any(|count| match count.parse::<i32>() {
             Ok(number) => number <= 1,
             Err(_) => {
                 count.starts_with("jed")
                     || count.starts_with("zer")
-                    || matches!(count, "one" | "zero")
+                    || matches!(*count, "one" | "zero")
             }
         });
     one_or_fewer
@@ -227,7 +227,7 @@ fn is_error_word(word: &str) -> bool {
     word.starts_with("blad") || word.starts_with("bled") || word.starts_with("error")
 }
 
-fn find_max_error_limit<'a>(words: &[&'a str]) -> Option<&'a str> {
+fn find_max_error_limits<'a>(words: &[&'a str]) -> Vec<&'a str> {
     const PREFIXES: &[&[&str]] = &[
         &["maks"],
         &["maksymalnie"],
@@ -239,6 +239,7 @@ fn find_max_error_limit<'a>(words: &[&'a str]) -> Option<&'a str> {
         &["at", "most"],
         &["no", "more", "than"],
     ];
+    let mut limits = Vec::new();
     for start in 0..words.len() {
         for prefix in PREFIXES {
             let remaining = &words[start..];
@@ -249,11 +250,11 @@ fn find_max_error_limit<'a>(words: &[&'a str]) -> Option<&'a str> {
             let valid_count = count.bytes().all(|byte| byte.is_ascii_digit())
                 || count.bytes().all(|byte| byte.is_ascii_lowercase());
             if valid_count && is_error_word(remaining[prefix.len() + 1]) {
-                return Some(count);
+                limits.push(count);
             }
         }
     }
-    None
+    limits
 }
 
 #[cfg(test)]

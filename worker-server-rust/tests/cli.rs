@@ -52,29 +52,20 @@ fn run(config: &TempConfig) -> (Output, Value) {
     });
     assert!(!stdout.contains("fake-secret"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
-    let mut keys: Vec<_> = value
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    keys.sort_unstable();
     if output.status.success() {
         assert_eq!(value["success"], true);
-        assert_eq!(
-            keys,
-            [
-                "duration_seconds",
-                "message",
-                "success",
-                "username",
-                "words_learned"
-            ]
-        );
+        assert!(value["username"].is_string());
         assert!(value["duration_seconds"].as_f64().unwrap() >= 0.0);
         assert!(value["words_learned"].is_u64());
     } else {
         assert_eq!(value["success"], false);
+        let mut keys: Vec<_> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
         assert_eq!(keys, ["error_code", "message", "success"]);
     }
     assert!(!value["message"].as_str().unwrap().is_empty());
@@ -225,6 +216,350 @@ fn count(server: &Server, prefix: &str) -> usize {
         .iter()
         .filter(|request| request.path.starts_with(prefix))
         .count()
+}
+
+#[test]
+fn list_classes_returns_one_json_document_without_mutations_or_scraping() {
+    let server = site(Options::default());
+    let config = TempConfig::new(&server.base, json!({}));
+    let output = command()
+        .arg("--config")
+        .arg(&config.0)
+        .arg("--list-classes")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must contain only one JSON document");
+    assert_eq!(result["success"], true);
+    let classes = result["classes"].as_array().expect("missing classes array");
+    assert_eq!(classes.len(), 2);
+    for (id, title) in [("1", "A"), ("2", "B")] {
+        let class = classes
+            .iter()
+            .find(|class| class["group_id"] == id)
+            .expect("missing class or group_id is not a string");
+        assert_eq!(class["title"], title);
+    }
+    assert!(count(&server, "/student/dashboard") > 0);
+    assert_eq!(count(&server, "/learning"), 0);
+    assert_eq!(count(&server, "/student/wordsets"), 0);
+    assert_eq!(count(&server, "/student/context"), 0);
+    assert_eq!(count(&server, "/student/group"), 0);
+    assert_eq!(count(&server, "/student/challenges"), 0);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+}
+
+#[test]
+fn list_classes_conflicts_with_scrape_class_before_login() {
+    for flags in [
+        ["--list-classes", "--scrape-class", "1"],
+        ["--scrape-class", "1", "--list-classes"],
+    ] {
+        let server = site(Options::default());
+        let config = TempConfig::new(&server.base, json!({}));
+        let output = command()
+            .arg("--config")
+            .arg(&config.0)
+            .arg("--json")
+            .args(flags)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        let result: Value = serde_json::from_slice(&output.stdout)
+            .expect("stdout must contain only one JSON error document");
+        assert_eq!(result["success"], false);
+        assert_eq!(result["error_code"], "CONFIG_ERROR");
+        assert_eq!(server.count(), 0);
+    }
+}
+
+#[test]
+fn inline_and_stdin_json_configs_run_without_a_config_file() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    for stdin_config in [false, true] {
+        let server = site(Options {
+            limit: true,
+            ..Default::default()
+        });
+        let config = json!({
+            "baseUrl": server.base, "studentDashboardUrl": "/student/dashboard",
+            "credentials": {"email": "test@example.org", "password": "fake-secret"},
+            "answerDelayMinMs": 0, "answerDelayMaxMs": 0
+        })
+        .to_string();
+        let mut cmd = command();
+        cmd.arg("--json");
+        if stdin_config {
+            cmd.arg("--config-json-stdin").stdin(Stdio::piped());
+        } else {
+            cmd.args(["--config-json", &config]);
+        }
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if stdin_config {
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(config.as_bytes()).unwrap();
+            drop(stdin); // The config is read until EOF.
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value =
+            serde_json::from_slice(&output.stdout).expect("stdout must contain only JSON");
+        assert_eq!(result["success"], true);
+        assert_eq!(result["username"], "test@example.org");
+        assert_eq!(result["words_learned"], 0);
+        assert!(count(&server, "/student/dashboard") > 0);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-secret"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+    }
+}
+
+#[test]
+fn invalid_inline_and_stdin_json_produce_json_errors_without_secrets() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    for stdin_config in [false, true] {
+        let mut cmd = command();
+        cmd.arg("--json");
+        if stdin_config {
+            cmd.arg("--config-json-stdin").stdin(Stdio::piped());
+        } else {
+            cmd.args(["--config-json", "fake-secret invalid JSON"]);
+        }
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if stdin_config {
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(b"fake-secret invalid JSON").unwrap();
+            drop(stdin);
+        }
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        let result: Value =
+            serde_json::from_slice(&output.stdout).expect("stdout must contain only JSON");
+        assert_eq!(result["success"], false);
+        assert_eq!(result["error_code"], "CONFIG_ERROR");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-secret"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+    }
+}
+
+#[test]
+fn realtime_flushes_api_events_before_finishing_and_emits_one_final_result() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let (blocked_tx, blocked_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let server = Server::start(move |request, _| {
+        Some(match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/h/login") => Reply::html("<input name=_csrf_token value=token>"),
+            ("POST", "/h/login") => {
+                blocked_tx.send(()).unwrap();
+                // Bound the wait even if the test or child fails.
+                let _ = release_rx.recv_timeout(Duration::from_secs(10));
+                Reply::redirect("/student/dashboard")
+            }
+            ("GET", "/student/dashboard") => Reply::page(json!({"page":"dashboard","dashboard":{
+                "currentGroup":{"id":1},"groups":[{"id":1,"name":"A"}],
+                "contexts":{},"lessonLimitReached":true,"challenges":[]
+            }})),
+            _ => panic!("Unexpected request {} {}", request.method, request.path),
+        })
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let mut child = command()
+        .arg("--config")
+        .arg(&config.0)
+        .arg("--realtime")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (line_tx, line_rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                break;
+            }
+            if line_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let blocked = blocked_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut lines = Vec::new();
+    let mut api_before_release = false;
+    while blocked && Instant::now() < deadline {
+        match line_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(line) => {
+                api_before_release |=
+                    serde_json::from_str::<Value>(&line).is_ok_and(|v| v["type"] == "http_request");
+                lines.push(line);
+                if api_before_release {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = release_tx.send(());
+    let output = child.wait_with_output().unwrap();
+    reader.join().unwrap();
+    lines.extend(line_rx.try_iter());
+    assert!(blocked, "child did not reach the blocked login request");
+    assert!(
+        api_before_release,
+        "no flushed API event while the process was still running: {lines:?}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events: Vec<Value> = lines
+        .iter()
+        .map(|line| {
+            assert!(
+                line.ends_with('\n'),
+                "NDJSON line is not newline-terminated: {line:?}"
+            );
+            serde_json::from_str(line).unwrap_or_else(|_| panic!("not a raw JSON line: {line}"))
+        })
+        .collect();
+    assert!(events.iter().all(|event| event["type"].is_string()));
+    assert!(events.iter().any(|event| event["type"] == "http_request"));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["type"] == "result")
+            .count(),
+        1
+    );
+    assert_eq!(events.last().unwrap()["type"], "result");
+    assert!(!lines.join("\n").contains("fake-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+}
+
+#[test]
+fn realtime_config_failure_is_one_raw_result_event() {
+    let output = command()
+        .args(["--realtime", "--config-json", "invalid fake-secret"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(
+        stdout.ends_with('\n'),
+        "NDJSON result must end with a newline"
+    );
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines.len(), 1, "{stdout}");
+    let event: Value = serde_json::from_str(lines[0]).expect("result must be raw JSON");
+    assert_eq!(event["type"], "result");
+    assert!(!stdout.contains("fake-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+}
+
+#[test]
+fn scrape_class_returns_words_grouped_by_wordset_without_lessons() {
+    let server = Server::start(|request, _| {
+        Some(match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/h/login") => Reply::html("<input name=_csrf_token value=token>"),
+            ("POST", "/h/login") => Reply::redirect("/student/dashboard"),
+            ("GET", "/student/dashboard") => Reply::page(json!({"page":"dashboard","dashboard":{
+                "currentGroup":{"id":1},"groups":[{"id":1,"name":"A"}],
+                "contexts":{},"lessonLimitReached":false,"challenges":[]
+            }})),
+            ("GET", "/student/wordsets") => Reply::page(json!({"page":"wordsets","wordsets":{
+                "currentGroup":{"id":1},"wordsets":[
+                    {"id":55,"name":"First","counts":{"total":1}},
+                    {"id":56,"name":"Second","counts":{"total":1}}
+                ]
+            }})),
+            ("GET", "/student/wordsets/55") => Reply::page(json!({"page":"wordset","wordset":{
+                "group":{"id":1},"wordset":{"id":55},"flashcards":[{"word":"house","translation":"dom"}]
+            }})),
+            ("GET", "/student/wordsets/56") => Reply::page(json!({"page":"wordset","wordset":{
+                "group":{"id":1},"wordset":{"id":56},"flashcards":[{"word":"cat","translation":"kot"}]
+            }})),
+            _ => panic!("Unexpected request {} {}", request.method, request.path),
+        })
+    });
+    let config = TempConfig::new(&server.base, json!({}));
+    let output = command()
+        .arg("--config")
+        .arg(&config.0)
+        .args(["--json", "--scrape-class", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must contain only JSON");
+    // Allow the CLI to wrap ScrapedClass in its success envelope.
+    fn find_wordsets(value: &Value) -> Option<&Vec<Value>> {
+        match value {
+            Value::Object(map) => map
+                .get("wordsets")
+                .and_then(Value::as_array)
+                .or_else(|| map.values().find_map(find_wordsets)),
+            Value::Array(items) => items.iter().find_map(find_wordsets),
+            _ => None,
+        }
+    }
+    let sets = find_wordsets(&result).expect("scrape result must contain wordsets");
+    assert_eq!(sets.len(), 2);
+    for (name, word, translation) in [("First", "house", "dom"), ("Second", "cat", "kot")] {
+        let set = sets
+            .iter()
+            .find(|set| set["info"]["name"] == name)
+            .expect("missing wordset");
+        let entries = set["entries"].as_array().expect("missing entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["word"], word);
+        assert_eq!(entries[0]["translation"], translation);
+    }
+    assert_eq!(count(&server, "/student/wordsets/55"), 1);
+    assert_eq!(count(&server, "/student/wordsets/56"), 1);
+    assert_eq!(count(&server, "/learning"), 0);
+    assert_eq!(count(&server, "/student/challenges"), 0);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-secret"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
 }
 
 #[test]

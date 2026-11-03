@@ -19,6 +19,17 @@ pub trait LessonClient {
 
     /// Enforce session deadlines when waiting, or avoid sleeping in tests.
     fn wait(&mut self, duration: Duration) -> Result<()>;
+
+    /// Called only after the server has provided answer feedback.
+    fn progress(
+        &mut self,
+        _prompt: &str,
+        _correct: bool,
+        _intentional: bool,
+        _words_learned: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -26,6 +37,8 @@ pub struct LessonStats {
     /// Distinct flashcard exercises with a confirmed, non-intentional success.
     pub words_learned: u64,
     pub answers_submitted: u64,
+    /// Server-confirmed rejected flashcard answers (including intentional errors).
+    pub errors_made: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -189,6 +202,9 @@ pub fn run_lesson(
                     "The intentional wrong answer was unexpectedly accepted.",
                 ));
             }
+            if feedback.result <= 0 {
+                stats.errors_made += 1;
+            }
             if !intentional_error {
                 if feedback.result <= 0 {
                     progress.candidate_index += 1;
@@ -197,6 +213,12 @@ pub fn run_lesson(
                     stats.words_learned += 1;
                 }
             }
+            client.progress(
+                &prompt,
+                feedback.result > 0,
+                intentional_error,
+                stats.words_learned,
+            )?;
         } else {
             // New-word acknowledgements need no grading feedback. Any successful
             // response confirms the POST, so the same card must not be replayed.

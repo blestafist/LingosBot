@@ -108,6 +108,253 @@ fn cli_overrides_json_and_preserves_password_whitespace() {
 }
 
 #[test]
+fn json_sources_share_the_same_model_and_cli_overrides() {
+    let json = r#"{"credentials":{"email":"desktop","password":"desktop-pass"},
+        "username":"file-user","password":"file-pass","mode":"api",
+        "lessonCount":2,"classLessonCounts":{"group:42":3,"disabled":0},
+        "answerDelayMinMs":100,"answerDelayMaxMs":200,
+        "requestTimeoutSeconds":10,"maxRunSeconds":100}"#;
+    let file = TestFile::new(json);
+    let common = Cli {
+        username: Some("cli-user".into()),
+        password: Some("cli-pass".into()),
+        lessons: Some(4),
+        delay_min_ms: Some(300),
+        delay_max_ms: Some(400),
+        timeout_seconds: Some(20),
+        max_run_seconds: Some(200),
+        ..Cli::default()
+    };
+    // Parse each invocation separately because Cli intentionally does not clone secrets.
+    let args = [
+        "lingosbot",
+        "-u",
+        "cli-user",
+        "-p",
+        "cli-pass",
+        "--lessons",
+        "4",
+        "--delay-min-ms",
+        "300",
+        "--delay-max-ms",
+        "400",
+        "--timeout-seconds",
+        "20",
+        "--max-run-seconds",
+        "200",
+    ];
+    let inline = Cli::try_parse_from(args.into_iter().chain(["--config-json", json]))
+        .unwrap()
+        .resolve()
+        .unwrap();
+    let from_stdin = Cli::try_parse_from(args.into_iter().chain(["--config-json-stdin"]))
+        .unwrap()
+        .resolve_with_stdin(json.as_bytes())
+        .unwrap();
+    let from_file = Cli {
+        config: Some(file.0.clone()),
+        ..common
+    }
+    .resolve()
+    .unwrap();
+    for config in [inline, from_stdin, from_file] {
+        assert_eq!(config.username, "cli-user");
+        assert_eq!(config.password, "cli-pass");
+        assert_eq!(config.lesson_count, 4);
+        assert_eq!(
+            config.class_lesson_counts,
+            BTreeMap::from([("group:42".to_owned(), 3), ("disabled".to_owned(), 0)])
+        );
+        assert_eq!(
+            (config.answer_delay_min_ms, config.answer_delay_max_ms),
+            (300, 400)
+        );
+        assert_eq!(config.request_timeout_seconds, 20);
+        assert_eq!(config.max_run_seconds, 200);
+    }
+}
+
+#[test]
+fn json_sources_are_mutually_exclusive_even_for_directly_constructed_cli() {
+    for args in [
+        vec!["lingosbot", "--config", "path", "--config-json", "{}"],
+        vec!["lingosbot", "--config", "path", "--config-json-stdin"],
+        vec!["lingosbot", "--config-json", "{}", "--config-json-stdin"],
+    ] {
+        assert_eq!(
+            Cli::try_parse_from(args).unwrap_err().kind(),
+            ErrorKind::ArgumentConflict
+        );
+    }
+    assert!(
+        Cli {
+            config: Some("nonexistent".into()),
+            config_json_stdin: true,
+            ..Cli::default()
+        }
+        .resolve_with_stdin(&b"{}"[..])
+        .unwrap_err()
+        .to_string()
+        .contains("mutually exclusive")
+    );
+    assert!(
+        Cli {
+            config_json: Some("{}".into()),
+            config_json_stdin: true,
+            ..Cli::default()
+        }
+        .resolve_with_stdin(&b"{}"[..])
+        .is_err()
+    );
+}
+
+#[test]
+fn json_sources_reject_invalid_and_oversized_input_without_leaking_secrets() {
+    let secret = "unique-secret-in-inline-json";
+    for json in [
+        "null".to_owned(),
+        "[]".to_owned(),
+        format!(r#"{{"password":"{secret}","lessonCount":"{secret}"}}"#),
+        format!(r#"{{"username":"{secret}","username":"other"}}"#),
+    ] {
+        for stdin in [false, true] {
+            let cli = Cli {
+                config_json: (!stdin).then(|| json.clone()),
+                config_json_stdin: stdin,
+                username: Some("user".into()),
+                password: Some("password".into()),
+                ..Cli::default()
+            };
+            assert!(!format!("{cli:?}").contains(secret));
+            let error = cli.resolve_with_stdin(json.as_bytes()).unwrap_err();
+            assert!(!format!("{error:?} {error}").contains(secret));
+        }
+    }
+    let mut json = br#"{"username":"user","password":"secret"}"#.to_vec();
+    json.resize(MAX_CONFIG_BYTES as usize, b' ');
+    for stdin in [false, true] {
+        let make_cli = |bytes: &[u8]| Cli {
+            config_json: (!stdin).then(|| String::from_utf8(bytes.to_vec()).unwrap()),
+            config_json_stdin: stdin,
+            username: Some("user".into()),
+            password: Some("password".into()),
+            ..Cli::default()
+        };
+        assert!(make_cli(&json).resolve_with_stdin(json.as_slice()).is_ok());
+        let mut oversized = json.clone();
+        oversized.push(b' ');
+        assert!(
+            make_cli(&oversized)
+                .resolve_with_stdin(oversized.as_slice())
+                .unwrap_err()
+                .to_string()
+                .contains("1 MiB")
+        );
+    }
+}
+
+#[test]
+fn stdin_is_only_read_when_requested_and_read_errors_are_sanitized() {
+    struct FailingReader;
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("secret reader error"))
+        }
+    }
+    let cli = Cli {
+        username: Some("user".into()),
+        password: Some("pass".into()),
+        ..Cli::default()
+    };
+    assert!(cli.resolve_with_stdin(FailingReader).is_ok());
+    let error = Cli {
+        config_json_stdin: true,
+        ..Cli::default()
+    }
+    .resolve_with_stdin(FailingReader)
+    .unwrap_err();
+    assert!(!format!("{error:?} {error}").contains("secret"));
+}
+
+#[test]
+fn resolve_reads_json_from_actual_stdin() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    const MARKER: &str = "LINGOS_CONFIG_STDIN_TEST_CHILD";
+    if std::env::var_os(MARKER).is_some() {
+        let config = Cli::try_parse_from([
+            "lingosbot",
+            "--config-json-stdin",
+            "-u",
+            "cli-user",
+            "-p",
+            "cli-pass",
+        ])
+        .unwrap()
+        .resolve()
+        .unwrap();
+        assert_eq!(config.username, "cli-user");
+        assert_eq!(config.class_lesson_counts["group:42"], 2);
+        return;
+    }
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["resolve_reads_json_from_actual_stdin", "--test-threads=1"])
+        .env(MARKER, "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"classLessonCounts":{"group:42":2}}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[test]
+fn integration_flags_are_parsed_and_error_rate_overrides_json() {
+    let json = r#"{"username":"user","password":"pass","errorsPer100Words":75}"#;
+    let cli = Cli::try_parse_from([
+        "lingosbot",
+        "--config-json",
+        json,
+        "--realtime",
+        "--scrape-class",
+        "42",
+        "--errors-per100-words",
+        "0",
+        "-u",
+        "user",
+        "-p",
+        "pass",
+    ])
+    .unwrap();
+    assert!(cli.realtime);
+    assert_eq!(cli.scrape_class, Some(42));
+    assert_eq!(cli.resolve().unwrap().errors_per100_words, 0);
+    let cli = Cli::try_parse_from(["lingosbot", "--scrape-class", "-1"]).unwrap();
+    assert_eq!(cli.scrape_class, Some(-1));
+    for value in ["101", "256", "-1"] {
+        let parsed = Cli::try_parse_from([
+            "lingosbot",
+            "-u",
+            "user",
+            "-p",
+            "pass",
+            "--errors-per100-words",
+            value,
+        ]);
+        assert!(parsed.is_err() || parsed.unwrap().resolve().is_err());
+    }
+}
+
+#[test]
 fn missing_delay_bounds_adapt_without_increasing_the_minimum() {
     for (settings, expected) in [
         (serde_json::json!({}), (0, 0)),
@@ -365,6 +612,36 @@ fn missing_explicit_file_is_not_created() {
     let file = TestFile::new(b"");
     fs::remove_file(&file.0).unwrap();
     assert!(file.cli().resolve().is_err());
+    assert!(!file.0.exists());
+}
+
+#[test]
+fn run_config_alias_has_the_same_file_behavior_and_conflicts() {
+    let file = TestFile::new(r#"{"username":"user","password":"pass","lessonCount":3}"#);
+    let path = file.0.to_str().unwrap();
+    let config = Cli::try_parse_from([
+        "lingosbot",
+        "--run-config",
+        path,
+        "-u",
+        "cli-user",
+        "-p",
+        "cli-pass",
+    ])
+    .unwrap()
+    .resolve()
+    .unwrap();
+    assert_eq!(config.username, "cli-user");
+    assert_eq!(config.lesson_count, 3);
+    assert!(
+        Cli::try_parse_from(["lingosbot", "--run-config", path, "--config-json", "{}"]).is_err()
+    );
+    assert!(
+        Cli::try_parse_from(["lingosbot", "--run-config", path, "--config-json-stdin"]).is_err()
+    );
+    fs::remove_file(&file.0).unwrap();
+    let cli = Cli::try_parse_from(["lingosbot", "--run-config", path]).unwrap();
+    assert!(cli.resolve().is_err());
     assert!(!file.0.exists());
 }
 

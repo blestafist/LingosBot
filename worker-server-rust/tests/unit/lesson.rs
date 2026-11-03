@@ -11,6 +11,7 @@ struct MockClient {
     navigations: Vec<String>,
     waits: Vec<Duration>,
     wait_error: Option<Error>,
+    progress: Vec<(String, bool, bool, u64)>,
 }
 
 impl LessonClient for MockClient {
@@ -32,6 +33,18 @@ impl LessonClient for MockClient {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+
+    fn progress(
+        &mut self,
+        prompt: &str,
+        correct: bool,
+        intentional: bool,
+        words_learned: u64,
+    ) -> Result<()> {
+        self.progress
+            .push((prompt.into(), correct, intentional, words_learned));
+        Ok(())
     }
 }
 
@@ -122,6 +135,98 @@ fn submitted(client: &MockClient) -> Vec<&str> {
 }
 
 #[test]
+fn progress_reports_graded_flashcards_and_cumulative_learned_words() {
+    let mut settings = config();
+    settings.errors_per100_words = 100;
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(flashcard(1), Some(0)),
+        result(flashcard(1), Some(-1)),
+        result(exercise(2, "new_teacher", "new"), Some(2)),
+        result(exercise(3, "new_premium", "new"), Some(0)),
+        result(state("finished"), None),
+    ]);
+
+    let stats = run(
+        &mut client,
+        &settings,
+        exercise(1, "flashcard", " \tdom\u{a0}"),
+    )
+    .unwrap();
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 1,
+            answers_submitted: 5,
+            errors_made: 2,
+        }
+    );
+    assert_eq!(
+        client.progress,
+        [
+            ("dom".into(), false, true, 0),
+            ("dom".into(), false, false, 0),
+            ("dom".into(), true, false, 1),
+        ]
+    );
+}
+
+#[test]
+fn progress_and_error_counts_continue_across_wordset_transitions() {
+    let mut client = MockClient::default();
+    client.results.extend([
+        result(transition(), Some(1)),
+        result(exercise(2, "flashcard", "house"), Some(0)),
+        result(state("finished"), Some(2)),
+    ]);
+    client.pages.push_back(Ok(props(flashcard(1), 99)));
+
+    let stats = run(&mut client, &config(), flashcard(1)).unwrap();
+    assert_eq!(
+        stats,
+        LessonStats {
+            words_learned: 2,
+            answers_submitted: 3,
+            errors_made: 1,
+        }
+    );
+    assert_eq!(
+        client.progress,
+        [
+            ("dom".into(), true, false, 1),
+            ("dom".into(), false, false, 1),
+            ("house".into(), true, false, 2),
+        ]
+    );
+}
+
+#[test]
+fn progress_is_not_reported_for_unconfirmed_or_unexpected_answers() {
+    let mut failed_post = MockClient::default();
+    failed_post
+        .results
+        .push_back(Err(Error::parsing("timeout")));
+    assert!(run(&mut failed_post, &config(), flashcard(1)).is_err());
+    assert!(failed_post.progress.is_empty());
+
+    let mut missing_feedback = MockClient::default();
+    missing_feedback
+        .results
+        .push_back(result(state("finished"), None));
+    assert!(run(&mut missing_feedback, &config(), flashcard(1)).is_err());
+    assert!(missing_feedback.progress.is_empty());
+
+    let mut settings = config();
+    settings.errors_per100_words = 100;
+    let mut unexpected_acceptance = MockClient::default();
+    unexpected_acceptance
+        .results
+        .push_back(result(state("finished"), Some(1)));
+    assert!(run(&mut unexpected_acceptance, &settings, flashcard(1)).is_err());
+    assert!(unexpected_acceptance.progress.is_empty());
+}
+
+#[test]
 fn finished_initial_state_needs_no_vocabulary_or_requests() {
     let mut client = MockClient::default();
     let stats = run_lesson(
@@ -136,6 +241,7 @@ fn finished_initial_state_needs_no_vocabulary_or_requests() {
     assert!(client.requests.is_empty());
     assert!(client.navigations.is_empty());
     assert!(client.waits.is_empty());
+    assert!(client.progress.is_empty());
 }
 
 #[test]
@@ -150,7 +256,8 @@ fn identical_prompts_with_new_identifiers_are_distinct_words() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 0,
         }
     );
     assert_eq!(submitted(&client), ["house", "house"]);
@@ -180,7 +287,8 @@ fn confirmed_rejection_allows_an_alternative_only_for_the_same_exercise() {
         stats,
         LessonStats {
             words_learned: 1,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 2,
         }
     );
 }
@@ -207,7 +315,8 @@ fn rejected_flashcard_resumes_candidates_after_another_exercise() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 1,
         }
     );
     assert_eq!(client.waits.len(), 3);
@@ -279,7 +388,8 @@ fn changed_main_with_the_same_identifier_resets_error_consideration() {
         stats,
         LessonStats {
             words_learned: 0,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 2,
         }
     );
 }
@@ -297,7 +407,8 @@ fn changed_main_with_the_same_identifier_is_a_distinct_learned_exercise() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 0,
         }
     );
 }
@@ -321,7 +432,8 @@ fn changed_type_with_the_same_identifier_preserves_prior_error_consideration() {
         stats,
         LessonStats {
             words_learned: 1,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 1,
         }
     );
 }
@@ -375,7 +487,8 @@ fn intentional_error_is_injected_once_and_does_not_consume_a_candidate() {
         stats,
         LessonStats {
             words_learned: 1,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 2,
         }
     );
 }
@@ -408,7 +521,8 @@ fn intentional_error_is_not_repeated_after_another_exercise() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 4
+            answers_submitted: 4,
+            errors_made: 2,
         }
     );
     assert_eq!(client.waits.len(), 4);
@@ -429,7 +543,8 @@ fn intentional_rejections_follow_the_server_without_replaying_old_prompts() {
         stats,
         LessonStats {
             words_learned: 0,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 2,
         }
     );
     assert_eq!(
@@ -500,7 +615,8 @@ fn new_word_cards_are_acknowledged_without_injecting_errors_or_learning_stats() 
                 stats,
                 LessonStats {
                     words_learned: 0,
-                    answers_submitted: 1
+                    answers_submitted: 1,
+                    errors_made: 0,
                 }
             );
         }
@@ -536,7 +652,8 @@ fn different_new_word_types_with_the_same_identifier_are_distinct_acknowledgemen
         stats,
         LessonStats {
             words_learned: 0,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 0,
         }
     );
 }
@@ -556,7 +673,8 @@ fn a_mixed_lesson_counts_correct_flashcards_not_rejections_or_new_cards() {
         stats,
         LessonStats {
             words_learned: 1,
-            answers_submitted: 5
+            answers_submitted: 5,
+            errors_made: 2,
         }
     );
 }
@@ -585,7 +703,8 @@ fn wordset_transition_reads_a_fresh_lesson_id_and_resets_candidates() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 1,
         }
     );
 }
@@ -613,7 +732,8 @@ fn wordset_transition_clears_exhausted_candidates_for_the_same_fingerprint() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 4
+            answers_submitted: 4,
+            errors_made: 2,
         }
     );
     assert_eq!(client.waits.len(), 4);
@@ -646,7 +766,8 @@ fn wordset_transition_resets_intentional_error_for_the_same_fingerprint() {
         stats,
         LessonStats {
             words_learned: 1,
-            answers_submitted: 3
+            answers_submitted: 3,
+            errors_made: 2,
         }
     );
     assert_eq!(client.waits.len(), 3);
@@ -667,7 +788,8 @@ fn identical_exercise_reused_after_a_wordset_transition_is_counted_again() {
         stats,
         LessonStats {
             words_learned: 2,
-            answers_submitted: 2
+            answers_submitted: 2,
+            errors_made: 0,
         }
     );
 }

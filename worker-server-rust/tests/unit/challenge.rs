@@ -121,8 +121,8 @@ fn normalized_regex_variants_and_word_boundaries() {
         "Trening",
         "Perfekcjonizm: mylesson max 1 error"
     ));
-    // The desktop regex intentionally uses the first limit, not the last.
-    assert!(!is_perfectionism(
+    // A stricter limit remains protective regardless of ordering.
+    assert!(is_perfectionism(
         "Perfekcjonizm",
         "Lesson max 2 errors, max 1 error"
     ));

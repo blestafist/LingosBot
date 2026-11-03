@@ -1,13 +1,15 @@
 //! Sequential HTTP orchestration. Every selection and join is confirmed by a
 //! fresh dashboard before a lesson can start; vocabulary is never guessed.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{self, Write};
-
+use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
-    challenge::{ChallengeSnapshot, confirm_challenge_join, normalize_text, parse_challenges},
+    challenge::{
+        ChallengeSnapshot, ChallengeStatus, confirm_challenge_join, normalize_text,
+        parse_challenges,
+    },
     config::Config,
     error::{Error, Result},
     infrastructure::Session,
@@ -20,18 +22,54 @@ use crate::{
 const MAX_CLASSES: usize = 256;
 const MAX_WORDSETS: usize = 256;
 const MAX_WORDSET_CARDS: usize = 10_000;
+// Unlike the answer index, an export retains duplicate entries too.
+const MAX_EXPORT_CARDS: usize = 10_000;
+const MAX_EXPORT_TEXT_BYTES: usize = 1024 * 1024;
+const MAX_EXPORT_TERM_BYTES: usize = 16 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct RunStats {
     pub words_learned: u64,
     pub lessons_completed: u64,
     pub classes_limited: u64,
     pub classes_empty: u64,
+    /// Confirmed rejected flashcard answers in completed lessons.
+    pub errors_made: u64,
+    /// Most recently observed dashboard, not necessarily the final state.
+    pub challenge_snapshot: Option<RunChallengeSnapshot>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// A dashboard observation. If `lessons_completed_at_snapshot` is less than
+/// the run's `lessons_completed`, subsequent lessons may have changed it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RunChallengeSnapshot {
+    #[serde(serialize_with = "serialize_id")]
+    pub group_id: i64,
+    pub lessons_completed_at_snapshot: u64,
+    pub available: usize,
+    pub in_progress: usize,
+    pub completed: usize,
+    #[serde(serialize_with = "serialize_optional_id")]
+    pub active_id: Option<i64>,
+    /// Validated dashboard items, in dashboard order. Text is untrusted.
+    pub challenges: Vec<RunChallengeItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RunChallengeItem {
+    #[serde(serialize_with = "serialize_id")]
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    pub points: i32,
+    #[serde(serialize_with = "serialize_challenge_status")]
+    pub status: ChallengeStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ClassInfo {
     pub title: String,
+    #[serde(serialize_with = "serialize_id")]
     pub group_id: i64,
 }
 
@@ -44,17 +82,58 @@ pub struct Dashboard {
     pub challenges: ChallengeSnapshot,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct WordsetInfo {
+    #[serde(serialize_with = "serialize_id")]
     pub id: i64,
     pub name: String,
     pub expected_count: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct VocabularyEntry {
     pub word: String,
     pub translation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedWordset {
+    pub info: WordsetInfo,
+    pub entries: Vec<VocabularyEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedClass {
+    pub class: ClassInfo,
+    pub wordsets: Vec<ScrapedWordset>,
+}
+
+fn serialize_id<S: serde::Serializer>(
+    id: &i64,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.collect_str(id)
+}
+
+fn serialize_optional_id<S: serde::Serializer>(
+    id: &Option<i64>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match id {
+        Some(id) => serializer.serialize_some(&id.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn serialize_challenge_status<S: serde::Serializer>(
+    status: &ChallengeStatus,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(match status {
+        ChallengeStatus::Available => "available",
+        ChallengeStatus::InProgress => "in_progress",
+        ChallengeStatus::Completed => "completed",
+    })
 }
 
 pub fn resolve_count(
@@ -211,6 +290,93 @@ pub fn group_switch_request(dashboard: &Dashboard, group_id: i64) -> Result<(&'s
     })
 }
 
+/// Fetch a fresh, validated dashboard for class discovery.
+pub fn discover(session: &Session, config: &Config) -> Result<Dashboard> {
+    read_dashboard(session, config, None)
+}
+
+/// Export a discovered group without starting lessons or writing files. The
+/// selection is confirmed by a dashboard before any vocabulary is requested.
+/// A reached lesson limit does not prevent vocabulary export. The selected
+/// group may remain changed, including when an error occurs. IDs serialize as
+/// decimal strings so JavaScript clients do not lose integer precision.
+pub fn scrape_class(session: &Session, config: &Config, group_id: i64) -> Result<ScrapedClass> {
+    scrape_class_with(session, &config.student_dashboard_url, group_id)
+}
+
+// Narrow adapter permits deterministic request-order tests without altering Session.
+trait ScrapeClient {
+    fn get_page(&self, url: &str) -> Result<Value>;
+    fn post(&self, url: &str, body: Option<&Value>) -> Result<Value>;
+}
+
+impl ScrapeClient for Session {
+    fn get_page(&self, url: &str) -> Result<Value> {
+        Session::get_page(self, url)
+    }
+    fn post(&self, url: &str, body: Option<&Value>) -> Result<Value> {
+        Session::post(self, url, body)
+    }
+}
+
+fn scrape_class_with(
+    client: &impl ScrapeClient,
+    dashboard_url: &str,
+    group_id: i64,
+) -> Result<ScrapedClass> {
+    if group_id <= 0 {
+        return Err(Error::parsing("Cannot select an undiscovered HTTP group."));
+    }
+    let mut dashboard = parse_dashboard(&client.get_page(dashboard_url)?, None)?;
+    // Validate membership even if no switch is required.
+    let (url, body) = group_switch_request(&dashboard, group_id)?;
+    if dashboard.current_group_id != group_id {
+        client.post(url, Some(&body))?;
+        dashboard = parse_dashboard(&client.get_page(dashboard_url)?, Some(group_id))?;
+    }
+    let class = dashboard
+        .classes
+        .iter()
+        .find(|class| class.group_id == group_id)
+        .cloned()
+        .ok_or_else(|| Error::parsing("Cannot select an undiscovered HTTP group."))?;
+    let sets = parse_wordsets(&client.get_page("/student/wordsets")?, group_id)?;
+    let mut wordsets = Vec::with_capacity(sets.len());
+    let mut cards = 0_usize;
+    let mut text_bytes = 0_usize;
+    export_text(&mut text_bytes, &class.title)?;
+    // Names are retained together with every card and count towards the budget.
+    for info in &sets {
+        export_text(&mut text_bytes, &info.name)?;
+    }
+    for info in sets {
+        let page = client.get_page(&format!("/student/wordsets/{}", info.id))?;
+        let entries = parse_wordset(&page, group_id, &info)?;
+        drop(page);
+        cards = cards
+            .checked_add(entries.len())
+            .filter(|count| *count <= MAX_EXPORT_CARDS)
+            .ok_or_else(|| Error::parsing("Vocabulary export exceeds the card limit."))?;
+        for entry in &entries {
+            export_text(&mut text_bytes, &entry.word)?;
+            export_text(&mut text_bytes, &entry.translation)?;
+        }
+        wordsets.push(ScrapedWordset { info, entries });
+    }
+    Ok(ScrapedClass { class, wordsets })
+}
+
+fn export_text(total: &mut usize, text: &str) -> Result<()> {
+    if text.len() > MAX_EXPORT_TERM_BYTES {
+        return Err(Error::parsing("Vocabulary text exceeds the length limit."));
+    }
+    *total = total
+        .checked_add(text.len())
+        .filter(|total| *total <= MAX_EXPORT_TEXT_BYTES)
+        .ok_or_else(|| Error::parsing("Vocabulary export exceeds the total text limit."))?;
+    Ok(())
+}
+
 /// Keep only small descriptors; the list page can be released before fetching
 /// details. Missing optional counts are permitted, malformed present counts are
 /// not. Every provided total must subsequently match the complete card array.
@@ -328,6 +494,7 @@ pub fn run(
     // Do not retain an initial page (or its stale challenge state) across runs.
     drop(initial_dashboard_page);
     let mut stats = RunStats::default();
+    observe_dashboard(&mut stats, &initial);
     let counts = resolve_counts(config, &classes);
     // login() just fetched and validated this dashboard. Reuse it only for
     // initial selection, never as a stale challenge snapshot after a lesson.
@@ -349,17 +516,16 @@ pub fn run(
         }
         let dashboard = match initial.take() {
             Some(dashboard) => dashboard,
-            None => read_dashboard(session, config, None)?,
+            None => {
+                let dashboard = read_dashboard(session, config, None)?;
+                observe_dashboard(&mut stats, &dashboard);
+                dashboard
+            }
         };
         match run_class(session, config, class, count, &mut stats, dashboard) {
             Ok(()) => {}
             Err(error) if error.is_limit() => {
                 stats.classes_limited += 1;
-                // No server error text, prompts, response bodies or credentials.
-                let _ = writeln!(
-                    io::stderr().lock(),
-                    "Daily lesson limit reached; skipping the remaining lessons for this class."
-                );
             }
             Err(error) => return Err(error),
         }
@@ -381,32 +547,45 @@ fn run_class(
         let (url, body) = group_switch_request(&dashboard, group_id)?;
         session.post(url, Some(&body))?;
         dashboard = read_dashboard(session, config, Some(group_id))?;
+        observe_dashboard(stats, &dashboard);
     }
     check_limit(&dashboard)?;
     let vocabulary = collect_vocabulary(session, group_id)?;
     if vocabulary.is_empty() {
         stats.classes_empty += 1;
-        let _ = writeln!(
-            io::stderr().lock(),
-            "Class has no vocabulary; skipping its lessons."
-        );
         return Ok(());
     }
 
     for _ in 0..count {
         // Always read afresh, including after lesson completion and joins.
         let dashboard = read_dashboard(session, config, Some(group_id))?;
+        observe_dashboard(stats, &dashboard);
         check_limit(&dashboard)?;
-        let perfectionism = ensure_challenge(session, config, dashboard, group_id)?;
+        let perfectionism = ensure_challenge(session, config, dashboard, group_id, stats)?;
         let page = session.get_page(&format!("/learning/start/0?groupId={group_id}"))?;
         let initial = parse_learning_page(page)?;
         let lesson = run_lesson(session, config, &vocabulary, perfectionism, initial)?;
-        stats.words_learned = stats
-            .words_learned
-            .checked_add(lesson.words_learned)
-            .ok_or_else(|| Error::parsing("Learned word counter overflow."))?;
-        stats.lessons_completed += 1;
+        record_lesson(stats, &lesson)?;
     }
+    Ok(())
+}
+
+fn record_lesson(stats: &mut RunStats, lesson: &crate::lesson::LessonStats) -> Result<()> {
+    let words = stats
+        .words_learned
+        .checked_add(lesson.words_learned)
+        .ok_or_else(|| Error::parsing("Learned word counter overflow."))?;
+    let errors = stats
+        .errors_made
+        .checked_add(lesson.errors_made)
+        .ok_or_else(|| Error::parsing("Error counter overflow."))?;
+    let lessons = stats
+        .lessons_completed
+        .checked_add(1)
+        .ok_or_else(|| Error::parsing("Lesson counter overflow."))?;
+    stats.words_learned = words;
+    stats.errors_made = errors;
+    stats.lessons_completed = lessons;
     Ok(())
 }
 
@@ -423,11 +602,42 @@ fn check_limit(dashboard: &Dashboard) -> Result<()> {
     }
 }
 
+fn observe_dashboard(stats: &mut RunStats, dashboard: &Dashboard) {
+    let mut snapshot = RunChallengeSnapshot {
+        group_id: dashboard.current_group_id,
+        lessons_completed_at_snapshot: stats.lessons_completed,
+        available: 0,
+        in_progress: 0,
+        completed: 0,
+        active_id: None,
+        challenges: Vec::with_capacity(dashboard.challenges.challenges.len()),
+    };
+    for challenge in &dashboard.challenges.challenges {
+        match challenge.status {
+            ChallengeStatus::Available => snapshot.available += 1,
+            ChallengeStatus::InProgress => {
+                snapshot.in_progress += 1;
+                snapshot.active_id = Some(challenge.id);
+            }
+            ChallengeStatus::Completed => snapshot.completed += 1,
+        }
+        snapshot.challenges.push(RunChallengeItem {
+            id: challenge.id,
+            title: challenge.title.clone(),
+            description: challenge.description.clone(),
+            points: challenge.points,
+            status: challenge.status,
+        });
+    }
+    stats.challenge_snapshot = Some(snapshot);
+}
+
 fn ensure_challenge(
     session: &Session,
     config: &Config,
     mut dashboard: Dashboard,
     group_id: i64,
+    stats: &mut RunStats,
 ) -> Result<bool> {
     if dashboard.challenges.active().is_none()
         && let Some(best) = dashboard.challenges.best_available()
@@ -437,6 +647,7 @@ fn ensure_challenge(
         session.post(&format!("/student/challenges/{id}"), None)?;
         dashboard = read_dashboard(session, config, Some(group_id))?;
         confirm_challenge_join(&dashboard.challenges, id)?;
+        observe_dashboard(stats, &dashboard);
         check_limit(&dashboard)?;
     }
     Ok(dashboard.challenges.active_perfectionism().is_some())

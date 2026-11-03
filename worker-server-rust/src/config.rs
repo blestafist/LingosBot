@@ -4,8 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 #[cfg(unix)]
 use std::fs::OpenOptions;
-#[cfg(unix)]
-use std::io::Read;
+use std::io::{self, Read};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -39,16 +38,40 @@ pub struct Cli {
     pub password: Option<String>,
 
     /// Read this JSON file. No file is read or created unless explicitly requested.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, visible_alias = "run-config", value_name = "PATH", conflicts_with_all = ["config_json", "config_json_stdin"])]
     pub config: Option<PathBuf>,
+
+    /// Read a JSON configuration argument (may expose credentials in process arguments).
+    #[arg(long, value_name = "JSON", conflicts_with_all = ["config", "config_json_stdin"])]
+    pub config_json: Option<String>,
+
+    /// Read a JSON configuration from standard input until EOF.
+    #[arg(long, conflicts_with_all = ["config", "config_json"])]
+    pub config_json_stdin: bool,
 
     /// Emit machine-readable output.
     #[arg(long)]
     pub json: bool,
 
+    /// Emit progress events as the run proceeds.
+    #[arg(long)]
+    pub realtime: bool,
+
+    /// Scrape the selected class instead of running lessons.
+    #[arg(long, value_name = "GROUP_ID", allow_hyphen_values = true)]
+    pub scrape_class: Option<i64>,
+
+    /// List available classes and their group IDs.
+    #[arg(long, conflicts_with = "scrape_class")]
+    pub list_classes: bool,
+
     /// Default lesson count per class (1..=10000).
     #[arg(long)]
     pub lessons: Option<u32>,
+
+    /// Number of intentionally incorrect answers per 100 words (0..=100).
+    #[arg(long = "errors-per100-words")]
+    pub errors_per100_words: Option<u8>,
 
     /// Minimum answer delay in milliseconds (0..=60000).
     #[arg(long)]
@@ -74,7 +97,10 @@ impl fmt::Debug for Cli {
         f.debug_struct("Cli")
             .field("credentials", &"<redacted>")
             .field("json", &self.json)
+            .field("realtime", &self.realtime)
+            .field("scrape_class", &self.scrape_class)
             .field("lessons", &self.lessons)
+            .field("errors_per100_words", &self.errors_per100_words)
             .field("delay_min_ms", &self.delay_min_ms)
             .field("delay_max_ms", &self.delay_max_ms)
             .field("timeout_seconds", &self.timeout_seconds)
@@ -202,11 +228,34 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for JsonObject<T> {
 
 impl Cli {
     /// Resolve CLI > nonempty env > top-level JSON > desktop credentials > defaults.
-    /// Only the explicitly supplied config file is read. Passwords are not trimmed.
+    /// Only the explicitly supplied source is read. Passwords are not trimmed.
     pub fn resolve(self) -> Result<Config> {
-        let file = match self.config.as_deref() {
-            Some(path) => read_config(path)?,
-            None => FileConfig::default(),
+        self.resolve_with_stdin(io::stdin())
+    }
+
+    /// Resolve settings using `stdin` only when `--config-json-stdin` was selected.
+    /// Useful for embedding and for supplying an already-open input stream.
+    pub fn resolve_with_stdin(self, stdin: impl Read) -> Result<Config> {
+        if usize::from(self.config.is_some())
+            + usize::from(self.config_json.is_some())
+            + usize::from(self.config_json_stdin)
+            > 1
+        {
+            return Err(Error::config("config sources are mutually exclusive"));
+        }
+        let file = if let Some(path) = self.config.as_deref() {
+            read_config(path)?
+        } else if let Some(json) = self.config_json.as_deref() {
+            parse_config(json.as_bytes())?
+        } else if self.config_json_stdin {
+            let mut bytes = Vec::new();
+            stdin
+                .take(MAX_CONFIG_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| Error::config("could not read config from stdin"))?;
+            parse_config(&bytes)?
+        } else {
+            FileConfig::default()
         };
         if let Some(mode) = file.mode.as_deref() {
             let mode = mode.trim();
@@ -254,8 +303,9 @@ impl Cli {
             lesson_prompt_safety_cap: file
                 .lesson_prompt_safety_cap
                 .unwrap_or(defaults.lesson_prompt_safety_cap),
-            errors_per100_words: file
+            errors_per100_words: self
                 .errors_per100_words
+                .or(file.errors_per100_words)
                 .unwrap_or(defaults.errors_per100_words),
             answer_delay_min_ms,
             answer_delay_max_ms,
@@ -397,10 +447,17 @@ fn read_config(path: &Path) -> Result<FileConfig> {
     if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err(Error::config("config file must not exceed 1 MiB"));
     }
+    parse_config(&bytes)
+}
+
+fn parse_config(bytes: &[u8]) -> Result<FileConfig> {
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(Error::config("config must not exceed 1 MiB"));
+    }
     // Serde errors can contain secret string values, including numeric-field input.
-    serde_json::from_slice::<JsonObject<FileConfig>>(&bytes)
+    serde_json::from_slice::<JsonObject<FileConfig>>(bytes)
         .map(|object| object.0)
-        .map_err(|_| Error::config("config file must contain a valid JSON configuration object"))
+        .map_err(|_| Error::config("config must contain a valid JSON configuration object"))
 }
 
 pub(crate) fn parse_origin(value: &str) -> Result<Url> {

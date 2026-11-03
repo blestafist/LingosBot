@@ -6,11 +6,16 @@ use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER};
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
-use std::io::Read;
+use std::io::{self, Read, Write};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::{Duration, Instant};
 
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+type EventCallback = dyn Fn(&Value) -> io::Result<()> + Send + Sync;
 
 /// One client, cookie jar and connection pool per process. Nothing is persisted.
 pub struct Session {
@@ -18,6 +23,8 @@ pub struct Session {
     origin: Url,
     timeout: Duration,
     deadline: Instant,
+    http_calls: AtomicU64,
+    event_callback: Option<Box<EventCallback>>,
 }
 
 impl LessonClient for Session {
@@ -35,6 +42,22 @@ impl LessonClient for Session {
 
     fn wait(&mut self, duration: Duration) -> Result<()> {
         Session::wait(self, duration)
+    }
+
+    fn progress(
+        &mut self,
+        prompt: &str,
+        correct: bool,
+        intentional: bool,
+        words_learned: u64,
+    ) -> Result<()> {
+        self.emit_event(&serde_json::json!({
+            "type": "lesson_answer",
+            "word": prompt,
+            "correct": correct,
+            "intentional": intentional,
+            "words_learned": words_learned,
+        }))
     }
 }
 
@@ -64,7 +87,60 @@ impl Session {
             origin,
             timeout,
             deadline,
+            http_calls: AtomicU64::new(0),
+            event_callback: None,
         })
+    }
+
+    /// Number of completed HTTP send attempts, including login, redirects and
+    /// transport failures. Rejected destinations and expired deadlines do not count.
+    pub fn api_call_count(&self) -> u64 {
+        self.http_calls.load(Ordering::Relaxed)
+    }
+
+    /// Install an optional synchronous observer for HTTP and application events.
+    /// HTTP events arrive when headers arrive or on transport failure, before the
+    /// response body is read. They include status and transport error categories,
+    /// never URLs, headers or bodies. Observer errors stop request processing
+    /// without replaying.
+    pub fn set_event_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(&Value) -> io::Result<()> + Send + Sync + 'static,
+    {
+        self.event_callback = Some(Box::new(callback));
+    }
+
+    /// Stop emitting events; the request counter continues to run.
+    pub fn clear_event_callback(&mut self) {
+        self.event_callback = None;
+    }
+
+    /// Emit an application event through the configured observer, if any.
+    /// Callers must ensure all fields are safe to expose: this method does not
+    /// sanitize arbitrary application-provided values.
+    pub fn emit_event(&self, event: &Value) -> Result<()> {
+        if let Some(callback) = &self.event_callback {
+            callback(event).map_err(|_| Error::network("Could not write realtime event."))?;
+        }
+        Ok(())
+    }
+
+    /// Write each event as one JSON line and flush it before continuing.
+    pub fn set_ndjson_writer<W: Write + Send + 'static>(&mut self, writer: W) {
+        let writer = Mutex::new(writer);
+        self.set_event_callback(move |event| {
+            let mut writer = writer
+                .lock()
+                .map_err(|_| io::Error::other("event writer unavailable"))?;
+            serde_json::to_writer(&mut *writer, event)?;
+            writer.write_all(b"\n")?;
+            writer.flush()
+        });
+    }
+
+    /// Opt in to realtime NDJSON on stdout. Do not mix with single-JSON output.
+    pub fn enable_ndjson_stdout(&mut self) {
+        self.set_ndjson_writer(io::stdout());
     }
 
     pub fn same_origin(&self, url: &str) -> Result<Url> {
@@ -106,24 +182,46 @@ impl Session {
     }
 
     fn send(&self, request: RequestBuilder, is_post: bool) -> Result<Response> {
-        request
-            .timeout(self.timeout.min(self.remaining()?))
-            .send()
-            .map_err(|error| {
-                // reqwest errors can embed complete URLs. Do not expose them.
-                let reason = if error.is_timeout() {
-                    "HTTP request timed out"
-                } else if error.is_connect() {
-                    "HTTP connection failed"
-                } else {
-                    "HTTP request failed"
-                };
+        let timeout = self.timeout.min(self.remaining()?);
+        let result = request.timeout(timeout).send();
+        let count = self.http_calls.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Some(callback) = &self.event_callback {
+            let (status, error) = match &result {
+                Ok(response) => (Some(response.status().as_u16()), None),
+                Err(error) if error.is_timeout() => (None, Some("timeout")),
+                Err(error) if error.is_connect() => (None, Some("connection")),
+                Err(_) => (None, Some("request")),
+            };
+            let event = serde_json::json!({
+                "type": "http_request",
+                "api_calls": count,
+                "method": if is_post { "POST" } else { "GET" },
+                "status": status,
+                "error": error,
+            });
+            callback(&event).map_err(|_| {
                 Error::network(if is_post {
-                    format!("{reason}; the server may have processed the request. Not retried.")
+                    "Could not write HTTP event; the server may have processed the request. Not retried."
                 } else {
-                    format!("{reason}; not retried.")
+                    "Could not write HTTP event; request was not replayed."
                 })
+            })?;
+        }
+        result.map_err(|error| {
+            // reqwest errors can embed complete URLs. Do not expose them.
+            let reason = if error.is_timeout() {
+                "HTTP request timed out"
+            } else if error.is_connect() {
+                "HTTP connection failed"
+            } else {
+                "HTTP request failed"
+            };
+            Error::network(if is_post {
+                format!("{reason}; the server may have processed the request. Not retried.")
+            } else {
+                format!("{reason}; not retried.")
             })
+        })
     }
 
     fn require_success(response: &Response) -> Result<()> {

@@ -369,3 +369,274 @@ fn oversized_discovery_arrays_are_rejected_before_indexing_or_fetching() {
     ]);
     assert!(parse_wordset(&page, 1, &set()).is_err());
 }
+
+type MockResponse = (&'static str, String, Option<Value>, Value);
+
+struct ScrapeMock {
+    responses: std::cell::RefCell<std::collections::VecDeque<MockResponse>>,
+}
+
+impl ScrapeMock {
+    fn new(responses: Vec<MockResponse>) -> Self {
+        Self {
+            responses: std::cell::RefCell::new(responses.into()),
+        }
+    }
+
+    fn request(&self, method: &str, url: &str, body: Option<&Value>) -> Result<Value> {
+        let (expected_method, expected_url, expected_body, response) = self
+            .responses
+            .borrow_mut()
+            .pop_front()
+            .expect("unexpected request");
+        assert_eq!(
+            (method, url, body),
+            (
+                expected_method,
+                expected_url.as_str(),
+                expected_body.as_ref()
+            )
+        );
+        Ok(response)
+    }
+
+    fn done(&self) {
+        assert!(self.responses.borrow().is_empty());
+    }
+}
+
+impl ScrapeClient for ScrapeMock {
+    fn get_page(&self, url: &str) -> Result<Value> {
+        self.request("GET", url, None)
+    }
+    fn post(&self, url: &str, body: Option<&Value>) -> Result<Value> {
+        self.request("POST", url, body)
+    }
+}
+
+fn get(path: &str, response: Value) -> MockResponse {
+    ("GET", path.into(), None, response)
+}
+
+#[test]
+fn scrape_preserves_set_order_duplicates_and_empty_sets_despite_lesson_limit() {
+    let mut page = dashboard();
+    page["dashboard"]["lessonLimitReached"] = json!(true);
+    let mut list = wordsets();
+    list["wordsets"]["wordsets"] = json!([
+        {"id":55,"name":"First","counts":{"total":2}},
+        {"id":56,"name":"Empty","counts":{"total":0}},
+        {"id":57,"name":"Last","counts":{"total":1}}
+    ]);
+    let mut first = wordset();
+    first["wordset"]["flashcards"][1] = first["wordset"]["flashcards"][0].clone();
+    let empty =
+        json!({"page":"wordset","wordset":{"group":{"id":1},"wordset":{"id":56},"flashcards":[]}});
+    let last = json!({"page":"wordset","wordset":{"group":{"id":1},"wordset":{"id":57},"flashcards":[{"word":"x","translation":"y"}]}});
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", page),
+        get("/student/wordsets", list),
+        get("/student/wordsets/55", first),
+        get("/student/wordsets/56", empty),
+        get("/student/wordsets/57", last),
+    ]);
+    let result = scrape_class_with(&mock, "/dashboard", 1).unwrap();
+    mock.done();
+    assert_eq!(
+        result
+            .wordsets
+            .iter()
+            .map(|set| set.info.id)
+            .collect::<Vec<_>>(),
+        [55, 56, 57]
+    );
+    assert_eq!(result.wordsets[0].entries[0], result.wordsets[0].entries[1]);
+    assert!(result.wordsets[1].entries.is_empty());
+    let json = serde_json::to_value(result).unwrap();
+    assert_eq!(json["class"]["group_id"], "1");
+    assert_eq!(json["wordsets"][0]["info"]["id"], "55");
+}
+
+#[test]
+fn scrape_switch_is_confirmed_before_loading_sets_and_rejects_undiscovered_groups() {
+    let mut switched = dashboard();
+    switched["dashboard"]["currentGroup"]["id"] = json!(2);
+    let mut list = wordsets();
+    list["wordsets"]["currentGroup"]["id"] = json!(2);
+    list["wordsets"]["wordsets"] = json!([]);
+    let post = (
+        "POST",
+        "/student/context".into(),
+        Some(json!({"kind":"group","id":2})),
+        json!({}),
+    );
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        post.clone(),
+        get("/dashboard", switched),
+        get("/student/wordsets", list),
+    ]);
+    assert_eq!(
+        scrape_class_with(&mock, "/dashboard", 2)
+            .unwrap()
+            .class
+            .group_id,
+        2
+    );
+    mock.done();
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        post,
+        get("/dashboard", dashboard()),
+    ]);
+    assert!(scrape_class_with(&mock, "/dashboard", 2).is_err());
+    mock.done();
+    let mock = ScrapeMock::new(vec![get("/dashboard", dashboard())]);
+    assert!(scrape_class_with(&mock, "/dashboard", 3).is_err());
+    mock.done();
+    let mock = ScrapeMock::new(vec![]);
+    assert!(scrape_class_with(&mock, "/dashboard", 0).is_err());
+    mock.done();
+}
+
+#[test]
+fn scrape_enforces_aggregate_card_and_text_budgets_including_duplicates_and_names() {
+    let mut list = wordsets();
+    list["wordsets"]["wordsets"] = json!([
+        {"id":55,"name":"A"}, {"id":56,"name":"B"}
+    ]);
+    let many = vec![json!({"word":"a","translation":"b"}); MAX_EXPORT_CARDS];
+    let detail = |id, cards| json!({"page":"wordset","wordset":{"group":{"id":1},"wordset":{"id":id},"flashcards":cards}});
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        get("/student/wordsets", list.clone()),
+        get("/student/wordsets/55", detail(55, json!(many))),
+        get(
+            "/student/wordsets/56",
+            detail(56, json!([{"word":"a","translation":"b"}])),
+        ),
+    ]);
+    assert!(scrape_class_with(&mock, "/dashboard", 1).is_err());
+    mock.done();
+
+    // Terms fit individually, but repetitions and set/class names exceed 1 MiB.
+    let term = "x".repeat(MAX_EXPORT_TERM_BYTES);
+    let cards = vec![json!({"word":term,"translation":"y"}); 64];
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        get("/student/wordsets", list),
+        get("/student/wordsets/55", detail(55, json!(cards))),
+    ]);
+    assert!(scrape_class_with(&mock, "/dashboard", 1).is_err());
+    mock.done();
+    let mut total = MAX_EXPORT_TEXT_BYTES - 1;
+    export_text(&mut total, "A").unwrap();
+    assert!(export_text(&mut total, "B").is_err());
+    assert!(export_text(&mut 0, &"x".repeat(MAX_EXPORT_TERM_BYTES + 1)).is_err());
+
+    // Names consume the same total budget, even before any detail request.
+    let mut list = wordsets();
+    list["wordsets"]["wordsets"] = json!(
+        (1..=65)
+            .map(|id| json!({"id":id,"name":"n".repeat(MAX_EXPORT_TERM_BYTES)}))
+            .collect::<Vec<_>>()
+    );
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        get("/student/wordsets", list),
+    ]);
+    assert!(scrape_class_with(&mock, "/dashboard", 1).is_err());
+    mock.done();
+}
+
+#[test]
+fn challenge_observation_is_marked_at_the_lesson_count_it_was_read() {
+    let mut page = dashboard();
+    page["dashboard"]["challenges"] = json!([
+        {"id":9223372036854775807_i64,"title":" A ","description":" test   text ","prize":1,"status":"in_progress"},
+        {"id":2,"title":"B","description":null,"prize":2,"status":"completed"},
+        {"id":3,"title":"C","description":"available","prize":-1,"status":"available"}
+    ]);
+    let mut stats = RunStats::default();
+    observe_dashboard(&mut stats, &parse_dashboard(&page, None).unwrap());
+    stats.lessons_completed = 1;
+    let snapshot = stats.challenge_snapshot.unwrap();
+    assert_eq!(snapshot.lessons_completed_at_snapshot, 0);
+    assert_eq!(
+        (snapshot.available, snapshot.in_progress, snapshot.completed),
+        (1, 1, 1)
+    );
+    let serialized = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(serialized["active_id"], "9223372036854775807");
+    assert_eq!(
+        serialized["challenges"],
+        json!([
+            {"id":"9223372036854775807","title":"A","description":"test text","points":1,"status":"in_progress"},
+            {"id":"2","title":"B","description":"","points":2,"status":"completed"},
+            {"id":"3","title":"C","description":"available","points":-1,"status":"available"}
+        ])
+    );
+}
+
+#[test]
+fn lesson_statistics_accumulate_without_partial_updates_on_overflow() {
+    let mut stats = RunStats::default();
+    let lesson = crate::lesson::LessonStats {
+        words_learned: 4,
+        errors_made: 2,
+        ..Default::default()
+    };
+    record_lesson(&mut stats, &lesson).unwrap();
+    record_lesson(&mut stats, &lesson).unwrap();
+    assert_eq!(
+        (
+            stats.words_learned,
+            stats.errors_made,
+            stats.lessons_completed
+        ),
+        (8, 4, 2)
+    );
+    stats.errors_made = u64::MAX;
+    let before = stats.clone();
+    assert!(record_lesson(&mut stats, &lesson).is_err());
+    assert_eq!(stats, before);
+}
+
+#[test]
+fn latest_dashboard_replaces_challenge_items_and_snapshot_is_owned() {
+    let mut page = dashboard();
+    page["dashboard"]["challenges"] = json!([
+        {"id":1,"title":"Old","description":"Old description","prize":5,"status":"in_progress"}
+    ]);
+    let mut stats = RunStats::default();
+    let old = parse_dashboard(&page, None).unwrap();
+    observe_dashboard(&mut stats, &old);
+    let saved = stats.challenge_snapshot.clone().unwrap();
+    stats.lessons_completed = 2;
+    page["dashboard"]["currentGroup"]["id"] = json!(2);
+    page["dashboard"]["challenges"] = json!([]);
+    observe_dashboard(&mut stats, &parse_dashboard(&page, Some(2)).unwrap());
+    let current = stats.challenge_snapshot.unwrap();
+    assert_eq!(current.group_id, 2);
+    assert_eq!(current.lessons_completed_at_snapshot, 2);
+    assert!(current.challenges.is_empty());
+    assert_eq!(current.active_id, None);
+    assert_eq!(saved.challenges[0].title, "Old");
+    assert_eq!(saved.active_id, Some(1));
+}
+
+#[test]
+fn scrape_stops_on_invalid_set_without_requesting_further_details() {
+    let mut list = wordsets();
+    list["wordsets"]["wordsets"] = json!([
+        {"id":55,"name":"First","counts":{"total":3}},
+        {"id":56,"name":"Next"}
+    ]);
+    let mock = ScrapeMock::new(vec![
+        get("/dashboard", dashboard()),
+        get("/student/wordsets", list),
+        get("/student/wordsets/55", wordset()),
+    ]);
+    assert!(scrape_class_with(&mock, "/dashboard", 1).is_err());
+    mock.done();
+}
