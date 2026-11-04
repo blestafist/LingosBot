@@ -4,7 +4,7 @@ A small, multiuser control panel for the Rust worker. The English Material 3 Exp
 
 ## Local launch (Fish, no Docker)
 
-For a prebuilt release, download `lingos-webui-linux-amd64` and `lingosbot-x86_64-unknown-linux-musl` (or `lingos-webui-linux-arm64` and `lingosbot-aarch64-unknown-linux-musl` for ARM64), along with their `.sha256` files. Verify each with `sha256sum -c <file>.sha256`, then make both binaries executable. No Go/Rust installation is required; trusted system CA certificates are still needed. Use the environment settings below, point `WORKER_BIN` at the downloaded worker's absolute path and run the downloaded WebUI binary instead of `go run .`. Keep the database outside a temporary directory.
+For a prebuilt release, download `lingosbot-webui-linux-x64` and `lingosbot-worker-linux-x64` (or `lingosbot-webui-linux-arm64` and `lingosbot-worker-linux-arm64` for ARM64), along with their `.sha256` files. Verify each with `sha256sum -c <file>.sha256`, then make both binaries executable. No Go/Rust installation is required; trusted system CA certificates are still needed. Use the environment settings below, point `WORKER_BIN` at the downloaded worker's absolute path and run the downloaded WebUI binary instead of `go run .`. Keep the database outside a temporary directory.
 
 Use a supported, patched Go release (tested with 1.27.3) and Rust 1.88+ to build the worker:
 

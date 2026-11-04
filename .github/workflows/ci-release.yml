@@ -78,9 +78,11 @@ jobs:
         include:
           - runner: ubuntu-latest
             arch: amd64
+            asset: lingosbot-webui-linux-x64
             elf-machine: Advanced Micro Devices X86-64
           - runner: ubuntu-24.04-arm
             arch: arm64
+            asset: lingosbot-webui-linux-arm64
             elf-machine: AArch64
     runs-on: ${{ matrix.runner }}
     defaults:
@@ -98,17 +100,17 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
-          ARCH: ${{ matrix.arch }}
+          ASSET: ${{ matrix.asset }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags='-s -w' -o "dist/lingos-webui-linux-$ARCH" .
+          go build -trimpath -ldflags='-s -w' -o "dist/$ASSET" .
       - name: Verify ELF, configuration guard and checksum
         env:
-          ARCH: ${{ matrix.arch }}
+          ASSET: ${{ matrix.asset }}
           ELF_MACHINE: ${{ matrix.elf-machine }}
           LC_ALL: C
         run: |
-          BINARY="dist/lingos-webui-linux-$ARCH"
+          BINARY="dist/$ASSET"
           MACHINE=$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')
           test "$MACHINE" = "$ELF_MACHINE"
           HEADERS=$(readelf -l "$BINARY")
@@ -123,8 +125,8 @@ jobs:
           fi
           grep -Fq 'ENCRYPTION_KEY must be base64 for exactly 32 bytes' <<< "$OUTPUT"
           cd dist
-          sha256sum "lingos-webui-linux-$ARCH" > "lingos-webui-linux-$ARCH.sha256"
-          sha256sum -c "lingos-webui-linux-$ARCH.sha256"
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          sha256sum -c "$ASSET.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: webui-linux-${{ matrix.arch }}
@@ -138,9 +140,11 @@ jobs:
         include:
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            asset: lingosbot-worker-linux-x64
             elf-machine: Advanced Micro Devices X86-64
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            asset: lingosbot-worker-linux-arm64
             elf-machine: AArch64
     runs-on: ${{ matrix.runner }}
     defaults:
@@ -193,12 +197,13 @@ jobs:
       - name: Package binary and checksum
         env:
           TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
         run: |
           mkdir -p dist
-          cp "target/$TARGET/release/lingosbot" "dist/lingosbot-$TARGET"
+          cp "target/$TARGET/release/lingosbot" "dist/$ASSET"
           cd dist
-          sha256sum "lingosbot-$TARGET" > "lingosbot-$TARGET.sha256"
-          sha256sum -c "lingosbot-$TARGET.sha256"
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          sha256sum -c "$ASSET.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.target }}
@@ -211,19 +216,19 @@ jobs:
       matrix:
         include:
           - rid: win-x64
-            asset: win-x64
+            asset: lingosbot-desktop-windows-x64
             app: LingosBot.exe
             manager: selenium-manager.exe
           - rid: linux-x64
-            asset: linux-x64
+            asset: lingosbot-desktop-linux-x64
             app: LingosBot
             manager: selenium-manager
           - rid: osx-x64
-            asset: macos-x86_64
+            asset: lingosbot-desktop-macos-x64
             app: LingosBot
             manager: selenium-manager
           - rid: osx-arm64
-            asset: macos-arm64
+            asset: lingosbot-desktop-macos-arm64
             app: LingosBot
             manager: selenium-manager
     runs-on: ubuntu-latest
@@ -268,7 +273,7 @@ jobs:
           sha256sum -c "$ASSET.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.asset }}
+          name: ${{ matrix.asset }}
           path: dist/*
           if-no-files-found: error
 
@@ -306,10 +311,10 @@ jobs:
         working-directory: dist
         run: |
           for FILE in \
-            lingosbot-x86_64-unknown-linux-musl \
-            lingosbot-aarch64-unknown-linux-musl \
-            lingos-webui-linux-amd64 lingos-webui-linux-arm64 \
-            win-x64.zip linux-x64.zip macos-x86_64.zip macos-arm64.zip; do
+            lingosbot-worker-linux-x64 lingosbot-worker-linux-arm64 \
+            lingosbot-webui-linux-x64 lingosbot-webui-linux-arm64 \
+            lingosbot-desktop-windows-x64.zip lingosbot-desktop-linux-x64.zip \
+            lingosbot-desktop-macos-x64.zip lingosbot-desktop-macos-arm64.zip; do
             test -s "$FILE"
             test -s "$FILE.sha256"
             sha256sum -c "$FILE.sha256"
