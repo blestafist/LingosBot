@@ -1,52 +1,48 @@
 # Creating A Release
 
-Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../.github/workflows/ci-release.yml). One tag `v*` produces one draft containing both the legacy .NET desktop archives and the Rust worker binaries. Commands below use **Bash on Linux**, from the repository root.
+Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../.github/workflows/ci-release.yml). One tag `v*` produces one draft containing the legacy .NET desktop archives, Rust worker binaries and Linux WebUI binaries. Commands below use **Bash on Linux**, from the repository root unless marked Fish.
 
 ## What the workflow does
 
 | Event | Result |
 | --- | --- |
-| Push to any branch, pull request | Rust (`fmt`, `clippy`, tests) and desktop (`dotnet test`) checks, plus a build of every artifact. **Nothing is published.** |
+| Push to any branch, pull request | Rust (`fmt`, `clippy`, tests), desktop (`dotnet test`) and WebUI (Go formatting, race tests, vet, JavaScript syntax/tests) checks, plus a build of every artifact. **Nothing is published.** |
 | Push of a tag `v*`, or a manual run on such a tag | The same checks and builds, then a **draft** release. |
 
-Artifacts of a draft (12 files):
+Artifacts of a draft (16 files):
 
 ```text
 win-x64.zip, linux-x64.zip, macos-x86_64.zip, macos-arm64.zip           (+ .sha256 each)
 lingosbot-x86_64-unknown-linux-musl, lingosbot-aarch64-unknown-linux-musl (+ .sha256 each)
+lingos-webui-linux-amd64, lingos-webui-linux-arm64                     (+ .sha256 each)
 ```
 
 - Desktop archives are self-contained single-file builds cross-compiled on Linux, each with exactly `LingosBot[.exe]` and `selenium-manager[.exe]` at the root. CI does not run them on Windows or macOS.
 - Rust binaries are static musl builds compiled natively on x86_64 and aarch64. Each passes ELF architecture/static-link checks (no `INTERP` or `NEEDED`), `--version`/`--help` smoke checks and `sha256sum -c`. None of these checks need a Lingos account.
+- WebUI binaries are static Go builds for Linux amd64 and arm64 with bundled frontend assets. Native checks verify ELF architecture/static linking, rejection of a missing encryption key and checksums; no server, Telegram bot or real lesson is started. Running WebUI also requires the matching Rust worker and trusted system CA certificates. See the [WebUI setup](../docker-webui/README.md).
 - On tag builds the tag version is stamped into the Rust binary (`v1.6.0` gives `lingosbot --version` = `lingosbot 1.6.0`) and verified; `Cargo.toml` in the repository stays unchanged. The tag must therefore be valid semver after the `v`, e.g. `v1.6.0` or `v1.6.0-beta.1`; otherwise the build fails.
 - The draft is created only if every test and build succeeded and the tagged commit is contained in `main`.
 - Tags containing `-alpha`, `-beta`, `-rc` or `-pre` are created as **pre-releases**.
 
-## Release notes come from the tagged commit
+## Prepare the PR and release notes
 
-The title is the tag name. The description is the full message of the commit the tag points to, so write the notes in that commit message:
+Write notes in `Docs/releases/<tag>.md` and include them in the PR to `main`. For v2.0.0, the file is [`Docs/releases/v2.0.0.md`](releases/v2.0.0.md). The workflow uses that file as the draft description; if it is absent, it falls back to the full message of the tagged commit. The title is the tag name.
 
-```bash
-git switch main && git pull --ff-only
+After the PR checks pass and it is merged, tag the reviewed commit on `main`. Merging a PR alone does **not** create a release or tag. For v2.0.0 (Fish):
+
+```fish
+git switch main
+git pull --ff-only
 git status --short
-git commit --allow-empty -F - <<'EOF_NOTES'
-Release v1.6.0
-
-## Changes
-- What changed for users.
-
-## Compatibility
-- Anything users must know.
-EOF_NOTES
-git tag v1.6.0
-git push origin main v1.6.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
-You can also tag an ordinary last commit; its message then becomes the notes. Edited notes are never overwritten: rerunning the workflow for a tag whose draft exists only refreshes the files (`--clobber`). If a release for the tag is already published, the workflow fails without changing it.
+Stop if the working tree is not clean or `main` is not the intended reviewed commit. Use a new tag for each release; never move an existing published tag. Edited notes are never overwritten: rerunning the workflow for a tag whose draft exists only refreshes the files (`--clobber`). If a release for the tag is already published, the workflow fails without changing it.
 
 ## Review and publish
 
-Open the draft in GitHub Releases, check the notes and all 12 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation of the worker binaries is documented in the [Rust worker README](../worker-server-rust/README.md).
+Open the draft in GitHub Releases, check the notes and all 16 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation is documented in the [Rust worker README](../worker-server-rust/README.md) and [WebUI README](../docker-webui/README.md).
 
 ## Manual fallback
 

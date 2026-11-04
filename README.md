@@ -1,19 +1,25 @@
 # LingosBot
 
-## HTTP-воркер на Rust
+## WebUI (v2.0)
 
-Автономный Linux CLI в [`worker-server-rust/`](worker-server-rust/README.md): авторизация, словарь, классы, челленджи и уроки по HTTP, без .NET, браузера, БД и WebUI. Все тесты находятся в `worker-server-rust/tests/`; существующий `worker-desktop/` не изменяется.
+A multiuser web workspace for the Rust worker: live run progress, vocabulary collection and Markdown/JSON downloads, per-user schedules, account administration and optional Telegram run notifications. The English interface supports responsive layouts and light/dark themes, with no external fonts or scripts.
+
+Download matching Linux WebUI and Rust worker binaries from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), or build from source. See [WebUI setup and migration](docker-webui/README.md), [v2.0.0 release notes](Docs/releases/v2.0.0.md) and [security/deployment limits](docker-webui/SECURITY-AUDIT.md). Desktop downloads remain available below.
+
+## Rust HTTP worker
+
+A standalone Linux CLI in [`worker-server-rust/`](worker-server-rust/README.md): authentication, vocabulary, classes, challenges and lessons over HTTP, without .NET, a browser, a database or WebUI. Tests live in `worker-server-rust/tests/`; the existing desktop application remains in `worker-desktop/`.
 
 ```bash
 cargo build --locked --release --manifest-path worker-server-rust/Cargo.toml
 ./worker-server-rust/target/release/lingosbot --help
 ```
 
-Готовые Linux musl-бинарники, безопасная передача учётных данных, конфигурация и JSON/exit-code контракт описаны в [инструкции воркера](worker-server-rust/README.md). Его бинарники публикуются в общем релизе `v<версия>` вместе с desktop ZIP-архивами.
+See the [worker guide](worker-server-rust/README.md) for prebuilt Linux musl binaries, safe credential input, configuration and the JSON/exit-code contract. Worker binaries ship in the same `v<version>` release as the desktop archives and WebUI binaries.
 
 ## Legacy desktop (.NET)
 
-Документация ниже относится к существующему C#-приложению в `worker-desktop/`.
+The documentation below covers the existing C# application in `worker-desktop/`.
 
 LingosBot is a .NET console application that automates lessons on [lingos.pl](https://lingos.pl/) through HTTP/API by default, with an optional Selenium browser workflow. It signs in, reads the vocabulary available in the selected class, and completes lessons using those collected translations.
 
@@ -87,7 +93,7 @@ These files may contain account, class, vocabulary, and page-session data. Inspe
 - [Command-line interface](Docs/CLI.md): every command-line option and its precedence.
 - [Advanced configuration](Docs/Advanced.md): browser paths, timing values, safety caps, and source builds.
 - [Linux servers](Docs/Servers.md): headless setup and scheduled runs with systemd timers or cron.
-- [Creating a release](Docs/Releasing.md): build all four platforms, package with 7-Zip, and publish on GitHub.
+- [Creating a release](Docs/Releasing.md): prepare notes and a PR, then let CI build a draft from a release tag.
 
 ## Development
 
