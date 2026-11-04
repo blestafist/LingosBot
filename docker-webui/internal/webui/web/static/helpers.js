@@ -44,6 +44,14 @@ export function settingsPayload(values, rows) {
   return result;
 }
 
+export function timezoneError(value) {
+  const zone = value.trim();
+  if (!zone || zone === 'Local' || /^[+-]/.test(zone)) return 'Enter an IANA timezone, such as Europe/Warsaw or UTC.';
+  try { new Intl.DateTimeFormat('en', { timeZone: zone }).format(); }
+  catch { return 'Unknown timezone. Use an IANA name, such as Europe/Warsaw or UTC.'; }
+  return '';
+}
+
 export function schedulePayload(values) {
   const result = {
     enabled: Boolean(values.enabled),
@@ -53,9 +61,9 @@ export function schedulePayload(values) {
     cron: values.cron.trim(),
   };
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(result.time)) throw new Error('Choose a valid start time.');
-  try { new Intl.DateTimeFormat('en', { timeZone: result.timezone }).format(); }
-  catch { throw new Error('Enter a valid IANA timezone, such as Europe/London.'); }
-  if (!result.timezone || result.timezone === 'Local') throw new Error('Choose a named timezone, such as Europe/London.');
+  const error = timezoneError(result.timezone);
+  if (error) throw new Error(error);
+  result.timezone = new Intl.DateTimeFormat('en', { timeZone: result.timezone }).resolvedOptions().timeZone;
   if (!result.days.length || result.days.some(day => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error('Choose at least one weekday.');
   if (result.cron && result.cron.split(/\s+/).length !== 5) throw new Error('Cron expressions must contain exactly five fields.');
   return result;

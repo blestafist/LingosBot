@@ -1,4 +1,4 @@
-import { settingLimits, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics, lessonReport } from './helpers.js';
+import { settingLimits, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics, lessonReport } from './helpers.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -29,7 +29,7 @@ document.addEventListener('click', event => {
 $$('input[type="password"]').forEach(input => { input.maxLength = 1024; });
 document.addEventListener('input', event => {
   if (event.target instanceof HTMLInputElement) event.target.setCustomValidity('');
-});
+}, true);
 document.addEventListener('invalid', event => {
   let details = event.target.closest('details');
   while (details) { details.open = true; details = details.parentElement.closest('details'); }
@@ -96,7 +96,7 @@ function initWorkspace() {
   let watchingRuns = false;
   let noticeTimer;
   const settingsForm = $('#settings-form');
-  const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection' };
+  const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection', scrape_all: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
 
   async function api(path, { method = 'GET', body, signal, download = false } = {}) {
@@ -209,10 +209,11 @@ function initWorkspace() {
     $('#page-context').textContent = heading.textContent;
     document.title = `${heading.textContent} · Your workspace`;
     if (focus) {
-      const target = id === 'collect-words' ? $('#collect-words h2') : id === 'schedule' ? $('#schedule-heading') : heading;
-      target.tabIndex = -1; target.focus({ preventScroll: true });
+      const target = id === 'schedule' ? $('#schedule-heading') : heading;
+      target.tabIndex = -1;
+      target.focus({ preventScroll: true });
     }
-    if (id === 'collect-words' || id === 'schedule') document.getElementById(id).scrollIntoView();
+    if (id === 'schedule') $('#schedule').scrollIntoView();
     else if (focus) window.scrollTo(0, 0);
     if (['config', 'dashboard'].includes(page.id) && state.scheduleLoaded) loadSchedule(false);
   }
@@ -233,7 +234,8 @@ function initWorkspace() {
   }
   function updateRunControls() {
     const busy = state.starting || Boolean(state.activeRun);
-    $$('[data-start], [data-run-control]').forEach(control => { control.disabled = busy; });
+    $$('[data-start]').forEach(control => { control.disabled = busy || !state.credentials?.saved; });
+    $('#collect-all-words').textContent = state.activeRun?.mode === 'scrape_all' ? 'Collecting…' : 'Collect all words';
     $('#run-lessons').disabled = !state.settings || state.settingsBusy || busy || !state.credentials?.saved;
     $('#verify-credentials').disabled = busy || !state.credentials?.saved;
     $('#save-settings').disabled = !state.settings || state.settingsBusy;
@@ -353,22 +355,6 @@ function initWorkspace() {
   });
   $('#quick-run-form').addEventListener('submit', event => { event.preventDefault(); startRun('run'); });
 
-  function renderClassLists() {
-    const container = $('#library-classes');
-    container.replaceChildren();
-    if (!state.classes.length) empty(container, 'No classes synced yet.', 'Save your Lingos credentials in Account, then sync classes.');
-    for (const item of state.classes) {
-      const row = element('div', 'class-row');
-      const copy = element('div');
-      copy.append(element('strong', '', item.title || 'Untitled class'), element('small', '', `Class ID ${item.group_id}`));
-      const collect = button('Collect words', () => startRun('scrape', item.group_id));
-      collect.dataset.runControl = '';
-      collect.setAttribute('aria-label', `Collect words from ${item.title || 'class'}`);
-      row.append(copy, collect);
-      container.append(row);
-    }
-    updateRunControls();
-  }
   async function loadClasses() {
     try {
       const data = await api('/api/classes');
@@ -376,7 +362,6 @@ function initWorkspace() {
       const dirty = settingsDirty();
       state.classes = data.classes;
       state.classesLoaded = true;
-      renderClassLists();
       if (state.settings && !state.settingsBusy) {
         if (!dirty) renderOverrides(state.settings.classLessonCounts);
         else {
@@ -392,15 +377,10 @@ function initWorkspace() {
         updateRunControls();
       }
     } catch (error) {
-      empty($('#library-classes'), 'Classes unavailable', error.message, loadClasses);
+      notify(`Classes unavailable. ${error.message}`, true);
     }
   }
   $$('[data-start]').forEach(control => control.addEventListener('click', () => startRun(control.dataset.start)));
-  $('#manual-collect').addEventListener('submit', event => {
-    event.preventDefault();
-    const input = $('#manual-class-id');
-    if (input.reportValidity()) startRun('scrape', input.value.trim());
-  });
 
   async function startRun(mode, classID = '', verify = false) {
     if (state.starting || state.activeRun || state.settingsBusy) return;
@@ -422,7 +402,7 @@ function initWorkspace() {
       renderHistory();
       $('#activity-details').open = true;
       if (mode === 'run') { const activity = $('.activity'); activity.tabIndex = -1; activity.focus(); }
-      notify(verify ? 'Checking saved login. No lessons will start.' : mode === 'classes' ? 'Syncing classes…' : mode === 'scrape' ? 'Collecting words…' : 'Lessons started. Progress is saved on the server.');
+      notify(verify ? 'Checking saved login. No lessons will start.' : mode === 'classes' ? 'Syncing classes…' : ['scrape', 'scrape_all'].includes(mode) ? 'Collecting words from all classes. Follow progress on Dashboard.' : 'Lessons started. Progress is saved on the server.');
     } catch (error) { notify(error.message, true); }
     finally { state.starting = false; updateRunControls(); }
   }
@@ -568,7 +548,7 @@ function initWorkspace() {
       trimLogs();
       return;
     }
-    const description = event.type === 'result' && event.success && state.selectedRun?.mode === 'classes' ? 'Classes synced.' : event.type === 'result' && event.success && state.selectedRun?.mode === 'scrape' ? 'Words collected and saved to your library.' : eventDescription(event);
+    const description = event.type === 'result' && event.success && state.selectedRun?.mode === 'classes' ? 'Classes synced.' : event.type === 'result' && event.success && ['scrape', 'scrape_all'].includes(state.selectedRun?.mode) ? 'Words collected and saved to your library.' : eventDescription(event);
     if (description) addActivity(description, seq, event.type === 'error' || event.type === 'result' && !event.success);
     if (['class_start', 'lesson_start', 'lesson_complete', 'class_complete', 'class_skipped'].includes(event.type)) {
       $('#run-title').textContent = event.type === 'lesson_start' ? `${event.class_title || 'Class'} · lesson ${event.lesson ?? '—'} of ${event.lessons_total ?? '—'}` : description;
@@ -724,7 +704,7 @@ function initWorkspace() {
   function renderLibrary() {
     const container = $('#library-collection');
     container.replaceChildren();
-    if (!state.library.length) { empty(container, 'Your collection starts here.', 'Sync your classes, then choose Collect words below. Wordsets will be saved here for reading and download.'); updateSelection(); return; }
+    if (!state.library.length) { empty(container, 'Your collection starts here.', 'Connect Lingos in Account, then use Collect all words to save your wordsets here.'); updateSelection(); return; }
     let matches = 0;
     for (const item of filterLibrary(state.library, $('#library-search').value)) {
       const topics = item.topics;
@@ -831,6 +811,18 @@ function initWorkspace() {
   $('#download-selection').addEventListener('click', () => downloadSelection('md'));
   $('#download-selection-json').addEventListener('click', () => downloadSelection('json'));
 
+  function validateTimezone() {
+    const input = $('#schedule-timezone');
+    const error = timezoneError(input.value);
+    input.setCustomValidity(error);
+    input.setAttribute('aria-invalid', String(Boolean(error)));
+    message('#timezone-error', error);
+    return !error;
+  }
+  $('#schedule-timezone').addEventListener('blur', validateTimezone);
+  $('#schedule-timezone').addEventListener('input', () => {
+    if ($('#schedule-timezone').getAttribute('aria-invalid') === 'true') validateTimezone();
+  });
   function scheduleValues() {
     return {
       enabled: $('#schedule-enabled').checked, time: $('#schedule-time').value,
@@ -854,6 +846,7 @@ function initWorkspace() {
       $('#schedule-enabled').checked = Boolean(schedule.enabled);
       $('#schedule-time').value = schedule.time || '09:00';
       $('#schedule-timezone').value = schedule.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      validateTimezone();
       $$('[name="day"]').forEach(input => { input.checked = (schedule.days || [1, 2, 3, 4, 5]).includes(Number(input.value)); });
       $('#schedule-cron').value = schedule.cron || '';
       $('#schedule-advanced').open = Boolean(schedule.cron?.trim());
@@ -932,6 +925,7 @@ function initWorkspace() {
   });
   $('#schedule-form').addEventListener('submit', async event => {
     event.preventDefault();
+    if (!validateTimezone()) { $('#schedule-timezone').reportValidity(); return; }
     let payload;
     try { payload = schedulePayload(scheduleValues()); }
     catch (error) { message('#schedule-error', error.message); return; }
@@ -993,7 +987,7 @@ function initWorkspace() {
       state.credentials = { saved: true, email: payload.email };
       state.verification = null;
       resetSecrets($('#credentials-form'));
-      notify('Lingos login saved. You can verify it below.');
+      notify('Lingos login saved. Ready to verify.');
     });
     renderCredentials();
   });
@@ -1068,7 +1062,18 @@ function initWorkspace() {
           if (!await confirmAction(user.admin ? 'Remove administrator access?' : 'Grant administrator access?', user.admin ? `${user.email} will no longer be able to manage users.` : `${user.email} will be able to create, disable and reset passwords for other users.`, user.admin ? 'Remove access' : 'Grant access')) return;
           await patchUser(user, { admin: !user.admin }, admin);
         });
-        controls.append(toggle, admin); details.append(controls);
+        const remove = button('Remove user', async () => {
+          if (!await confirmAction('Permanently remove this user?', `${user.email} will lose access. Their saved credentials, config, schedule, library and run history will be deleted. This cannot be undone.`, 'Remove user')) return;
+          remove.disabled = true;
+          try {
+            await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: 'DELETE' });
+            if (String(user.id) === String(account?.id)) { location.assign('/'); return; }
+            notify('User removed.');
+            await loadUsers();
+          } catch (error) { notify(error.message, true); }
+          finally { remove.disabled = false; }
+        }, 'button danger');
+        controls.append(toggle, admin, remove); details.append(controls);
         const form = element('form', 'user-reset');
         form.append(makeSecretField(`reset-password-${user.id}`, 'New workspace password'));
         const hint = element('p', 'footnote', 'At least 12 characters. All sessions for this user will be signed out.');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classCounts, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, durationLabel, lessonReport, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
+import { classCounts, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, durationLabel, lessonReport, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
 
 test('class overrides preserve titles, skip blank defaults, accept zero and reject duplicate or excessive counts', () => {
   assert.deepEqual({ ...classCounts([{ title: 'My class', count: '' }, { title: 'Skipped', count: '0' }]) }, { Skipped: 0 });
@@ -25,11 +25,19 @@ test('schedule payload contains only writable fields and validates timezone, wee
   const values = { enabled: true, time: '09:00', timezone: 'Europe/London', days: [1, 2, 3, 4, 5], cron: '', next_run: 123 };
   assert.equal(scheduleSummary(values), 'Mon, Tue, Wed, Thu, Fri at 9:00 am · Europe/London');
   assert.equal(Object.keys(schedulePayload(values)).length, 5);
+  for (const [timezone, expected] of [['europe/warsaw', 'Europe/Warsaw'], ['utc', 'UTC'], [' Pacific/Auckland ', 'Pacific/Auckland']]) {
+    assert.equal(schedulePayload({ ...values, timezone }).timezone, expected);
+  }
   assert.throws(() => schedulePayload({ ...values, days: [] }), /weekday/);
   assert.throws(() => schedulePayload({ ...values, timezone: 'not-a-zone' }), /timezone/);
   assert.throws(() => schedulePayload({ ...values, cron: '* * *' }), /five/);
   assert.equal(normalizeSchedule({ nextRun: 123, lastRunId: 4 }).last_run_id, 4);
   assert.equal(normalizeSchedule({ schedule: { next_run: 123 } }).next_run, 123);
+});
+
+test('timezone validation accepts IANA names and UTC but rejects unknown names, Local and numeric offsets', () => {
+  for (const zone of ['UTC', 'Europe/Warsaw', ' Pacific/Auckland ', 'Etc/GMT+5', 'Asia/Kolkata']) assert.equal(timezoneError(zone), '');
+  for (const zone of ['', ' ', 'Local', 'Europe/Warshaw', '+01:00', '-05:00', '<img>']) assert.match(timezoneError(zone), /timezone/);
 });
 
 test('HTTP detail never displays a URL, path or unrecognized semantic operation', () => {
