@@ -90,12 +90,15 @@ function initWorkspace() {
     schedule: null, scheduleLoaded: false, scheduleDirty: false, skipping: false,
     latestRunID: null, latestLoading: false, verification: null,
     selectedTopics: new Set(), downloading: false,
+    telegram: null, telegramLink: null, telegramBusy: false, telegramRequest: null, telegramTimer: null, telegramError: null,
+    adminTelegramRequest: null, adminTelegramBusy: false,
   };
   let account = null;
   let overrideID = 0;
   let watchingRuns = false;
   let noticeTimer;
   const settingsForm = $('#settings-form');
+  const telegramPanel = $('#telegram-panel');
   const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection', scrape_all: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
 
@@ -216,6 +219,9 @@ function initWorkspace() {
     if (id === 'schedule') $('#schedule').scrollIntoView();
     else if (focus) window.scrollTo(0, 0);
     if (['config', 'dashboard'].includes(page.id) && state.scheduleLoaded) loadSchedule(false);
+    if (page.id === 'account' && !document.hidden) loadTelegram();
+    else stopTelegramPolling();
+    if (page.id === 'users') loadAdminTelegram();
   }
   window.addEventListener('hashchange', () => showPage(true));
   showPage();
@@ -941,6 +947,165 @@ function initWorkspace() {
     finally { control.disabled = false; control.textContent = 'Save schedule'; $('#schedule-fields').disabled = false; updateSchedulePreview(); }
   });
 
+  function validTelegramBot(username) {
+    return typeof username === 'string' && /^[a-z][a-z0-9_]{4,31}$/i.test(username);
+  }
+  function telegramIdentity(data) {
+    return data.username ? `@${data.username}` : data.first_name || `Chat ${data.chat_id}`;
+  }
+  function stopTelegramPolling() {
+    clearTimeout(state.telegramTimer);
+    const request = state.telegramRequest;
+    state.telegramRequest = null;
+    request?.abort();
+  }
+  function queueTelegramPoll() {
+    clearTimeout(state.telegramTimer);
+    if (!telegramPanel || $('#account').hidden || document.hidden || state.telegramBusy) return;
+    if (state.telegram?.linked || state.telegram?.code_expires_at * 1000 > Date.now()) state.telegramTimer = setTimeout(loadTelegram, 5000);
+  }
+  function renderTelegram() {
+    if (!telegramPanel) return;
+    const data = state.telegram;
+    const linked = Boolean(data?.linked);
+    const ready = Boolean(data?.configured && validTelegramBot(data.bot_username));
+    if (state.telegramLink && (linked || !ready || state.telegramLink.expires_at * 1000 <= Date.now() || state.telegramLink.expires_at !== data?.code_expires_at)) {
+      if (!linked && state.telegramLink.expires_at * 1000 <= Date.now()) message('#telegram-feedback', 'The link code has expired. Create a new code to try again.', false);
+      state.telegramLink = null;
+    }
+    const link = state.telegramLink;
+    const pending = !linked && data?.code_expires_at * 1000 > Date.now();
+    const busy = state.telegramBusy;
+    telegramPanel.setAttribute('aria-busy', String(busy || Boolean(state.telegramRequest)));
+    status($('#telegram-state'), !data ? state.telegramRequest ? 'Loading…' : 'Unavailable' : linked ? 'Connected' : !data.configured ? 'Not enabled' : !ready ? 'Temporarily unavailable' : pending ? 'Awaiting connection' : 'Not connected', linked ? 'good' : !data && !state.telegramRequest ? 'bad' : '');
+    const errorText = state.telegramError?.message || '';
+    if ($('#telegram-error').textContent !== errorText) message('#telegram-error', errorText);
+    $('#telegram-availability').hidden = !data || ready;
+    $('#telegram-availability').textContent = !data?.configured ? `${linked ? 'Notifications are paused. ' : ''}Ask your administrator to enable the Telegram bot.` : `The bot is temporarily unavailable. ${linked ? 'Your connection and notification preference are saved. ' : ''}Try refreshing in a moment.`;
+    $('#telegram-unlinked').hidden = !data || linked || (!ready && !pending);
+    $('#telegram-instructions').textContent = link ? `Open Telegram and send the command to @${link.bot_username}, or paste just the code into the bot. Notifications stay off until you enable them here.` : pending ? 'A private link code is pending. For your privacy, saved codes cannot be retrieved. Create a new code to replace it, or cancel the link.' : 'Create a private, one-use code to connect your Telegram account. Notifications stay off until you enable them.';
+    $('#telegram-pending').hidden = !link;
+    $('#telegram-code').value = link ? `/start ${link.code}` : '';
+    const open = $('#telegram-open');
+    if (link && !busy) open.href = `https://t.me/${link.bot_username}?start=${link.code}`;
+    else open.removeAttribute('href');
+    open.setAttribute('aria-disabled', String(busy || !link));
+    open.tabIndex = busy || !link ? -1 : 0;
+    $('#telegram-expiry').hidden = !pending;
+    $('#telegram-expiry').textContent = pending ? `Expires ${dateLabel(data.code_expires_at)} · One use only. Creating a new code invalidates the previous one.` : '';
+    $('#telegram-linked').hidden = !linked;
+    $('#telegram-identity').textContent = linked ? telegramIdentity(data) : '';
+    $('#telegram-connected').hidden = !linked || !data.linked_at;
+    $('#telegram-connected').textContent = linked && data.linked_at ? `Connected ${dateLabel(data.linked_at)}` : '';
+    $('#telegram-notification-row').hidden = !linked;
+    if (!busy) $('#telegram-notifications').checked = linked && data.notifications === true;
+    $('#telegram-notifications').disabled = busy || !linked;
+    $('#telegram-create').hidden = !ready || linked;
+    $('#telegram-create').textContent = pending ? 'Create new code' : 'Create link code';
+    $('#telegram-cancel').hidden = !pending;
+    $('#telegram-disconnect').hidden = !linked;
+    $('#telegram-refresh').hidden = !state.telegramError && (!data?.configured || ready);
+    $('#telegram-refresh').textContent = state.telegramError ? 'Retry' : 'Refresh';
+    $$('button', telegramPanel).forEach(control => { control.disabled = busy; });
+    $('#telegram-actions').hidden = !$$('#telegram-actions button', telegramPanel).some(control => !control.hidden);
+  }
+  async function loadTelegram(force = false) {
+    if (!telegramPanel || state.telegramBusy || state.telegramRequest || (!force && $('#account').hidden) || document.hidden) return;
+    clearTimeout(state.telegramTimer);
+    const request = new AbortController();
+    state.telegramRequest = request;
+    renderTelegram();
+    try {
+      const data = await api('/api/telegram', { signal: request.signal });
+      if (state.telegramRequest !== request) return;
+      if (typeof data?.configured !== 'boolean' || typeof data.linked !== 'boolean' || typeof data.notifications !== 'boolean') throw new Error('Your Telegram connection could not be read. Please retry.');
+      const connected = data.linked && !state.telegram?.linked;
+      const focusConnection = connected && telegramPanel.contains(document.activeElement);
+      state.telegram = data;
+      if (!state.telegramError?.mutation) state.telegramError = null;
+      if (connected && state.telegramLink) message('#telegram-feedback', 'Telegram connected. Choose whether to enable run notifications below.', false);
+      renderTelegram();
+      if (focusConnection) $('#telegram-notifications').focus({ preventScroll: true });
+    } catch (error) {
+      if (state.telegramRequest !== request || error.name === 'AbortError') return;
+      if (!state.telegramError?.mutation) state.telegramError = { message: error.message };
+    } finally {
+      if (state.telegramRequest === request) {
+        state.telegramRequest = null;
+        renderTelegram();
+        queueTelegramPoll();
+      }
+    }
+  }
+  async function changeTelegram(method) {
+    if (state.telegramBusy || !state.telegram) return;
+    const notifications = $('#telegram-notifications').checked;
+    const wasLinked = state.telegram.linked;
+    stopTelegramPolling();
+    state.telegramBusy = true;
+    state.telegramError = null;
+    message('#telegram-feedback', '');
+    // A failed regeneration may still have invalidated the previous bearer code on the server.
+    if (method === 'POST') state.telegramLink = null;
+    renderTelegram();
+    try {
+      const data = await api(method === 'POST' ? '/api/telegram/link' : '/api/telegram', { method, ...(method === 'PATCH' ? { body: { notifications } } : {}) });
+      if (method === 'POST') {
+        if (typeof data?.code !== 'string' || !/^[a-z0-9_-]{43}$/i.test(data.code) || !validTelegramBot(data.bot_username) || !Number.isFinite(data.expires_at) || data.expires_at * 1000 <= Date.now()) throw new Error('The server did not return a usable link code. Create a new code to try again.');
+        state.telegramLink = data;
+        state.telegram = { ...state.telegram, bot_username: data.bot_username, code_expires_at: data.expires_at };
+        message('#telegram-feedback', 'Link code ready. Send it to the bot to connect.', false);
+      } else {
+        if (data?.ok !== true) throw new Error('The server did not confirm your change. Retry to refresh your Telegram connection.');
+        if (method === 'PATCH') {
+          state.telegram = { ...state.telegram, notifications };
+          message('#telegram-feedback', `Run notifications ${notifications ? 'enabled' : 'disabled'}.`, false);
+        } else {
+          state.telegramLink = null;
+          state.telegram = { ...state.telegram, linked: false, username: '', first_name: '', chat_id: '', notifications: false, linked_at: 0, code_expires_at: 0 };
+          message('#telegram-feedback', wasLinked ? 'Telegram disconnected. Run notifications and queued messages have been removed.' : 'Link cancelled. The code can no longer be used.', false);
+        }
+      }
+    } catch (error) {
+      state.telegramError = { message: error.message, mutation: true };
+    } finally {
+      state.telegramBusy = false;
+      renderTelegram();
+      queueTelegramPoll();
+      if (!$('#account').hidden && !document.hidden) {
+        if (state.telegramError) $('#telegram-error').focus({ preventScroll: true });
+        else if (method === 'POST') { $('#telegram-code').focus(); $('#telegram-code').select(); }
+        else if (method === 'DELETE') ($('#telegram-create').hidden ? $('#telegram-heading') : $('#telegram-create')).focus({ preventScroll: true });
+      }
+    }
+  }
+  $('#telegram-create')?.addEventListener('click', () => changeTelegram('POST'));
+  $('#telegram-cancel')?.addEventListener('click', () => changeTelegram('DELETE'));
+  $('#telegram-disconnect')?.addEventListener('click', async () => {
+    if (state.telegramBusy || !await confirmAction('Disconnect Telegram?', 'Run notifications will stop. Your link code and queued notifications will also be removed. You can connect again later.', 'Disconnect')) return;
+    changeTelegram('DELETE');
+  });
+  $('#telegram-notifications')?.addEventListener('change', () => changeTelegram('PATCH'));
+  $('#telegram-refresh')?.addEventListener('click', () => { state.telegramError = null; loadTelegram(); });
+  $('#telegram-copy')?.addEventListener('click', async () => {
+    const link = state.telegramLink;
+    if (!link || state.telegramBusy) return;
+    try {
+      await navigator.clipboard.writeText(link.code);
+      if (state.telegramLink === link) message('#telegram-feedback', 'Code copied. Paste it into the Telegram bot.', false);
+    } catch {
+      if (state.telegramLink !== link) return;
+      $('#telegram-code').focus(); $('#telegram-code').select();
+      message('#telegram-feedback', 'Command selected. Copy it manually, then send it to the Telegram bot.', false);
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    stopTelegramPolling();
+    state.telegramLink = null;
+    renderTelegram();
+  });
+  window.addEventListener('pageshow', event => { if (event.persisted) loadTelegram(); });
+
   function renderCredentials() {
     const saved = Boolean(state.credentials?.saved);
     const verification = state.verification;
@@ -1038,9 +1203,93 @@ function initWorkspace() {
     } catch (error) { notify(error.message, true); }
     finally { control.disabled = false; }
   }
+  async function disconnectAdminTelegram(binding, row) {
+    if (state.adminTelegramBusy || state.adminTelegramRequest || !await confirmAction('Disconnect this Telegram account?', `${binding.email} will stop receiving run notifications. Their link code and queued notifications will also be removed. Only the user can reconnect and opt in again.`, 'Disconnect')) return;
+    const panel = $('#admin-telegram-panel');
+    state.adminTelegramRequest?.abort();
+    state.adminTelegramRequest = null;
+    state.adminTelegramBusy = true;
+    message('#admin-telegram-error', '');
+    panel.setAttribute('aria-busy', 'true');
+    $$('button', panel).forEach(control => { control.disabled = true; });
+    let disconnected = false;
+    try {
+      const data = await api(`/api/admin/telegram/${encodeURIComponent(binding.user_id)}`, { method: 'DELETE' });
+      if (data?.ok !== true) throw new Error('The server did not confirm the disconnect. Refresh connections before trying again.');
+      disconnected = true;
+      row.remove();
+      if (!$('#admin-telegram-list').children.length) empty($('#admin-telegram-list'), 'No Telegram accounts connected.', 'Connections appear here when users link Telegram in Account.');
+      if (String(binding.user_id) === String(account?.id)) {
+        stopTelegramPolling(); state.telegram = null; state.telegramLink = null; state.telegramError = null;
+        message('#telegram-feedback', '');
+        await loadTelegram(true);
+      }
+      notify(`Telegram disconnected for ${binding.email}.`);
+    } catch (error) {
+      message('#admin-telegram-error', error.message);
+      if (!$('#users').hidden) $('#admin-telegram-error').focus({ preventScroll: true });
+    } finally {
+      state.adminTelegramBusy = false;
+      panel.setAttribute('aria-busy', 'false');
+      $$('button', panel).forEach(control => { control.disabled = false; });
+    }
+    if (disconnected) {
+      await loadAdminTelegram();
+      if (!$('#users').hidden) $('#refresh-admin-telegram').focus({ preventScroll: true });
+    }
+  }
+  async function loadAdminTelegram() {
+    const panel = $('#admin-telegram-panel');
+    if (!panel || state.adminTelegramBusy) return;
+    state.adminTelegramRequest?.abort();
+    const request = new AbortController();
+    state.adminTelegramRequest = request;
+    panel.setAttribute('aria-busy', 'true');
+    $$('button', panel).forEach(control => { control.disabled = true; });
+    message('#admin-telegram-error', '');
+    const container = $('#admin-telegram-list');
+    try {
+      const data = await api('/api/admin/telegram', { signal: request.signal });
+      if (state.adminTelegramRequest !== request) return;
+      if (!Array.isArray(data?.bindings)) throw new Error('Telegram connections could not be read. Refresh connections to try again.');
+      const rows = document.createDocumentFragment();
+      for (const binding of data.bindings) {
+        const row = element('article', 'user-row telegram-admin-row');
+        row.dataset.telegramUserId = String(binding.user_id);
+        const head = element('div', 'user-row-head');
+        const identity = element('div');
+        identity.append(element('p', 'user-email', binding.email), element('p', 'muted', telegramIdentity(binding)));
+        const disconnect = button('Disconnect', () => disconnectAdminTelegram(binding, row), 'button danger');
+        disconnect.setAttribute('aria-label', `Disconnect Telegram for ${binding.email}`);
+        head.append(identity, disconnect);
+        const badges = element('div', 'actions');
+        const preference = element('span');
+        status(preference, binding.notifications ? 'Notifications on' : 'Notifications off', binding.notifications ? 'good' : '');
+        badges.append(preference);
+        if (binding.disabled) { const disabled = element('span'); status(disabled, 'Account disabled'); badges.append(disabled); }
+        row.append(head, element('p', 'footnote', `Chat ${binding.chat_id} · Connected ${dateLabel(binding.linked_at)}`), badges);
+        rows.append(row);
+      }
+      container.replaceChildren(rows);
+      container.dataset.loaded = 'true';
+      if (!data.bindings.length) empty(container, 'No Telegram accounts connected.', 'Connections appear here when users link Telegram in Account.');
+    } catch (error) {
+      if (state.adminTelegramRequest !== request || error.name === 'AbortError') return;
+      message('#admin-telegram-error', error.message);
+      if (!container.dataset.loaded) empty(container, 'Connections unavailable.', 'Use Refresh connections to try again.');
+    } finally {
+      if (state.adminTelegramRequest === request) {
+        state.adminTelegramRequest = null;
+        panel.setAttribute('aria-busy', 'false');
+        $$('button', panel).forEach(control => { control.disabled = false; });
+      }
+    }
+  }
+  $('#refresh-admin-telegram')?.addEventListener('click', loadAdminTelegram);
   async function loadUsers() {
     const container = $('#users-list');
     if (!container) return;
+    loadAdminTelegram();
     try {
       const data = await api('/api/admin/users');
       if (!Array.isArray(data?.users)) throw new Error('The user list could not be read.');
@@ -1123,6 +1372,8 @@ function initWorkspace() {
   });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { clearTimeout(state.watchTimer); watchRuns(); }
+    if (!document.hidden && !$('#account').hidden) loadTelegram();
+    else stopTelegramPolling();
   });
   Promise.allSettled([loadSettings(), loadClasses(), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadLatestResult(), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
 }

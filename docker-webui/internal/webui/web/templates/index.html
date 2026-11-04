@@ -124,6 +124,26 @@
             <div class="verification inset"><button id="verify-credentials" class="button tonal" type="button" disabled>Verify credentials</button><p id="verification-result" class="footnote" role="status">Save your Lingos login first.</p></div>
             <div class="panel-footer"><button id="remove-credentials" class="button danger" type="button" disabled>Remove credentials</button><div class="actions"><button id="retry-credentials" class="button" type="button" hidden>Retry</button><button id="save-credentials" class="button primary" type="submit" disabled>Save credentials</button></div></div>
           </form>
+          <section id="telegram-panel" class="panel" aria-labelledby="telegram-heading">
+            <div class="panel-heading"><div class="panel-title"><span class="section-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 3-7 18-4-7-7-4Z M10 14 21 3"/></svg></span><div><h2 id="telegram-heading" tabindex="-1">Telegram</h2><p>Connect your Telegram account for optional run notifications.</p></div></div><span id="telegram-state" class="status">Loading…</span></div>
+            <p id="telegram-error" class="message error" role="alert" tabindex="-1" hidden></p>
+            <div class="telegram-content inset">
+              <p id="telegram-availability" class="muted" hidden></p>
+              <div id="telegram-unlinked" hidden>
+                <p id="telegram-instructions" class="muted"></p>
+                <div id="telegram-pending" class="telegram-pending" hidden>
+                  <p id="telegram-private" class="muted">Keep this code private. Anyone with it can link their Telegram to your account. The link sends it to Telegram only when you choose Open Telegram.</p>
+                  <div class="field"><label for="telegram-code">Private link command</label><textarea id="telegram-code" rows="3" readonly autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="telegram-private telegram-expiry"></textarea></div>
+                  <div class="actions"><a id="telegram-open" class="button tonal" target="_blank" rel="noreferrer noopener">Open Telegram <span aria-hidden="true">↗</span></a><button id="telegram-copy" class="button" type="button">Copy code</button></div>
+                </div>
+                <p id="telegram-expiry" class="footnote" hidden></p>
+              </div>
+              <div id="telegram-linked" hidden><p id="telegram-identity" class="activity-title"></p><p id="telegram-connected" class="footnote" hidden></p></div>
+            </div>
+            <label id="telegram-notification-row" class="check-row" hidden><input id="telegram-notifications" type="checkbox" aria-describedby="telegram-notification-hint" disabled><span><strong>Run notifications</strong><small id="telegram-notification-hint">Optional; off by default. For lessons, class sync or credential checks, and word collection. Only completion, failure, stopped or interrupted results. No progress or logs.</small></span></label>
+            <p id="telegram-feedback" class="telegram-feedback footnote" role="status" hidden></p>
+            <div id="telegram-actions" class="panel-footer" hidden><div class="actions"><button id="telegram-create" class="button tonal" type="button" hidden>Create link code</button><button id="telegram-cancel" class="button" type="button" hidden>Cancel link</button><button id="telegram-disconnect" class="button danger" type="button" hidden>Disconnect</button><button id="telegram-refresh" class="button" type="button" hidden>Retry</button></div></div>
+          </section>
           <form id="password-form" class="panel">
             <div class="panel-heading"><div class="panel-title"><span class="section-symbol tertiary" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="10" r="5"/><path d="m12 13 8 7 2-2-2-2 1-1-2-2-2 2M6 9l1 1"/></svg></span><div><h2>Workspace password</h2><p id="account-identity">Signed in as {{.User.Email}}</p></div></div></div>
             <input type="email" class="visually-hidden" name="username" value="{{.User.Email}}" autocomplete="username" tabindex="-1" aria-label="Workspace email" readonly>
@@ -133,7 +153,12 @@
         </section>
 
         {{if .User.Admin}}
-        <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading"><div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div><section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section><form id="create-user-form" class="panel"><div class="panel-heading"><div><h2>Add a user</h2><p>No public registration. Share the initial password securely.</p></div></div><div class="fields two-columns"><label for="user-email">Email<input id="user-email" type="email" autocomplete="off" required></label><div class="field"><label for="user-password">Initial password</label><div class="secret-field"><input id="user-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" data-reveal="user-password" aria-controls="user-password" aria-pressed="false">Show</button></div><span class="field-hint">At least 12 characters.</span></div></div><label class="check-row"><input id="user-admin" type="checkbox"><span>Administrator access</span></label><p id="users-error" class="message error" role="alert" hidden></p><div class="panel-footer"><p>Administrators can manage other users.</p><button class="button primary" type="submit">Create user</button></div></form></section>
+        <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading"><div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div><section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section>
+          <section id="admin-telegram-panel" class="panel" aria-labelledby="admin-telegram-heading">
+            <div class="panel-heading"><div><h2 id="admin-telegram-heading">Telegram connections</h2><p>All connected accounts, including disabled users. Only users can opt in to notifications.</p></div><button id="refresh-admin-telegram" class="button" type="button">Refresh connections</button></div>
+            <p id="admin-telegram-error" class="message error" role="alert" tabindex="-1" hidden></p><div id="admin-telegram-list"><p class="empty">Loading connections…</p></div>
+          </section>
+          <form id="create-user-form" class="panel"><div class="panel-heading"><div><h2>Add a user</h2><p>No public registration. Share the initial password securely.</p></div></div><div class="fields two-columns"><label for="user-email">Email<input id="user-email" type="email" autocomplete="off" required></label><div class="field"><label for="user-password">Initial password</label><div class="secret-field"><input id="user-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" data-reveal="user-password" aria-controls="user-password" aria-pressed="false">Show</button></div><span class="field-hint">At least 12 characters.</span></div></div><label class="check-row"><input id="user-admin" type="checkbox"><span>Administrator access</span></label><p id="users-error" class="message error" role="alert" hidden></p><div class="panel-footer"><p>Administrators can manage other users.</p><button class="button primary" type="submit">Create user</button></div></form></section>
         {{end}}
       </div>
     </main>
