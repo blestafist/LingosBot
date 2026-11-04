@@ -124,6 +124,52 @@ export function eventDescription(event) {
   }
 }
 
+const nonnegativeNumber = value => Number.isFinite(value) && value >= 0;
+export function durationLabel(seconds) {
+  if (!nonnegativeNumber(seconds)) return '—';
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor(total % 3600 / 60);
+  if (hours) return `${hours}h${minutes ? ` ${minutes}m` : ''}`;
+  if (minutes) return `${minutes}m${total % 60 ? ` ${total % 60}s` : ''}`;
+  return `${total}s`;
+}
+
+export function lessonReport(run, result) {
+  const duration = nonnegativeNumber(result?.duration_seconds) ? result.duration_seconds
+    : Number.isFinite(run?.created_at) && run.created_at > 0 && Number.isFinite(run?.finished_at) && run.finished_at > 0 && run.finished_at >= run.created_at
+      ? run.finished_at - run.created_at : undefined;
+  const metrics = [
+    ['Lessons', result?.lessons_completed], ['Words learned', result?.words_learned], ['Duration', duration],
+    ['Errors', result?.errors_made], ['Classes at limit', result?.classes_limited], ['Empty classes', result?.classes_empty],
+  ].filter(([, value]) => nonnegativeNumber(value)).map(([label, value]) => ({ label, value: label === 'Duration' ? durationLabel(value) : String(value) }));
+  const note = !result ? 'No final worker report was saved. Totals are unavailable.'
+    : result.success === false && typeof result.message === 'string' ? result.message : '';
+  let challenge = null;
+  const snapshot = result?.challenge_snapshot;
+  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+    const group = typeof snapshot.group_id === 'string' || Number.isFinite(snapshot.group_id) ? snapshot.group_id : '—';
+    let snapshotNote = 'Last check for this class only. Not live.';
+    if (!nonnegativeNumber(snapshot.lessons_completed_at_snapshot) || !nonnegativeNumber(result.lessons_completed)) {
+      snapshotNote += ' Final state not confirmed.';
+    } else if (snapshot.lessons_completed_at_snapshot < result.lessons_completed) {
+      snapshotNote += ' More lessons ran after this check.';
+    }
+    challenge = {
+      title: `Wyzwania · class ${group}`,
+      note: snapshotNote,
+      counts: [['available', snapshot.available], ['in progress', snapshot.in_progress], ['completed', snapshot.completed]]
+        .filter(([, value]) => nonnegativeNumber(value)).map(([label, value]) => `${value} ${label}`).join(' · '),
+      items: (Array.isArray(snapshot.challenges) ? snapshot.challenges : []).filter(item => item && typeof item === 'object' && !Array.isArray(item)).map(item => [
+        typeof item.title === 'string' ? item.title : 'Challenge',
+        ['available', 'in_progress', 'completed'].includes(item.status) ? item.status.replace('_', ' ') : '',
+        Number.isFinite(item.points) ? `${item.points} points` : '',
+      ].filter(Boolean).join(' · ')),
+    };
+  }
+  return { metrics, note, challenge };
+}
+
 export function dateLabel(seconds, timezone) {
   if (!seconds) return '—';
   const date = new Date(Number(seconds) * 1000);

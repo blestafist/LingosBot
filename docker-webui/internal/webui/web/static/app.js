@@ -1,4 +1,4 @@
-import { settingLimits, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
+import { settingLimits, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics, lessonReport } from './helpers.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -87,12 +87,14 @@ function initWorkspace() {
     selectedRun: null, activeRun: null, cursor: 0, pollingGeneration: 0,
     pollTimer: null, watchTimer: null, httpCount: 0, logTrimmed: false,
     progress: { lessons: 0, words: 0, lessonWords: 0 }, starting: false,
-    schedule: null, scheduleLoaded: false, scheduleDirty: false,
+    schedule: null, scheduleLoaded: false, scheduleDirty: false, skipping: false,
+    latestRunID: null, latestLoading: false, verification: null,
     selectedTopics: new Set(), downloading: false,
   };
   let account = null;
   let overrideID = 0;
   let watchingRuns = false;
+  let noticeTimer;
   const settingsForm = $('#settings-form');
   const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
@@ -133,10 +135,12 @@ function initWorkspace() {
     node.classList.toggle('error', error);
   }
   function notify(text, error = false) {
+    clearTimeout(noticeTimer);
     const notice = $('#notice');
     notice.setAttribute('role', error ? 'alert' : 'status');
     message(notice, text, error);
     if (error) notice.focus({ preventScroll: true });
+    else noticeTimer = setTimeout(() => { notice.hidden = true; }, 6000);
   }
   function empty(container, title, description, retry) {
     container.replaceChildren();
@@ -194,7 +198,8 @@ function initWorkspace() {
 
   function showPage(focus = false) {
     const id = location.hash.slice(1).split('?')[0];
-    const page = $$('[data-page]').find(item => item.id === (id === 'collect-words' ? 'library' : id)) || $('#lessons');
+    const pageID = { lessons: 'dashboard', schedule: 'config', 'collect-words': 'library' }[id] || id;
+    const page = $$('[data-page]').find(item => item.id === pageID) || $('#dashboard');
     $$('[data-page]').forEach(item => { item.hidden = item !== page; });
     $$('[data-page-link]').forEach(link => {
       if (link.dataset.pageLink === page.id) link.setAttribute('aria-current', 'page');
@@ -204,12 +209,12 @@ function initWorkspace() {
     $('#page-context').textContent = heading.textContent;
     document.title = `${heading.textContent} · Your workspace`;
     if (focus) {
-      const target = id === 'collect-words' ? $('#collect-words h2') : heading;
+      const target = id === 'collect-words' ? $('#collect-words h2') : id === 'schedule' ? $('#schedule-heading') : heading;
       target.tabIndex = -1; target.focus({ preventScroll: true });
     }
-    if (id === 'collect-words') $('#collect-words').scrollIntoView();
+    if (id === 'collect-words' || id === 'schedule') document.getElementById(id).scrollIntoView();
     else if (focus) window.scrollTo(0, 0);
-    if (page.id === 'schedule' && state.scheduleLoaded && !state.scheduleDirty) loadSchedule(false);
+    if (['config', 'dashboard'].includes(page.id) && state.scheduleLoaded) loadSchedule(false);
   }
   window.addEventListener('hashchange', () => showPage(true));
   showPage();
@@ -230,15 +235,17 @@ function initWorkspace() {
     const busy = state.starting || Boolean(state.activeRun);
     $$('[data-start], [data-run-control]').forEach(control => { control.disabled = busy; });
     $('#run-lessons').disabled = !state.settings || state.settingsBusy || busy || !state.credentials?.saved;
+    $('#verify-credentials').disabled = busy || !state.credentials?.saved;
     $('#save-settings').disabled = !state.settings || state.settingsBusy;
     const dirty = settingsDirty();
     $('#class-plan-count').textContent = state.classesLoaded ? `${state.classes.length} classes` : '';
-    $('#run-lessons').textContent = state.settingsBusy ? 'Saving plan…' : state.starting ? 'Starting…' : dirty ? 'Save & run lessons →' : 'Run lessons →';
+    $('#run-lessons').textContent = state.starting ? 'Starting…' : 'Run now →';
     if (state.settings) {
       status($('#settings-state'), state.settingsBusy ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved', dirty ? '' : 'good');
-      $('#settings-hint').textContent = !state.credentials ? 'Check your account connection before running.' : !state.credentials.saved ? 'Connect Lingos in Account before running lessons.' : dirty ? 'Running saves and uses this plan first.' : 'Manual and scheduled runs use your saved plan.';
+      $('#settings-hint').textContent = dirty ? 'Save to apply changes.' : 'Defaults for future runs.';
     }
-    $('#library-run-status').textContent = state.activeRun ? `${runLabels[state.activeRun.mode] || 'Worker'} is running. Follow progress in Lessons.` : '';
+    $('#quick-run-hint').textContent = !state.settings ? 'Load your settings in Config first.' : !state.credentials ? 'Check connection in Account.' : !state.credentials.saved ? 'Connect Lingos in Account first.' : dirty ? 'Uses saved config, not unsaved edits. Per-class counts still apply.' : 'This run only. Saved per-class counts still apply.';
+    $('#library-run-status').textContent = state.activeRun ? `${runLabels[state.activeRun.mode] || 'Worker'} is running. Follow progress on Dashboard.` : '';
     $('#library-run-status').hidden = !state.activeRun;
   }
   function addOverride(title = '', value = '', manual = false) {
@@ -296,6 +303,7 @@ function initWorkspace() {
       for (const [key, [, , fallback]] of Object.entries(settingLimits)) settingsForm.elements.namedItem(key).value = data.settings[key] ?? fallback;
       renderOverrides(data.settings.classLessonCounts || {});
       state.settings = currentSettings();
+      $('#quick-lesson-count').value = state.settings.lessonCount;
       $('#base-url').textContent = data.baseUrl || 'Not configured';
       $('#dashboard-url').textContent = data.studentDashboardUrl || 'Not configured';
       $('#execution-limit-hint').textContent = `Server limit: ${data.executionLimitSeconds} seconds. Longer runs are capped.`;
@@ -314,6 +322,7 @@ function initWorkspace() {
     try { payload = currentSettings(); }
     catch (error) { message('#settings-error', error.message); return false; }
     state.settingsBusy = true;
+    const followDefault = $('#quick-lesson-count').value === String(state.settings.lessonCount);
     const revision = state.settingsRevision;
     $('#settings-fields').disabled = true;
     message('#settings-error', '');
@@ -322,6 +331,7 @@ function initWorkspace() {
       const data = await api('/api/settings', { method: 'PUT', body: payload });
       if (!data?.settings) throw new Error('The server did not confirm your saved plan. Try again before running.');
       state.settings = settingsPayload(data.settings, Object.entries(data.settings.classLessonCounts || {}).map(([title, count]) => ({ title, count })));
+      if (followDefault) $('#quick-lesson-count').value = state.settings.lessonCount;
       if (state.settingsRevision === revision) {
         for (const key of Object.keys(settingLimits)) settingsForm.elements.namedItem(key).value = state.settings[key];
         renderOverrides(state.settings.classLessonCounts);
@@ -333,7 +343,7 @@ function initWorkspace() {
   settingsForm.addEventListener('input', () => { state.settingsRevision++; updateRunControls(); });
   settingsForm.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!state.settingsBusy && await saveSettings()) notify('Lesson plan saved. Scheduled runs will use it too.');
+    if (!state.settingsBusy && await saveSettings()) notify('Config saved.');
   });
   $('#retry-settings').addEventListener('click', loadSettings);
   $('#add-override').addEventListener('click', () => {
@@ -341,7 +351,7 @@ function initWorkspace() {
     const row = addOverride('', '', true);
     $('.override-title', row).focus();
   });
-  $('#run-lessons').addEventListener('click', () => startRun('run'));
+  $('#quick-run-form').addEventListener('submit', event => { event.preventDefault(); startRun('run'); });
 
   function renderClassLists() {
     const container = $('#library-classes');
@@ -392,23 +402,78 @@ function initWorkspace() {
     if (input.reportValidity()) startRun('scrape', input.value.trim());
   });
 
-  async function startRun(mode, classID = '') {
+  async function startRun(mode, classID = '', verify = false) {
     if (state.starting || state.activeRun || state.settingsBusy) return;
+    if (mode === 'run' && (!state.settings || !$('#quick-run-form').reportValidity())) return;
     if (mode === 'scrape' && !/^[1-9][0-9]{0,18}$/.test(String(classID))) { notify('Enter a positive numeric class ID, up to 19 digits.', true); return; }
     state.starting = true;
+    const credentials = state.credentials;
     updateRunControls();
     try {
-      if (mode === 'run' && !await saveSettings()) return;
-      const data = await api('/api/runs', { method: 'POST', body: { mode, class_id: String(classID) } });
+      const data = await api('/api/runs', { method: 'POST', body: { mode, ...(mode === 'scrape' ? { class_id: String(classID) } : {}), ...(mode === 'run' ? { lesson_count: Number($('#quick-lesson-count').value) } : {}) } });
       if (!data?.run) throw new Error('The server did not confirm the run. Refresh history before retrying.');
       state.activeRun = data.run;
+      if (verify && credentials === state.credentials) {
+        state.verification = { ...data.run };
+        renderCredentials();
+      }
       state.runs = [data.run, ...state.runs.filter(run => String(run.id) !== String(data.run.id))];
       selectRun(data.run);
       renderHistory();
+      $('#activity-details').open = true;
       if (mode === 'run') { const activity = $('.activity'); activity.tabIndex = -1; activity.focus(); }
-      notify(mode === 'classes' ? 'Syncing your classes. Progress is saved in Lessons.' : mode === 'scrape' ? 'Collecting words into your library. You can leave this tab.' : 'Lessons started. You can leave this tab; the run continues on the server.');
+      notify(verify ? 'Checking saved login. No lessons will start.' : mode === 'classes' ? 'Syncing classes…' : mode === 'scrape' ? 'Collecting words…' : 'Lessons started. Progress is saved on the server.');
     } catch (error) { notify(error.message, true); }
     finally { state.starting = false; updateRunControls(); }
+  }
+
+  async function loadLatestResult() {
+    if (state.latestLoading) return;
+    state.latestLoading = true;
+    const container = $('#latest-run-result');
+    try {
+      const data = await api('/api/runs/latest');
+      if (!data || !Object.hasOwn(data, 'run')) throw new Error('The latest result could not be read.');
+      const run = data.run;
+      state.latestRunID = run?.id ?? null;
+      container.replaceChildren();
+      if (!run) {
+        status($('#latest-run-status'), 'No runs yet');
+        container.append(element('p', 'muted', 'No lesson runs yet.'));
+        return;
+      }
+      status($('#latest-run-status'), statusLabels[run.status] || run.status, run.status === 'completed' ? 'good' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '');
+      const report = lessonReport(run, data.result);
+      container.append(element('p', 'muted', `${dateLabel(run.finished_at || run.created_at)}${run.source === 'schedule' ? ' · scheduled' : ''}`));
+      const metrics = element('dl', 'result-metrics');
+      for (const metric of report.metrics) {
+        const row = element('div'); row.append(element('dt', '', metric.label), element('dd', '', metric.value)); metrics.append(row);
+      }
+      if (report.metrics.length) container.append(metrics);
+      if (report.note) container.append(element('p', 'footnote', report.note));
+      if (report.challenge) {
+        const { title, note, counts, items } = report.challenge;
+        const section = element('section', 'challenge-report');
+        section.append(element('h3', '', title), element('p', 'footnote', note));
+        if (counts) section.append(element('p', 'footnote', counts));
+        if (items.length) {
+          const list = element('ul', 'challenge-list');
+          for (const item of items) list.append(element('li', '', item));
+          section.append(list);
+        }
+        container.append(section);
+      } else container.append(element('p', 'footnote', 'Wyzwania: no saved data.'));
+      container.append(button('View saved activity', () => { selectRun(run); $('#activity-details').open = true; $('.activity').scrollIntoView({ block: 'center' }); }, 'button quiet'));
+    } catch (error) {
+      status($('#latest-run-status'), 'Unavailable', 'bad');
+      empty(container, 'Result unavailable', error.message, loadLatestResult);
+    } finally { state.latestLoading = false; }
+  }
+
+  function updateVerification(run) {
+    if (String(state.verification?.id) !== String(run?.id) || !run) return;
+    state.verification = run;
+    renderCredentials();
   }
 
   function renderHistory() {
@@ -431,6 +496,9 @@ function initWorkspace() {
       if (!Array.isArray(data?.runs)) throw new Error('Run history could not be read.');
       const previousActive = state.activeRun;
       state.runs = data.runs;
+      const latest = state.runs.find(run => run.mode === 'run' && run.status !== 'running');
+      if (latest && String(latest.id) !== String(state.latestRunID)) loadLatestResult();
+      if (state.verification) updateVerification(state.runs.find(run => String(run.id) === String(state.verification.id)));
       state.activeRun = state.runs.find(run => run.status === 'running') || null;
       if (initial && state.runs.length) selectRun(state.activeRun || state.runs[0]);
       else if (!state.selectedRun && state.activeRun) selectRun(state.activeRun);
@@ -444,6 +512,7 @@ function initWorkspace() {
         $('#run-meta').textContent = 'Run lessons, sync classes or collect words.';
       }
       if (previousActive && !state.activeRun) refreshAfterRun();
+      if (state.activeRun && (initial || String(previousActive?.id) !== String(state.activeRun.id))) $('#activity-details').open = true;
       renderHistory();
       updateRunControls();
     } catch (error) {
@@ -579,6 +648,7 @@ function initWorkspace() {
       const finished = run.status === 'running' && data.run.status !== 'running';
       if (finished && ['failed', 'interrupted'].includes(data.run.status)) $('.run-details').open = true;
       state.selectedRun = data.run;
+      updateVerification(data.run);
       const index = state.runs.findIndex(item => String(item.id) === String(data.run.id));
       if (index !== -1) state.runs[index] = data.run;
       if (data.run.status === 'running') state.activeRun = data.run;
@@ -596,8 +666,8 @@ function initWorkspace() {
     if (continuePolling && generation === state.pollingGeneration) state.pollTimer = setTimeout(() => pollRun(generation), delay);
   }
   function refreshAfterRun() {
-    loadClasses(); loadLibrary();
-    if (!state.scheduleDirty) loadSchedule(false);
+    loadClasses(); loadLibrary(); loadLatestResult();
+    loadSchedule(false);
   }
   $('#refresh-runs').addEventListener('click', () => loadRuns({ initial: !state.selectedRun }));
   $('#cancel-run').addEventListener('click', async () => {
@@ -771,6 +841,7 @@ function initWorkspace() {
     const values = scheduleValues();
     $('#schedule-summary').textContent = scheduleSummary(values);
     const advanced = Boolean(values.cron.trim());
+    $('#schedule-custom-hint').hidden = !advanced;
     $('#schedule-time').disabled = advanced;
     $$('[name="day"]').forEach(input => { input.disabled = advanced; });
     if (state.scheduleDirty) status($('#schedule-status'), 'Unsaved changes');
@@ -785,9 +856,11 @@ function initWorkspace() {
       $('#schedule-timezone').value = schedule.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       $$('[name="day"]').forEach(input => { input.checked = (schedule.days || [1, 2, 3, 4, 5]).includes(Number(input.value)); });
       $('#schedule-cron').value = schedule.cron || '';
+      $('#schedule-advanced').open = Boolean(schedule.cron?.trim());
       state.scheduleDirty = false;
       $('#schedule-fields').disabled = false;
       $('#save-schedule').disabled = false;
+      message('#schedule-error', '');
       updateSchedulePreview();
     }
     if (!state.scheduleDirty) status($('#schedule-status'), schedule.enabled ? 'Enabled' : 'Paused', schedule.enabled ? 'good' : '');
@@ -795,21 +868,59 @@ function initWorkspace() {
     const statuses = { waiting: 'Waiting for the worker to be available', busy: 'Worker was busy; occurrence skipped', running: 'In progress', completed: 'Completed', failed: 'Failed', interrupted: 'Interrupted', cancelled: 'Stopped', skipped: 'Occurrence skipped', no_credentials: 'Lingos credentials are missing', disabled: 'Account is disabled' };
     $('#schedule-last').textContent = `${statuses[schedule.last_status] || schedule.last_status || 'No scheduled runs yet'}${schedule.last_error ? ` · ${schedule.last_error}` : ''}`;
     $('#schedule-history').textContent = schedule.last_run_id ? `View latest scheduled run →` : 'View run history →';
+    renderNextSession();
+  }
+  function renderNextSession() {
+    const schedule = state.schedule;
+    $('#skip-next-run').disabled = state.skipping || !schedule?.enabled || !schedule.next_run;
+    $('#skip-next-run').textContent = state.skipping ? 'Skipping…' : 'Skip next run';
+    if (!schedule) return;
+    $('#dashboard-next').textContent = !schedule.enabled ? 'Automatic runs are paused' : schedule.next_run ? dateLabel(schedule.next_run, schedule.timezone) : 'Waiting for the next occurrence';
+    $('#dashboard-schedule-hint').textContent = `${schedule.last_status === 'skipped' ? 'One occurrence skipped. ' : ''}${scheduleSummary(schedule)}${schedule.enabled && schedule.next_run && schedule.next_run * 1000 <= Date.now() ? ' · Pending: starts when the service is ready.' : ''}`;
   }
   async function loadSchedule(fill = true) {
     if (fill) message('#schedule-error', '');
     try {
       const data = await api('/api/schedule');
       if (!data || typeof (data.schedule ?? data).enabled !== 'boolean') throw new Error('The saved schedule could not be read.');
-      renderSchedule(data, fill);
+      renderSchedule(data, fill || !state.scheduleLoaded);
       $('#retry-schedule').hidden = true;
     } catch (error) {
       if (fill) { message('#schedule-error', error.message); $('#retry-schedule').hidden = false; status($('#schedule-status'), 'Unavailable', 'bad'); }
+      if (!state.scheduleLoaded) {
+        $('#dashboard-next').textContent = 'Schedule unavailable';
+        $('#dashboard-schedule-hint').textContent = 'Open Config to retry loading your schedule.';
+      }
     }
   }
+  $('#skip-next-run').addEventListener('click', async () => {
+    const schedule = state.schedule;
+    if (state.skipping || !schedule?.enabled || !schedule.next_run) return;
+    const nextRun = schedule.next_run;
+    state.skipping = true;
+    renderNextSession();
+    message('#skip-error', '');
+    try {
+      if (!await confirmAction('Skip this scheduled run?', `Skip ${dateLabel(nextRun, schedule.timezone)}? Later runs stay enabled. This does not stop a run that has already started.`, 'Skip this run')) return;
+      const data = await api('/api/schedule/skip', { method: 'POST', body: { nextRun } });
+      renderSchedule(data, !state.scheduleDirty);
+      notify('Run skipped. Later runs stay enabled.');
+    } catch (error) {
+      message('#skip-error', `${error.message} The displayed schedule has been refreshed; review the date before retrying.`);
+      await loadSchedule(false);
+    } finally { state.skipping = false; renderNextSession(); }
+  });
   $('#schedule-form').addEventListener('input', () => { state.scheduleDirty = true; updateSchedulePreview(); });
+  $('#use-simple-schedule').addEventListener('click', () => {
+    $('#schedule-cron').value = '';
+    state.scheduleDirty = true;
+    updateSchedulePreview();
+    $('#schedule-time').focus();
+  });
   $('#retry-schedule').addEventListener('click', () => loadSchedule());
   $('#schedule-history').addEventListener('click', async () => {
+    $('#activity-details').open = true;
+    $('.history').open = true;
     const id = state.schedule?.last_run_id;
     if (!id) return;
     const run = state.runs.find(item => String(item.id) === String(id));
@@ -831,16 +942,24 @@ function initWorkspace() {
     try {
       const data = await api('/api/schedule', { method: 'PUT', body: payload });
       renderSchedule(data);
-      notify('Schedule saved. It uses your saved lesson plan.');
+      notify('Schedule saved.');
     } catch (error) { message('#schedule-error', error.message); }
     finally { control.disabled = false; control.textContent = 'Save schedule'; $('#schedule-fields').disabled = false; updateSchedulePreview(); }
   });
 
   function renderCredentials() {
     const saved = Boolean(state.credentials?.saved);
+    const verification = state.verification;
+    const verified = saved && verification?.status === 'completed';
+    const checking = saved && verification?.status === 'running';
+    const failed = saved && verification && !checking && !verified;
     $('#setup-card').hidden = saved;
-    status($('#credentials-state'), saved ? 'Saved · not verified' : 'Not saved', saved ? 'good' : '');
-    status($('#credentials-overview'), saved ? 'Credentials saved · not verified' : 'Connect your account →', saved ? 'good' : '');
+    const label = !saved ? 'Not saved' : verified ? 'Verified this session' : checking ? 'Checking connection…' : failed ? 'Check did not complete' : 'Saved · not verified';
+    status($('#credentials-state'), label, verified ? 'good' : failed ? 'bad' : '');
+    status($('#credentials-overview'), saved ? label : 'Connect your account →', verified ? 'good' : failed ? 'bad' : '');
+    $('#verification-result').textContent = !saved ? 'Save your Lingos login first.' : verified ? `Connected · ${dateLabel(verification.finished_at)}. Classes synced.` : checking ? 'Checking saved login…' : failed ? 'Check did not complete. See Dashboard for details.' : 'Not checked yet.';
+    $('#verification-result').classList.toggle('error', Boolean(failed));
+    $('#verify-credentials').textContent = checking ? 'Verifying…' : 'Verify credentials';
     $('#remove-credentials').disabled = !saved;
     $('#save-credentials').disabled = false;
     $('#credentials-fields').disabled = false;
@@ -864,6 +983,7 @@ function initWorkspace() {
     }
   }
   $('#retry-credentials').addEventListener('click', loadCredentials);
+  $('#verify-credentials').addEventListener('click', () => startRun('classes', '', true));
   $('#credentials-form').addEventListener('submit', async event => {
     event.preventDefault();
     const payload = { email: $('#credentials-email').value.trim(), password: $('#credentials-password').value };
@@ -871,8 +991,9 @@ function initWorkspace() {
     await withForm(event.currentTarget, '#credentials-error', async () => {
       await api('/api/credentials', { method: 'PUT', body: payload });
       state.credentials = { saved: true, email: payload.email };
+      state.verification = null;
       resetSecrets($('#credentials-form'));
-      notify('Lingos credentials saved. They have not been verified yet.');
+      notify('Lingos login saved. You can verify it below.');
     });
     renderCredentials();
   });
@@ -881,6 +1002,7 @@ function initWorkspace() {
     await withForm($('#credentials-form'), '#credentials-error', async () => {
       await api('/api/credentials', { method: 'DELETE' });
       state.credentials = { saved: false, email: '' };
+      state.verification = null;
       $('#credentials-email').value = '';
       resetSecrets($('#credentials-form'));
       notify('Lingos credentials removed.');
@@ -986,7 +1108,7 @@ function initWorkspace() {
     if (watchingRuns) return;
     watchingRuns = true;
     clearTimeout(state.watchTimer);
-    if (!document.hidden) await loadRuns({ quiet: true });
+    if (!document.hidden) await Promise.allSettled([loadRuns({ quiet: true }), loadSchedule(false)]);
     watchingRuns = false;
     state.watchTimer = setTimeout(watchRuns, 10000);
   }
@@ -997,5 +1119,5 @@ function initWorkspace() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { clearTimeout(state.watchTimer); watchRuns(); }
   });
-  Promise.allSettled([loadSettings(), loadClasses(), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
+  Promise.allSettled([loadSettings(), loadClasses(), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadLatestResult(), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
 }
