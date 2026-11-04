@@ -35,6 +35,7 @@ Assumed one Linux server, roughly 5–20 users and one worker at a time, behind 
 - OSV batch lookup: 163 locked crates.io dependencies, zero advisory matches on the audit date. This checks published dependency advisories, not application logic or container OS packages.
 - Independently reported review of POST batch export (`c543d69`): no concrete issues found. Checked all-or-nothing ownership, CSRF/same-origin enforcement, strict bounded JSON, deduplication and the 500-topic limit, SQL placeholders, no distinction leaking foreign versus missing IDs, and GET compatibility; 41 export/library tests passed.
 - Independently reported browser checks on frontend `88cb04b`: 15 axe checks, seven viewport widths from 320 to 1440 px, batch Markdown/JSON exports, and run/cancel/error/retry flows passed with a fake worker.
+- Dashboard follow-up adds a bounded, validated one-off `lesson_count` and an owner-filtered latest lesson result without changing saved config. Schedule skip uses the expected timestamp, version and lease checks; stale/double submissions cannot silently skip a later date. Synthetic tests cover auth/CSRF, isolation, strict input, persistence, scheduler races and unchanged cron defaults. The final Go race suite contains 162 passing tests; frontend helpers/theme have 19 passing Node tests. This follow-up does not constitute a new dependency or deployment audit.
 - No authentication bypass, cross-user disclosure, user-controlled worker SSRF or shell injection was found in the reviewed paths. This is not a security guarantee.
 
 ## Limits and deployment
