@@ -332,7 +332,7 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"users": users})
 		return
 	}
-	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
+	if r.Method != http.MethodPost && r.Method != http.MethodPatch && r.Method != http.MethodDelete {
 		apiError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
@@ -342,7 +342,7 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		Admin    *bool   `json:"admin"`
 		Disabled *bool   `json:"disabled"`
 	}
-	if !decodeJSON(w, r, &body) {
+	if r.Method != http.MethodDelete && !decodeJSON(w, r, &body) {
 		return
 	}
 	var u User
@@ -376,6 +376,11 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if r.Method == http.MethodDelete {
+		// Match launchRun's lock order so no worker can start between the busy check and deletion.
+		x.runMu.Lock()
+		defer x.runMu.Unlock()
+	}
 	tx, err := x.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
@@ -403,10 +408,9 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u.Admin = body.Admin != nil && *body.Admin
-		var result sql.Result
-		result, err = tx.Exec(`INSERT INTO users(email,password_hash,admin,created_at) VALUES(?,?,?,?)`, u.Email, hash, u.Admin, time.Now().Unix())
+		err = tx.QueryRow(`UPDATE user_id_counter SET last_id=max(last_id,(SELECT coalesce(max(id),0) FROM users))+1 WHERE id=1 RETURNING last_id`).Scan(&u.ID)
 		if err == nil {
-			u.ID, err = result.LastInsertId()
+			_, err = tx.Exec(`INSERT INTO users(id,email,password_hash,admin,created_at) VALUES(?,?,?,?,?)`, u.ID, u.Email, hash, u.Admin, time.Now().Unix())
 		}
 		status = http.StatusCreated
 	} else {
@@ -425,23 +429,57 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		if body.Disabled != nil {
 			u.Disabled = *body.Disabled
 		}
-		if !u.Admin || u.Disabled {
+		if r.Method == http.MethodDelete || !u.Admin || u.Disabled {
 			var otherAdmins int
 			if err = tx.QueryRow(`SELECT count(*) FROM users WHERE admin=1 AND disabled=0 AND id<>?`, u.ID).Scan(&otherAdmins); err != nil {
 				apiError(w, http.StatusInternalServerError, "storage error")
 				return
 			}
 			if otherAdmins == 0 {
-				apiError(w, http.StatusConflict, "cannot disable or demote the last active admin")
+				apiError(w, http.StatusConflict, "cannot delete, disable or demote the last active admin")
 				return
 			}
 		}
-		_, err = tx.Exec(`UPDATE users SET admin=?,disabled=? WHERE id=?`, u.Admin, u.Disabled, u.ID)
-		if err == nil && body.Password != nil {
-			_, err = tx.Exec(`UPDATE users SET password_hash=? WHERE id=?`, hash, u.ID)
-		}
-		if err == nil && (u.Disabled || body.Password != nil) {
-			_, err = tx.Exec(`DELETE FROM user_sessions WHERE user_id=?`, u.ID)
+		if r.Method == http.MethodDelete {
+			var busy bool
+			err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM runs WHERE user_id=? AND status='running')`, u.ID).Scan(&busy)
+			// A worker can still be finishing after its run record becomes terminal.
+			for id := range x.cancels {
+				if err != nil || busy {
+					break
+				}
+				err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM runs WHERE id=? AND user_id=?)`, id, u.ID).Scan(&busy)
+			}
+			if err != nil {
+				apiError(w, http.StatusInternalServerError, "storage error")
+				return
+			}
+			if busy {
+				apiError(w, http.StatusConflict, "user has an active run; wait for it to finish")
+				return
+			}
+			for _, query := range []string{
+				`UPDATE user_id_counter SET last_id=max(last_id,?) WHERE id=1`,
+				`DELETE FROM class_cache WHERE user_id=?`,
+				`DELETE FROM library_classes WHERE user_id=?`,
+				`DELETE FROM runs WHERE user_id=?`,
+				`DELETE FROM users WHERE id=?`,
+			} {
+				if _, err = tx.Exec(query, u.ID); err != nil {
+					break
+				}
+			}
+			if err == nil && u.ID == 1 {
+				_, err = tx.Exec(`DELETE FROM credentials WHERE id=1; DELETE FROM schedule WHERE id=1`)
+			}
+		} else {
+			_, err = tx.Exec(`UPDATE users SET admin=?,disabled=? WHERE id=?`, u.Admin, u.Disabled, u.ID)
+			if err == nil && body.Password != nil {
+				_, err = tx.Exec(`UPDATE users SET password_hash=? WHERE id=?`, hash, u.ID)
+			}
+			if err == nil && (u.Disabled || body.Password != nil) {
+				_, err = tx.Exec(`DELETE FROM user_sessions WHERE user_id=?`, u.ID)
+			}
 		}
 	}
 	if err == nil {
@@ -449,6 +487,10 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
+		return
+	}
+	if r.Method == http.MethodDelete {
+		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 		return
 	}
 	if u.Disabled {

@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash BLOB NOT NULL,
  admin INTEGER NOT NULL DEFAULT 0 CHECK(admin IN (0,1)), disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)), created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_id_counter (id INTEGER PRIMARY KEY CHECK(id=1), last_id INTEGER NOT NULL CHECK(last_id>=0));
+INSERT OR IGNORE INTO user_id_counter(id,last_id) VALUES(1,0);
+UPDATE user_id_counter SET last_id=max(last_id,(SELECT coalesce(max(id),0) FROM users)) WHERE id=1;
 CREATE TABLE IF NOT EXISTS user_sessions (
  token TEXT PRIMARY KEY, csrf TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL
 );
