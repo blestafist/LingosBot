@@ -1,10 +1,10 @@
 # WebUI
 
-A small, multiuser control panel for the Rust worker. The interface is in English. Each user has their own Lingos credentials, saved lesson settings, classes, vocabulary library, schedule and run history. Only administrators can create accounts, reset passwords, change roles or disable users. There is no public registration.
+A small, multiuser control panel for the Rust worker. The interface is in English, with responsive phone/tablet layouts and light, dark or system appearance. Each user has their own Lingos credentials, saved lesson settings, classes, vocabulary library, schedule and run history. Only administrators can create accounts, reset passwords, change roles or disable users. There is no public registration.
 
 ## Local launch (Fish, no Docker)
 
-Requires Go 1.24+ and Rust 1.88+ to build the worker:
+Use a supported, patched Go release (tested with 1.27.3) and Rust 1.88+ to build the worker:
 
 ```fish
 cd /home/pestit/code/LingosBot/worker-server-rust
@@ -27,10 +27,14 @@ Generate the encryption key **once** using `openssl rand -base64 32`, then keep 
 
 ## Workflow
 
-- **Lessons:** save the default number of lessons, sync classes and set overrides by class title. `0` skips a class. The same saved settings apply to manual and scheduled runs. Timing and safety limits are under advanced settings.
-- **Library:** collect a class's vocabulary, browse topics and words, and download one topic, one class or the entire library as Markdown or JSON. A bundle is one combined document, not a ZIP archive. Collection replaces only that user's previously collected vocabulary for that class, atomically after a successful result. Failed collections leave the previous library intact. JSON preserves the worker's wordset structure; Markdown escapes untrusted text.
+- **Lessons:** choose the default number of lessons. Expand “Adjust individual classes” to sync classes or override their lesson counts; `0` skips a class. The same saved settings apply to manual and scheduled runs. Intentional errors, timing, safety limits and operator-managed endpoints are under advanced settings. Logs and history are collapsed until needed; errors reveal run details automatically.
+- **Library:** collect a class's vocabulary, browse wordsets and select the ones to download together. Selections can span classes and remain selected when searching. “Select all shown” adds the current search results; “Clear” removes the entire selection. Each batch accepts up to 500 wordsets and produces **one combined Markdown or JSON file**, not a ZIP. Individual wordset downloads are inside the word preview; class and entire-library downloads remain available in disclosures. Collection replaces only that user's previously collected vocabulary for that class, atomically after a successful result. Failed collections leave the previous library intact. Recollection changes wordset IDs: review your selection after refreshing a class. JSON preserves the worker's wordset structure; Markdown escapes untrusted text.
 - **Runs:** progress is saved on the server, so closing a tab does not stop a task. Reopen it to see the current lesson or a previous run. HTTP operations and timings are under a disclosure, without request bodies, URLs or cookies. Stop cancels future requests; it cannot undo completed lessons or a request already accepted by Lingos.
 - **Account:** enter your Lingos **email**, not a username. Passwords are not returned by the API. Saved credentials are not proof that Lingos has accepted them. The application login password and Lingos password are separate.
+
+On phones, the main sections stay in the bottom navigation. Appearance is available on the sign-in screen and in the workspace; its non-sensitive preference is saved only in this browser. “System theme” follows OS changes. No external fonts, scripts or new runtime dependencies are required.
+
+Batch exports use `POST /api/library/export` with JSON `{"format":"md","topics":[1,2]}` and the session's CSRF token. IDs must belong to the current user. Empty/oversized selections are rejected; any missing or foreign ID rejects the whole download rather than exporting a partial selection. Existing read-only GET exports are unchanged.
 
 The UI supports every worker execution mode and every lesson-setting field: `lessonCount`, `classLessonCounts`, `lessonPromptSafetyCap`, `errorsPer100Words`, `answerDelayMinMs`, `answerDelayMaxMs`, `requestTimeoutSeconds`, `maxRunSeconds`. Input limits match the Rust configuration. Each run receives a snapshot via stdin, never passwords in process arguments.
 
@@ -56,6 +60,8 @@ Only one worker task runs at a time across users. Scheduled tasks wait while it 
 - CSP blocks third-party resources and framing. No CDN fonts/scripts, analytics or telemetry. Do not disable these protections to add a proxy banner or inline script.
 - Protect the data directory, encryption key, environment and backups. Email addresses and collected vocabulary are private user data, not encrypted database fields. Local process owners and host administrators remain trusted. MFA, email delivery/recovery and security monitoring are not included.
 
+See [SECURITY-AUDIT.md](SECURITY-AUDIT.md) for the 2026-11-04 source/dependency audit, fixes and deployment limits. This is not a certification or a substitute for testing your reverse proxy and TLS configuration.
+
 ## Docker Compose
 
 Set `ADMIN_USER`, `ADMIN_PASSWORD`, `ENCRYPTION_KEY` and `COOKIE_SECURE` in the environment or `docker-webui/.env` (never commit it). From the repository root:
@@ -74,6 +80,8 @@ go test -race ./...
 go vet ./...
 go build ./...
 node --check internal/webui/web/static/app.js
+node --check internal/webui/web/static/theme.js
+node --test internal/webui/web/static/*.test.js
 ```
 
 Test with an isolated database and a fake worker before using real Lingos credentials. Real lesson runs have external side effects and are never retried automatically after an uncertain result.
