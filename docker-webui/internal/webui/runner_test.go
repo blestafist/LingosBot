@@ -232,8 +232,9 @@ func TestRunnerDoesNotInheritSecretsWithoutWhitelistedEnvironment(t *testing.T) 
 		}
 	}
 	t.Setenv("ADMIN_PASSWORD", "server-secret")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "telegram-server-secret")
 	x.worker = filepath.Join(t.TempDir(), "worker")
-	if err := os.WriteFile(x.worker, []byte("#!/bin/sh\ntest -z \"$ADMIN_PASSWORD\" || exit 1\nprintf '%s\\n' '{\"type\":\"result\",\"success\":true}'\n"), 0700); err != nil {
+	if err := os.WriteFile(x.worker, []byte("#!/bin/sh\ntest -z \"$ADMIN_PASSWORD$TELEGRAM_BOT_TOKEN\" || exit 1\nprintf '%s\\n' '{\"type\":\"result\",\"success\":true}'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	id, err := x.startRun(1, "run", "", "manual")

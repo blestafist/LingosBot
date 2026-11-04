@@ -32,6 +32,7 @@ type app struct {
 	cancels         map[int64]context.CancelFunc
 	workers         sync.WaitGroup
 	ctx             context.Context
+	telegram        *telegramBot
 }
 
 func Run() {
@@ -110,6 +111,12 @@ func serve() error {
 	if err := initLibraryDB(db); err != nil {
 		return err
 	}
+	if err := initTelegramDB(db); err != nil {
+		return err
+	}
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+		x.telegram = newTelegramBot(token)
+	}
 	if _, err := db.Exec(`UPDATE runs SET status='interrupted',summary='The server stopped during this run. Check Lingos before retrying.',finished_at=? WHERE status='running'`, time.Now().Unix()); err != nil {
 		return err
 	}
@@ -118,6 +125,13 @@ func serve() error {
 	go func() {
 		defer close(scheduleDone)
 		x.scheduleLoop(ctx)
+	}()
+	telegramDone := make(chan struct{})
+	go func() {
+		defer close(telegramDone)
+		if x.telegram != nil {
+			x.telegramLoop(ctx)
+		}
 	}()
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -134,6 +148,7 @@ func serve() error {
 	stop()
 	<-shutdownDone
 	<-scheduleDone
+	<-telegramDone
 	x.workers.Wait()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -149,8 +164,12 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("POST /logout", x.logout)
 	mux.HandleFunc("/api/account", x.accountAPI)
 	mux.HandleFunc("/api/credentials", x.credentialsAPI)
+	mux.HandleFunc("/api/telegram", x.telegramAPI)
+	mux.HandleFunc("/api/telegram/link", x.telegramLinkAPI)
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
+	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
+	mux.HandleFunc("/api/admin/telegram/", x.adminTelegramAPI)
 	mux.HandleFunc("/api/settings", x.settingsAPI)
 	mux.HandleFunc("/api/schedule", x.scheduleAPI)
 	mux.HandleFunc("/api/schedule/skip", x.skipScheduleAPI)
