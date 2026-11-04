@@ -56,6 +56,35 @@ The service still needs to be running: an in-process scheduler cannot execute wh
 
 Only one worker task runs at a time across users. Scheduled tasks wait while it is busy. The operator's `WORKER_MAX_RUN_SECONDS` (default 3600, allowed 1–86400) caps every user's requested duration, including class sync and collection. Linux terminates the worker if the server dies; cancelled runs also terminate the worker's process group. This is a single-server application, not a distributed job queue. Run events retain approximately the latest 5,000 entries per task, the history API shows the latest 50 tasks, and a worker output stream is bounded to 100 MiB (16 MiB per event). Monitor database size and back it up; long-term automatic history deletion is not implemented.
 
+## Telegram (optional)
+
+Create a bot with [@BotFather](https://t.me/BotFather), then set its secret token **on the server**, not in a user's Account form. For local Fish launch, add this before `go run .`:
+
+```fish
+set -gx TELEGRAM_BOT_TOKEN 'your-token-from-BotFather'
+```
+
+Compose forwards the same optional environment variable. Restart the server after changing it. Without it, the rest of the application works normally and Account explains that Telegram is unavailable. Keep the token out of source control, screenshots, browser code and support logs. It is not passed to the Rust worker.
+
+The Go server uses outbound HTTPS long polling; no inbound webhook, public URL, extra process or new dependency is required. Use one running poller per bot token, with no Telegram webhook configured. Do not reuse a bot currently operated by another service. Outbound access to `api.telegram.org:443` is required; Telegram outages do not stop lesson tasks.
+
+Rotating the token for the **same bot** preserves bindings. Substituting a **different bot** resets bindings, pending codes and its polling cursor after `getMe` verifies the new identity; users must explicitly reconnect before any results can go to that bot.
+
+1. In **Account → Telegram**, create a link code. Open the Telegram link and press **Start**, or send `/start <code>` (the bare code also works) to the displayed bot in a **private chat**.
+2. Account automatically shows the connected Telegram identity. One application user can link one Telegram account, and one Telegram account cannot be shared between application users.
+3. Enable **Run notifications** separately. They are **off by default**. Notifications contain the final result of manual or scheduled tasks: lessons, class sync/verification and word collection; completed, failed, stopped or interrupted. No progress stream, credentials, vocabulary or raw worker logs are sent. The bot cannot start or stop lessons.
+4. Disconnect in Account, or send `/stop` to the bot. `/help` explains linking. Disabling notifications or disconnecting discards queued notifications; a request already in flight may still arrive. Deleting an application user also deletes the binding and pending messages, but cannot erase messages already in Telegram or stored backups.
+
+Administrators can see **all Telegram connections in Users**, including connections belonging to disabled accounts: website email, Telegram identity/chat ID, link date and notification preference. They can disconnect any binding with confirmation, without deleting the website account. Only the owning user can opt into notifications; administrators cannot turn them on for someone else. Ordinary users cannot list or change another user's connections.
+
+Codes are random, single-use and expire after ten minutes. Only their SHA-256 hashes are stored; generating another code invalidates the previous one. A code grants only a binding, never a website session. Treat it as private: someone who obtains it before use can bind their Telegram instead. It is sent to Telegram when you use the deep link or paste it. Password changes/resets and account disabling invalidate unused codes. Telegram chat IDs, names and notification preferences are private but **not encrypted** database fields; names are the snapshot recorded when linking.
+
+Final run transitions enqueue notifications atomically in SQLite. Queued delivery survives restart and is separate from the worker. Transient failures get at most five attempts, with delays of 30 seconds, 2 minutes, 10 minutes and 1 hour (or Telegram's longer rate-limit delay). A permanent chat error pauses that user's notifications. Leaving the bot globally disabled preserves queued notifications for the same bot, so restoring it can deliver older results. This is best-effort delivery, not an exactly-once guarantee: a crash after Telegram accepts a message but before SQLite records success can produce a duplicate. Enabling a user's notifications does not replay old history. Back up the entire database as usual.
+
+The authenticated API is `GET /api/telegram` (only the current user's binding), `POST /api/telegram/link` (issue/replace code), `PATCH /api/telegram` with `{"notifications":true}` and `DELETE /api/telegram` (unlink/cancel code). All writes require the session's CSRF token and same-origin checks. Neither the global bot token nor stored code hashes are returned by these endpoints.
+
+The administrator-only API is `GET /api/admin/telegram` (all bindings, no codes/tokens) and `DELETE /api/admin/telegram/{user_id}` (disconnect and invalidate any pending code for that user). Deletion rechecks the administrator role inside the write transaction.
+
 ## Security and deployment
 
 - New application passwords require at least 12 characters. Password hashes use salted PBKDF2-SHA256, not reversible encryption. Lingos secrets use AES-GCM bound to the owning user.
