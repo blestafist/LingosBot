@@ -1,8 +1,10 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -23,6 +25,96 @@ func TestWorkerArgs(t *testing.T) {
 		if _, err := workerArgs("scrape", id); err == nil {
 			t.Errorf("workerArgs accepted invalid class ID %q", id)
 		}
+	}
+	for _, mode := range []string{"run", "classes"} {
+		want := []string{"--realtime", "--config-json-stdin"}
+		if mode == "classes" {
+			want = append(want, "--list-classes")
+		}
+		if got, err := workerArgs(mode, ""); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("workerArgs(%q, empty) = %v, %v; want %v", mode, got, err, want)
+		}
+		for _, id := range []string{"12345", " ", strings.Repeat("a", 900000)} {
+			if _, err := workerArgs(mode, id); err == nil {
+				t.Errorf("workerArgs(%q) accepted an unused class ID (%d bytes)", mode, len(id))
+			}
+		}
+	}
+}
+
+func TestRunnerRejectsUnusedClassIDBeforeStorage(t *testing.T) {
+	x := newAuthTestApp(t)
+	userID := authTestUser(t, x, "learner@example.com", false)
+	token, csrf := authTestSession(t, x, userID)
+	for _, mode := range []string{"run", "classes"} {
+		body, err := json.Marshal(map[string]string{"mode": mode, "class_id": strings.Repeat("a", 900000)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := authTestRequest(x.runsAPI, "POST", "/api/runs", string(body), token, csrf)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "class_id") {
+			t.Fatalf("unused class ID: %d %s", w.Code, w.Body.String())
+		}
+	}
+	var count int
+	if err := x.db.QueryRow(`SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("invalid requests created runs: count=%d err=%v", count, err)
+	}
+}
+
+type blockingRunResponseWriter struct {
+	*httptest.ResponseRecorder
+	started, release chan struct{}
+}
+
+func (w *blockingRunResponseWriter) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestRunnerEventsReleaseDBBeforeWriting(t *testing.T) {
+	x := newAuthTestApp(t)
+	token, _ := authTestSession(t, x, 1)
+	result, err := x.db.Exec(`INSERT INTO runs(user_id,mode,class_id,source,status,created_at) VALUES(1,'run','','manual','completed',0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The extra event leaves the SQL cursor unread when the page reaches 200 entries.
+	for seq := 1; seq <= 201; seq++ {
+		if _, err := x.db.Exec(`INSERT INTO run_events(run_id,seq,data) VALUES(?,?,?)`, id, seq, `{"type":"http_request"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := &blockingRunResponseWriter{ResponseRecorder: httptest.NewRecorder(), started: make(chan struct{}), release: make(chan struct{})}
+	r := httptest.NewRequest("GET", "/api/runs/"+strconv.FormatInt(id, 10), nil)
+	r.AddCookie(&http.Cookie{Name: "session", Value: token})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		x.runsAPI(w, r)
+	}()
+	t.Cleanup(func() {
+		close(w.release)
+		<-done
+	})
+	select {
+	case <-w.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run response did not start")
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("run response status: %d", w.Code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var one int
+	if err := x.db.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil || one != 1 {
+		t.Fatalf("blocked response retained the only DB connection: value=%d err=%v", one, err)
 	}
 }
 

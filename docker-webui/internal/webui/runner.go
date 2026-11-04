@@ -53,6 +53,9 @@ func initRunnerDB(db *sql.DB) error {
 }
 
 func workerArgs(mode, id string) ([]string, error) {
+	if mode != "scrape" && id != "" {
+		return nil, errors.New("class_id is only allowed for vocabulary collection.")
+	}
 	args := []string{"--realtime", "--config-json-stdin"}
 	switch mode {
 	case "classes":
@@ -467,7 +470,7 @@ func (x *app) runsAPI(w http.ResponseWriter, r *http.Request) {
 		events = append(events, e)
 		after = e.Seq
 	}
-	if rows.Err() != nil {
+	if err := rows.Close(); err != nil || rows.Err() != nil {
 		apiError(w, 500, "Could not read task progress.")
 		return
 	}

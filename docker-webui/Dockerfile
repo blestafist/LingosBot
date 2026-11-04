@@ -5,7 +5,7 @@ COPY worker-server-rust/Cargo.toml worker-server-rust/Cargo.lock ./
 COPY worker-server-rust/src ./src
 RUN cargo build --locked --release --bin lingosbot
 
-FROM golang:1.24-alpine AS build
+FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 COPY docker-webui/go.mod docker-webui/go.sum* ./
 RUN go mod download

@@ -20,8 +20,11 @@ type User struct {
 
 func normalizeEmail(email string) (string, bool) {
 	email = strings.ToLower(strings.TrimSpace(email))
+	if len(email) > 254 {
+		return email, false
+	}
 	address, err := mail.ParseAddress(email)
-	return email, err == nil && address.Address == email && len(email) <= 254
+	return email, err == nil && address.Address == email
 }
 
 func (x *app) sessionUser(r *http.Request) (User, string, string, error) {

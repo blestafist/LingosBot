@@ -1,0 +1,44 @@
+# WebUI security audit
+
+**Date:** 2026-11-04. **Status:** three reproduced findings fixed in source; deployment not verified.
+
+## Scope and expected load
+
+Reviewed deployment documentation, Docker/Compose and dependencies, Go routes, authentication, CSRF, sessions, user isolation, SQLite storage, credentials, settings, schedules, library exports and run endpoints. Traced Rust worker configuration, HTTP origin/redirect restrictions, environment filtering and process cancellation. This source review covered security-related frontend rendering and headers; independently reported batch-export and browser checks are recorded below.
+
+Assumed one Linux server, roughly 5–20 users and one worker at a time, behind an HTTPS reverse proxy. Host administrators are trusted; ordinary application users need not be trusted.
+
+## Reproduced findings — now fixed
+
+### 1. High: unused class IDs amplified storage and history responses
+
+- **Issue/impact:** authenticated `POST /api/runs` accepted a 900,000-byte `class_id` for `run` or `classes`, although the worker ignored it. Three synthetic runs persisted 2,700,000 bytes of unused metadata; 50 such records could produce a roughly 45 MB history response. No valid Lingos account was needed to create failed runs.
+- **Fix:** `internal/webui/runner.go:55–58` rejects every nonempty ID outside `scrape` in shared `workerArgs`, before database access or process launch. Existing numeric/range checks for scraping remain unchanged.
+- **Regression:** `TestWorkerArgs` covers empty, numeric, whitespace and oversized IDs; `TestRunnerRejectsUnusedClassIDBeforeStorage` checks HTTP 400 and no stored runs for an ordinary user.
+
+### 2. High: oversized email reached a vulnerable parser in the Docker build
+
+- **Issue/impact:** the email length check ran after `mail.ParseAddress`. The previous `golang:1.24-alpine` tag resolved to Go 1.24.13, affected by [GO-2026-4986 / CVE-2026-39820](https://pkg.go.dev/vuln/GO-2026-4986). A synthetic address with a 32 KiB comment caused about 565 MB of cumulative allocations, not peak RSS, before rejection. Authenticated credential updates could cause CPU and garbage-collection pressure.
+- **Fix:** `internal/webui/auth.go:21–27` enforces the 254-byte normalized email limit before parsing. `Dockerfile:8` uses `golang:1.27.3-alpine`; its manifest was confirmed with HTTP 200 from Docker Registry v2.
+- **Regression:** `TestAuthEmailValidation` checks normalization, format rejection, byte boundaries and zero parser allocations for the oversized comment. It also passes on Go 1.24.13, confirming the early guard independently of the compiler upgrade.
+
+### 3. Medium: a slow event reader held the only database connection
+
+- **Issue/impact:** fetching 201 events and returning only 200 left a cursor open during JSON output. In a synthetic loopback TCP reproduction, a non-reading client with a roughly 3.2 MB event page blocked another user's account request until the first connection closed.
+- **Fix:** `internal/webui/runner.go:473–477` explicitly closes the event cursor before `writeJSON`, retaining both iteration-error and close-error handling. Pagination and ownership checks are unchanged.
+- **Regression:** `TestRunnerEventsReleaseDBBeforeWriting` seeds 201 events, blocks `ResponseWriter.Write` and verifies another query can use the single SQLite connection. The regression checks for all three findings failed before the fixes and pass afterward.
+
+## Checks
+
+- `gofmt`, `go test -race ./...` and `go vet ./...`: passed.
+- `govulncheck` v1.9.0, Linux Go 1.27.3: no vulnerable calls or imported packages. It reported the Windows-only module advisory GO-2026-5024 in `golang.org/x/sys`; that package is not imported by this Linux application.
+- OSV batch lookup: 163 locked crates.io dependencies, zero advisory matches on the audit date. This checks published dependency advisories, not application logic or container OS packages.
+- Independently reported review of POST batch export (`c543d69`): no concrete issues found. Checked all-or-nothing ownership, CSRF/same-origin enforcement, strict bounded JSON, deduplication and the 500-topic limit, SQL placeholders, no distinction leaking foreign versus missing IDs, and GET compatibility; 41 export/library tests passed.
+- Independently reported browser checks on frontend `88cb04b`: 15 axe checks, seven viewport widths from 320 to 1440 px, batch Markdown/JSON exports, and run/cancel/error/retry flows passed with a fake worker.
+- No authentication bypass, cross-user disclosure, user-controlled worker SSRF or shell injection was found in the reviewed paths. This is not a security guarantee.
+
+## Limits and deployment
+
+Tests used isolated databases and synthetic credentials/workers. Local databases, secrets and production configuration were not read or modified. Existing history was not rewritten; the ID fix prevents new oversized records. Rebuild and redeploy to apply the source and toolchain fixes.
+
+Docker build/runtime, the actual reverse proxy/TLS deployment and live Lingos behavior were not verified; Docker runtime remained unavailable. Browser checks used a fake worker, not live Lingos. The frontend and legacy desktop were not penetration-tested. Scanners only cover known advisories and supported analysis paths. This automated, source-based audit does not replace a penetration test.

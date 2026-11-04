@@ -92,6 +92,37 @@ func authTestRequest(handler http.HandlerFunc, method, path, body, token, csrf s
 	return w
 }
 
+func TestAuthEmailValidation(t *testing.T) {
+	for _, test := range []struct {
+		email string
+		valid bool
+	}{
+		{" Learner@Example.com ", true},
+		{strings.Repeat("a", 242) + "@example.com", true},
+		{strings.Repeat("a", 243) + "@example.com", false},
+		{strings.Repeat("ж", 122) + "@example.com", false},
+		{"", false},
+		{"invalid", false},
+		{"Learner <learner@example.com>", false},
+		{"learner@example.com (comment)", false},
+	} {
+		email, valid := normalizeEmail(test.email)
+		if email != strings.ToLower(strings.TrimSpace(test.email)) || valid != test.valid {
+			t.Errorf("normalizeEmail(%q) = %q, %v; want valid=%v", test.email, email, valid, test.valid)
+		}
+	}
+
+	input := "a@example.com (" + strings.Repeat("a", 32768) + ")"
+	var valid bool
+	allocs := testing.AllocsPerRun(1, func() {
+		_, valid = normalizeEmail(input)
+	})
+	// Already-normalized oversized input must return before allocating in net/mail.
+	if valid || allocs != 0 {
+		t.Fatalf("oversized email reached the parser: valid=%v allocations=%g", valid, allocs)
+	}
+}
+
 func TestAuthPasswords(t *testing.T) {
 	password := strings.Repeat("ж", 12)
 	hash, err := hashPassword(password)
