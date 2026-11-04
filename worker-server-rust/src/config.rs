@@ -65,6 +65,10 @@ pub struct Cli {
     #[arg(long, conflicts_with = "scrape_class")]
     pub list_classes: bool,
 
+    /// Scrape every freshly discovered class without running lessons.
+    #[arg(long, conflicts_with_all = ["scrape_class", "list_classes"])]
+    pub scrape_all: bool,
+
     /// Default lesson count per class (1..=10000).
     #[arg(long)]
     pub lessons: Option<u32>,
@@ -99,6 +103,7 @@ impl fmt::Debug for Cli {
             .field("json", &self.json)
             .field("realtime", &self.realtime)
             .field("scrape_class", &self.scrape_class)
+            .field("scrape_all", &self.scrape_all)
             .field("lessons", &self.lessons)
             .field("errors_per100_words", &self.errors_per100_words)
             .field("delay_min_ms", &self.delay_min_ms)

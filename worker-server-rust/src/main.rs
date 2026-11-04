@@ -62,6 +62,7 @@ fn run(
     config: &Config,
     scrape_class: Option<i64>,
     list_classes: bool,
+    scrape_all: bool,
 ) -> Result<Value> {
     let initial = session.login(
         &config.username,
@@ -69,6 +70,12 @@ fn run(
         &config.student_dashboard_url,
     )?;
     session.emit_event(&json!({"type":"login_success"}))?;
+    if scrape_all {
+        drop(initial);
+        let scraped = workflow::scrape_all(session, config)?;
+        return Ok(json!({"success":true, "classes":scraped.classes,
+            "scrapes":scraped.scrapes, "api_calls":session.api_call_count()}));
+    }
     if list_classes {
         let dashboard = workflow::parse_dashboard(&initial, None)?;
         return Ok(
@@ -150,7 +157,12 @@ fn main() -> ExitCode {
                 || matches
                     .as_ref()
                     .and_then(|m| m.try_get_one::<i64>("scrape_class").ok().flatten())
-                    .is_some();
+                    .is_some()
+                || matches
+                    .as_ref()
+                    .and_then(|m| m.try_get_one::<bool>("scrape_all").ok().flatten())
+                    .copied()
+                    .unwrap_or(false);
             // clap diagnostics may quote a supplied password or environment value.
             return failure(
                 Error::config("Invalid command-line arguments; use --help."),
@@ -160,9 +172,11 @@ fn main() -> ExitCode {
         }
     };
     let realtime = cli.realtime;
-    let json = cli.json || realtime || cli.scrape_class.is_some() || cli.list_classes;
+    let json =
+        cli.json || realtime || cli.scrape_class.is_some() || cli.list_classes || cli.scrape_all;
     let scrape_class = cli.scrape_class;
     let list_classes = cli.list_classes;
+    let scrape_all = cli.scrape_all;
     let config = match cli.resolve() {
         Ok(config) => config,
         Err(error) => return failure(error, json, realtime),
@@ -178,7 +192,13 @@ fn main() -> ExitCode {
     if realtime {
         session.enable_ndjson_stdout();
     }
-    match run(&mut session, &config, scrape_class, list_classes) {
+    match run(
+        &mut session,
+        &config,
+        scrape_class,
+        list_classes,
+        scrape_all,
+    ) {
         Ok(mut value) => {
             value["duration_seconds"] = json!(start.elapsed().as_secs_f64());
             if realtime {

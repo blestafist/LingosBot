@@ -54,12 +54,14 @@ func initRunnerDB(db *sql.DB) error {
 
 func workerArgs(mode, id string) ([]string, error) {
 	if mode != "scrape" && id != "" {
-		return nil, errors.New("class_id is only allowed for vocabulary collection.")
+		return nil, errors.New("class_id is only allowed for single-class vocabulary collection.")
 	}
 	args := []string{"--realtime", "--config-json-stdin"}
 	switch mode {
 	case "classes":
 		return append(args, "--list-classes"), nil
+	case "scrape_all":
+		return append(args, "--scrape-all"), nil
 	case "scrape":
 		if !classID.MatchString(id) {
 			return nil, errors.New("Enter a positive numeric class ID.")
@@ -249,7 +251,9 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 	status, summary := "failed", "The worker ended without a result."
 	internalFailure := false
 	resultSaved := false
-	scanner := bufio.NewScanner(io.LimitReader(out, 100<<20))
+	var allClasses, allScrapes json.RawMessage
+	limited := &io.LimitedReader{R: out, N: (100 << 20) + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 4096), 16<<20)
 	seq := 0
 	for scanner.Scan() {
@@ -280,6 +284,10 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 				case "scrape":
 					err = x.saveVocabulary(userID, class, event["scrape"])
 					summary = "Vocabulary saved to your library."
+				case "scrape_all":
+					// Commit only after the worker exits cleanly with exactly one result.
+					allClasses, allScrapes = event["classes"], event["scrapes"]
+					summary = "All vocabulary saved to your library."
 				case "run":
 					var lessons, words int
 					json.Unmarshal(event["lessons_completed"], &lessons)
@@ -295,6 +303,7 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 			}
 			// Large dictionaries live in the library, not duplicated in every event response.
 			delete(event, "scrape")
+			delete(event, "scrapes")
 			delete(event, "classes")
 			delete(event, "username")
 		}
@@ -325,7 +334,7 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil || limited.N == 0 {
 		cancel()
 		status, summary = "failed", "Worker output was too large or could not be read."
 		internalFailure = true
@@ -340,6 +349,13 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 		}
 	} else if waitErr != nil && !internalFailure && !resultSaved {
 		status, summary = "failed", "The worker exited with an error. Open the run for details."
+	}
+	if mode == "scrape_all" && status == "completed" {
+		if waitErr != nil || ctx.Err() != nil {
+			status, summary = "failed", "The worker stopped before its vocabulary result could be saved."
+		} else if err := x.saveAllVocabulary(userID, allClasses, allScrapes); err != nil {
+			status, summary = "failed", "The worker finished, but its result could not be saved."
+		}
 	}
 	x.finishRun(runID, status, summary)
 }
@@ -453,7 +469,7 @@ func (x *app) runsAPI(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Legacy events may predate collectRun's payload stripping.
-			for _, key := range []string{"username", "scrape", "classes", "credentials"} {
+			for _, key := range []string{"username", "scrape", "scrapes", "classes", "credentials"} {
 				delete(result, key)
 			}
 		}
@@ -536,15 +552,27 @@ type cachedClass struct {
 	GroupID string `json:"group_id"`
 }
 
-func (x *app) saveClasses(userID int64, raw json.RawMessage) error {
+func parseCachedClasses(raw json.RawMessage) ([]cachedClass, error) {
 	var classes []cachedClass
-	if err := json.Unmarshal(raw, &classes); err != nil || classes == nil {
-		return errors.New("invalid class list")
+	if err := json.Unmarshal(raw, &classes); err != nil || classes == nil || len(classes) > 256 {
+		return nil, errors.New("invalid class list")
 	}
+	seen := make(map[string]bool, len(classes))
 	for _, c := range classes {
 		if _, err := workerArgs("scrape", c.GroupID); err != nil {
-			return err
+			return nil, err
 		}
+		if seen[c.GroupID] || strings.TrimSpace(c.Title) == "" || len(c.Title) > 16<<10 {
+			return nil, errors.New("invalid or duplicate class")
+		}
+		seen[c.GroupID] = true
+	}
+	return classes, nil
+}
+
+func (x *app) saveClasses(userID int64, raw json.RawMessage) error {
+	if _, err := parseCachedClasses(raw); err != nil {
+		return err
 	}
 	_, err := x.db.Exec(`INSERT INTO class_cache(user_id,data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data`, userID, string(raw))
 	return err

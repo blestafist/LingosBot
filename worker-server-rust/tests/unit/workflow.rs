@@ -640,3 +640,93 @@ fn scrape_stops_on_invalid_set_without_requesting_further_details() {
     assert!(scrape_class_with(&mock, "/dashboard", 1).is_err());
     mock.done();
 }
+
+#[test]
+fn scrape_all_shares_card_text_and_wordset_budgets_between_classes() {
+    for limit in ["cards", "text", "wordsets"] {
+        let mut responses = vec![get("/dashboard", dashboard())];
+        for group in 1..=2 {
+            let mut page = dashboard();
+            page["dashboard"]["currentGroup"]["id"] = json!(group);
+            responses.push(get("/dashboard", page));
+            let sets = if limit == "wordsets" && group == 1 {
+                MAX_WORDSETS
+            } else {
+                1
+            };
+            responses.push(get("/student/wordsets", json!({"page":"wordsets","wordsets":{
+                "currentGroup":{"id":group},
+                "wordsets":(1..=sets).map(|id| json!({"id":id,"name":"Set"})).collect::<Vec<_>>()
+            }})));
+            if limit == "wordsets" && group == 2 {
+                break;
+            }
+            for id in 1..=sets {
+                let cards = match limit {
+                    "cards" => vec![json!({"word":"a","translation":"b"}); 6000],
+                    "text" => vec![
+                        json!({"word":"x".repeat(MAX_EXPORT_TERM_BYTES),"translation":"y"});
+                        32
+                    ],
+                    _ => vec![],
+                };
+                responses.push(get(
+                    &format!("/student/wordsets/{id}"),
+                    json!({"page":"wordset","wordset":{
+                        "group":{"id":group},"wordset":{"id":id},"flashcards":cards
+                    }}),
+                ));
+            }
+        }
+        let mock = ScrapeMock::new(responses);
+        assert!(scrape_all_with(&mock, "/dashboard").is_err(), "{limit}");
+        mock.done();
+    }
+}
+
+#[test]
+fn bounded_all_class_export_fits_runner_line_even_with_six_byte_json_escaping() {
+    let mut budget = ScrapeBudget::default();
+    let mut classes = Vec::new();
+    let mut scrapes = Vec::new();
+    for index in 0..MAX_CLASSES {
+        let class = ClassInfo {
+            group_id: i64::MAX - index as i64,
+            title: "\u{1}".repeat(32),
+        };
+        // The class is serialized in both arrays.
+        export_text(&mut budget.text_bytes, &class.title).unwrap();
+        export_text(&mut budget.text_bytes, &class.title).unwrap();
+        let info = WordsetInfo {
+            id: i64::MAX,
+            name: "\u{1}".repeat(32),
+            expected_count: None,
+        };
+        export_text(&mut budget.text_bytes, &info.name).unwrap();
+        let mut entries = Vec::new();
+        for _ in 0..(MAX_EXPORT_CARDS / MAX_CLASSES
+            + usize::from(index < MAX_EXPORT_CARDS % MAX_CLASSES))
+        {
+            let entry = VocabularyEntry {
+                word: "\u{1}".repeat(50),
+                translation: "\u{1}".repeat(50),
+            };
+            export_text(&mut budget.text_bytes, &entry.word).unwrap();
+            export_text(&mut budget.text_bytes, &entry.translation).unwrap();
+            entries.push(entry);
+            budget.cards += 1;
+        }
+        classes.push(class.clone());
+        scrapes.push(ScrapedClass {
+            class,
+            wordsets: vec![ScrapedWordset { info, entries }],
+        });
+    }
+    assert_eq!(budget.cards, MAX_EXPORT_CARDS);
+    let line = serde_json::to_vec(
+        &json!({"type":"result","success":true,"classes":classes,"scrapes":scrapes,
+        "duration_seconds":1.0,"api_calls":1000}),
+    )
+    .unwrap();
+    assert!(line.len() + 1 < 16 * 1024 * 1024, "{} bytes", line.len());
+}

@@ -108,6 +108,19 @@ pub struct ScrapedClass {
     pub wordsets: Vec<ScrapedWordset>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedAll {
+    pub classes: Vec<ClassInfo>,
+    pub scrapes: Vec<ScrapedClass>,
+}
+
+#[derive(Default)]
+struct ScrapeBudget {
+    cards: usize,
+    wordsets: usize,
+    text_bytes: usize,
+}
+
 fn serialize_id<S: serde::Serializer>(
     id: &i64,
     serializer: S,
@@ -208,10 +221,17 @@ fn titles_equal(left: &str, right: &str) -> bool {
 /// Parse a dashboard's required nonempty group list without coercing IDs or
 /// names. Duplicate titles are allowed; duplicate IDs are not.
 pub fn parse_classes(dashboard: &Value) -> Result<Vec<ClassInfo>> {
+    let classes = parse_class_list(dashboard)?;
+    if classes.is_empty() {
+        return Err(Error::parsing("Empty dashboard groups."));
+    }
+    Ok(classes)
+}
+
+fn parse_class_list(dashboard: &Value) -> Result<Vec<ClassInfo>> {
     let groups = required(dashboard, "groups")?
         .as_array()
-        .filter(|groups| !groups.is_empty())
-        .ok_or_else(|| Error::parsing("Missing, empty or invalid dashboard groups."))?;
+        .ok_or_else(|| Error::parsing("Missing or invalid dashboard groups."))?;
     if groups.len() > MAX_CLASSES {
         return Err(Error::parsing(
             "Dashboard exceeds the 256-class safety limit.",
@@ -304,6 +324,37 @@ pub fn scrape_class(session: &Session, config: &Config, group_id: i64) -> Result
     scrape_class_with(session, &config.student_dashboard_url, group_id)
 }
 
+/// One all-or-nothing export, including empty classes. Budgets and the Session
+/// deadline cover the entire collection, not each class independently.
+pub fn scrape_all(session: &Session, config: &Config) -> Result<ScrapedAll> {
+    scrape_all_with(session, &config.student_dashboard_url)
+}
+
+fn scrape_all_with(client: &impl ScrapeClient, dashboard_url: &str) -> Result<ScrapedAll> {
+    let page = client.get_page(dashboard_url)?;
+    let classes = parse_class_list(page_data(&page, "dashboard", "dashboard")?)?;
+    // An account without groups has no selected group to validate or switch.
+    if !classes.is_empty() {
+        parse_dashboard(&page, None)?;
+    }
+    drop(page);
+    let mut budget = ScrapeBudget::default();
+    for class in &classes {
+        export_text(&mut budget.text_bytes, &class.title)?;
+    }
+    let mut scrapes = Vec::with_capacity(classes.len());
+    for class in &classes {
+        let scrape = scrape_class_with_budget(client, dashboard_url, class.group_id, &mut budget)?;
+        if scrape.class != *class {
+            return Err(Error::parsing(
+                "Dashboard class changed during vocabulary export.",
+            ));
+        }
+        scrapes.push(scrape);
+    }
+    Ok(ScrapedAll { classes, scrapes })
+}
+
 // Narrow adapter permits deterministic request-order tests without altering Session.
 trait ScrapeClient {
     fn get_page(&self, url: &str) -> Result<Value>;
@@ -324,6 +375,20 @@ fn scrape_class_with(
     dashboard_url: &str,
     group_id: i64,
 ) -> Result<ScrapedClass> {
+    scrape_class_with_budget(
+        client,
+        dashboard_url,
+        group_id,
+        &mut ScrapeBudget::default(),
+    )
+}
+
+fn scrape_class_with_budget(
+    client: &impl ScrapeClient,
+    dashboard_url: &str,
+    group_id: i64,
+    budget: &mut ScrapeBudget,
+) -> Result<ScrapedClass> {
     if group_id <= 0 {
         return Err(Error::parsing("Cannot select an undiscovered HTTP group."));
     }
@@ -341,25 +406,29 @@ fn scrape_class_with(
         .cloned()
         .ok_or_else(|| Error::parsing("Cannot select an undiscovered HTTP group."))?;
     let sets = parse_wordsets(&client.get_page("/student/wordsets")?, group_id)?;
+    budget.wordsets = budget
+        .wordsets
+        .checked_add(sets.len())
+        .filter(|count| *count <= MAX_WORDSETS)
+        .ok_or_else(|| Error::parsing("Vocabulary export exceeds the total wordset limit."))?;
     let mut wordsets = Vec::with_capacity(sets.len());
-    let mut cards = 0_usize;
-    let mut text_bytes = 0_usize;
-    export_text(&mut text_bytes, &class.title)?;
+    export_text(&mut budget.text_bytes, &class.title)?;
     // Names are retained together with every card and count towards the budget.
     for info in &sets {
-        export_text(&mut text_bytes, &info.name)?;
+        export_text(&mut budget.text_bytes, &info.name)?;
     }
     for info in sets {
         let page = client.get_page(&format!("/student/wordsets/{}", info.id))?;
         let entries = parse_wordset(&page, group_id, &info)?;
         drop(page);
-        cards = cards
+        budget.cards = budget
+            .cards
             .checked_add(entries.len())
             .filter(|count| *count <= MAX_EXPORT_CARDS)
             .ok_or_else(|| Error::parsing("Vocabulary export exceeds the card limit."))?;
         for entry in &entries {
-            export_text(&mut text_bytes, &entry.word)?;
-            export_text(&mut text_bytes, &entry.translation)?;
+            export_text(&mut budget.text_bytes, &entry.word)?;
+            export_text(&mut budget.text_bytes, &entry.translation)?;
         }
         wordsets.push(ScrapedWordset { info, entries });
     }

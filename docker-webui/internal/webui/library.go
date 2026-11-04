@@ -53,6 +53,14 @@ func (x *app) saveVocabulary(userID int64, requestedID string, raw json.RawMessa
 		return err
 	}
 	defer tx.Rollback()
+	if err := saveVocabularyTx(tx, userID, scrape); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveVocabularyTx(tx *sql.Tx, userID int64, scrape scrapedClass) error {
+	requestedID := scrape.Class.GroupID
 	if _, err := tx.Exec(`INSERT INTO library_classes(user_id,class_id,title,collected_at) VALUES(?,?,?,?)
 		ON CONFLICT(user_id,class_id) DO UPDATE SET title=excluded.title,collected_at=excluded.collected_at`, userID, requestedID, scrape.Class.Title, time.Now().Unix()); err != nil {
 		return err
@@ -68,6 +76,74 @@ func (x *app) saveVocabulary(userID int64, requestedID string, raw json.RawMessa
 		if _, err := tx.Exec(`INSERT INTO library_topics(user_id,class_id,name,count,data) VALUES(?,?,?,?,?)`, userID, requestedID, topic.Info.Name, len(topic.Entries), string(data)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (x *app) saveAllVocabulary(userID int64, classesRaw, scrapesRaw json.RawMessage) error {
+	classes, err := parseCachedClasses(classesRaw)
+	if err != nil {
+		return err
+	}
+	var scrapes []scrapedClass
+	if err := json.Unmarshal(scrapesRaw, &scrapes); err != nil || scrapes == nil || len(scrapes) != len(classes) {
+		return errors.New("invalid all-class vocabulary result")
+	}
+	remaining := make(map[string]cachedClass, len(classes))
+	textBytes, wordsets, cards := 0, 0, 0
+	checkText := func(text string) bool {
+		textBytes += len(text)
+		return strings.TrimSpace(text) != "" && len(text) <= 16<<10 && textBytes <= 1<<20
+	}
+	for _, c := range classes {
+		if !checkText(c.Title) {
+			return errors.New("vocabulary export exceeds the text limit")
+		}
+		remaining[c.GroupID] = c
+	}
+	for _, scrape := range scrapes {
+		c, ok := remaining[scrape.Class.GroupID]
+		if !ok || c != scrape.Class || scrape.Wordsets == nil || !checkText(scrape.Class.Title) {
+			return errors.New("vocabulary does not match the discovered classes")
+		}
+		delete(remaining, c.GroupID)
+		wordsets += len(scrape.Wordsets)
+		if wordsets > 256 {
+			return errors.New("vocabulary export exceeds the wordset limit")
+		}
+		seen := make(map[string]bool, len(scrape.Wordsets))
+		for _, topic := range scrape.Wordsets {
+			if _, err := workerArgs("scrape", topic.Info.ID); err != nil {
+				return err
+			}
+			if seen[topic.Info.ID] || !checkText(topic.Info.Name) || topic.Entries == nil ||
+				topic.Info.ExpectedCount != nil && *topic.Info.ExpectedCount != len(topic.Entries) {
+				return errors.New("invalid vocabulary topic")
+			}
+			seen[topic.Info.ID] = true
+			cards += len(topic.Entries)
+			if cards > 10000 {
+				return errors.New("vocabulary export exceeds the card limit")
+			}
+			for _, entry := range topic.Entries {
+				if !checkText(entry.Word) || !checkText(entry.Translation) {
+					return errors.New("invalid or oversized vocabulary text")
+				}
+			}
+		}
+	}
+	tx, err := x.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, scrape := range scrapes {
+		if err := saveVocabularyTx(tx, userID, scrape); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO class_cache(user_id,data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data`, userID, string(classesRaw)); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

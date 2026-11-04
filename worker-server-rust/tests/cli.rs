@@ -76,6 +76,8 @@ fn run(config: &TempConfig) -> (Output, Value) {
 struct Options {
     limit: bool,
     incomplete: bool,
+    incomplete_group: Option<u64>,
+    wrong_vocabulary_group: Option<u64>,
     unconfirmed_join: bool,
     unconfirmed_switch: bool,
     drop_answer: bool,
@@ -144,10 +146,10 @@ fn site(options: Options) -> Server {
                 let sets = if options.empty_group == Some(group) {
                     json!([])
                 } else {
-                    json!([{"id":55,"name":"Set","counts":{"total":if options.incomplete {3} else {2}}}])
+                    json!([{"id":55,"name":"Set","counts":{"total":if options.incomplete || options.incomplete_group == Some(group) {3} else {2}}}])
                 };
                 Reply::page(json!({"page":"wordsets","wordsets":{
-                    "currentGroup":{"id":group},"wordsets":sets
+                    "currentGroup":{"id":if options.wrong_vocabulary_group == Some(group) {99} else {group}},"wordsets":sets
                 }}))
             }
             ("GET", "/student/wordsets/55") => Reply::page(json!({"page":"wordset","wordset":{
@@ -676,6 +678,205 @@ fn scrape_class_returns_words_grouped_by_wordset_without_lessons() {
     assert_eq!(count(&server, "/student/challenges"), 0);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-secret"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fake-secret"));
+}
+
+#[test]
+fn scrape_all_collects_every_class_including_empty_without_lessons() {
+    for realtime in [false, true] {
+        let server = site(Options {
+            empty_group: Some(1),
+            limit: true,
+            ..Default::default()
+        });
+        let config = TempConfig::new(
+            &server.base,
+            json!({"classLessonCounts":{"group:1":0,"group:2":0}}),
+        );
+        let mut cmd = command();
+        cmd.arg("--config").arg(&config.0).arg("--scrape-all");
+        if realtime {
+            cmd.arg("--realtime");
+        }
+        let output = cmd.output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        let events: Vec<Value> = std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let result = events.last().unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(
+            result["classes"],
+            json!([{"group_id":"1","title":"A"},{"group_id":"2","title":"B"}])
+        );
+        assert_eq!(result["scrapes"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            result["scrapes"][0],
+            json!({"class":{"group_id":"1","title":"A"},"wordsets":[]})
+        );
+        assert_eq!(result["scrapes"][1]["class"], result["classes"][1]);
+        assert_eq!(
+            result["scrapes"][1]["wordsets"][0]["entries"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(result.get("scrape").is_none());
+        if realtime {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event["type"] == "result")
+                    .count(),
+                1
+            );
+            assert_eq!(result["type"], "result");
+        } else {
+            assert_eq!(events.len(), 1);
+        }
+        assert_eq!(count(&server, "/learning"), 0);
+        assert_eq!(count(&server, "/student/challenges"), 0);
+        assert_eq!(count(&server, "/student/context"), 1);
+    }
+}
+
+#[test]
+fn scrape_all_discovers_freshly_including_zero_classes() {
+    for empty in [false, true] {
+        let mut dashboards = 0;
+        let mut group = 1;
+        let server = Server::start(move |request, _| {
+            Some(match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/h/login") => Reply::html("<input name=_csrf_token value=token>"),
+                ("POST", "/h/login") => Reply::redirect("/student/dashboard"),
+                ("GET", "/student/dashboard") => {
+                    dashboards += 1;
+                    let groups = if dashboards == 1 {
+                        json!([{"id":1,"name":"Old"}])
+                    } else if empty {
+                        json!([])
+                    } else {
+                        json!([{"id":1,"name":"A"},{"id":2,"name":"B"}])
+                    };
+                    Reply::page(json!({"page":"dashboard","dashboard":{
+                        "currentGroup":if empty && dashboards > 1 { Value::Null } else { json!({"id":group}) },
+                        "groups":groups,"contexts":{},"lessonLimitReached":false,"challenges":[]
+                    }}))
+                }
+                ("POST", "/student/context") => {
+                    group = serde_json::from_str::<Value>(&request.body).unwrap()["id"]
+                        .as_u64()
+                        .unwrap();
+                    Reply::json(json!({}))
+                }
+                ("GET", "/student/wordsets") => Reply::page(json!({"page":"wordsets","wordsets":{
+                    "currentGroup":{"id":group},"wordsets":[]
+                }})),
+                _ => panic!("Unexpected request {} {}", request.method, request.path),
+            })
+        });
+        let config = TempConfig::new(&server.base, json!({}));
+        let output = command()
+            .arg("--config")
+            .arg(&config.0)
+            .arg("--scrape-all")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(
+            result["classes"].as_array().unwrap().len(),
+            if empty { 0 } else { 2 }
+        );
+        assert_eq!(
+            result["scrapes"].as_array().unwrap().len(),
+            if empty { 0 } else { 2 }
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Old"));
+        assert!(count(&server, "/student/dashboard") >= 2);
+        assert_eq!(
+            count(&server, "/student/wordsets"),
+            if empty { 0 } else { 2 }
+        );
+        assert_eq!(count(&server, "/learning"), 0);
+        assert_eq!(count(&server, "/student/challenges"), 0);
+    }
+}
+
+#[test]
+fn scrape_all_rejects_wrong_class_and_partial_errors_without_returning_partial_scrapes() {
+    for options in [
+        Options {
+            unconfirmed_switch: true,
+            ..Default::default()
+        },
+        Options {
+            incomplete_group: Some(2),
+            ..Default::default()
+        },
+        Options {
+            wrong_vocabulary_group: Some(2),
+            ..Default::default()
+        },
+    ] {
+        let server = site(options);
+        let config = TempConfig::new(&server.base, json!({}));
+        let output = command()
+            .arg("--config")
+            .arg(&config.0)
+            .args(["--scrape-all", "--realtime"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        let events: Vec<Value> = std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let result = events.last().unwrap();
+        assert_eq!(result["type"], "result");
+        assert_eq!(result["success"], false);
+        assert_eq!(result["error_code"], "PARSING_ERROR");
+        assert!(result.get("classes").is_none());
+        assert!(result.get("scrapes").is_none());
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["type"] == "result")
+                .count(),
+            1
+        );
+        assert!(count(&server, "/student/wordsets/55") >= 1);
+        assert_eq!(count(&server, "/learning"), 0);
+        assert_eq!(count(&server, "/student/challenges"), 0);
+    }
+}
+
+#[test]
+fn scrape_all_conflicts_with_list_and_single_class_before_login() {
+    for flags in [
+        vec!["--scrape-all", "--list-classes"],
+        vec!["--list-classes", "--scrape-all"],
+        vec!["--scrape-all", "--scrape-class", "1"],
+        vec!["--scrape-class", "1", "--scrape-all"],
+    ] {
+        let server = site(Options::default());
+        let config = TempConfig::new(&server.base, json!({}));
+        let output = command()
+            .arg("--config")
+            .arg(&config.0)
+            .args(flags)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["success"], false);
+        assert_eq!(result["error_code"], "CONFIG_ERROR");
+        assert_eq!(server.count(), 0);
+    }
 }
 
 #[test]
