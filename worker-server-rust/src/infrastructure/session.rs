@@ -1,0 +1,467 @@
+use super::{html, json};
+use crate::error::{Error, Result};
+use crate::lesson::LessonClient;
+use crate::models::{AnswerRequest, AnswerResult, LearningProps};
+use reqwest::blocking::{Client, Request, RequestBuilder, Response};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER};
+use reqwest::{StatusCode, Url};
+use serde_json::Value;
+use std::io::{self, Read, Write};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::{Duration, Instant};
+
+const MAX_BODY_BYTES: usize = 1024 * 1024;
+const MAX_REDIRECTS: usize = 5;
+type EventCallback = dyn Fn(&Value) -> io::Result<()> + Send + Sync;
+
+// Only fixed labels leave the process; URL components are never event fields.
+fn request_operation(request: &Request) -> &'static str {
+    let method = request.method().as_str();
+    let path = request.url().path().trim_end_matches('/');
+    match (method, path) {
+        ("GET" | "POST", "/h/login") => "sign_in",
+        ("GET", "/student/dashboard") => "load_dashboard",
+        ("GET", "/student/wordsets") => "load_vocabulary",
+        ("GET", "/learning/next") => "continue_lesson",
+        ("POST", "/student/context" | "/student/group") => "select_class",
+        _ => {
+            let Some((prefix, id)) = path.rsplit_once('/') else {
+                return "load_page";
+            };
+            if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+                return "load_page";
+            }
+            match (method, prefix) {
+                ("GET", "/student/wordsets") => "load_vocabulary",
+                ("GET", "/learning/start") => "start_lesson",
+                ("POST", "/learning/answer") => "submit_answer",
+                ("POST", "/student/challenges") => "join_challenge",
+                _ => "load_page",
+            }
+        }
+    }
+}
+
+/// One client, cookie jar and connection pool per process. Nothing is persisted.
+pub struct Session {
+    client: Client,
+    origin: Url,
+    timeout: Duration,
+    deadline: Instant,
+    http_calls: AtomicU64,
+    event_callback: Option<Box<EventCallback>>,
+}
+
+impl LessonClient for Session {
+    fn navigate(&mut self, url: &str) -> Result<LearningProps> {
+        serde_json::from_value(self.get_page(url)?)
+            .map_err(|_| Error::parsing("Invalid learning page data; stopped safely."))
+    }
+
+    fn answer(&mut self, lesson_id: u64, request: &AnswerRequest) -> Result<AnswerResult> {
+        let body = serde_json::to_value(request)
+            .map_err(|_| Error::parsing("Could not encode the answer request."))?;
+        serde_json::from_value(self.post(&format!("/learning/answer/{lesson_id}"), Some(&body))?)
+            .map_err(|_| Error::parsing("Invalid answer response; request was not replayed."))
+    }
+
+    fn wait(&mut self, duration: Duration) -> Result<()> {
+        Session::wait(self, duration)
+    }
+
+    fn progress(
+        &mut self,
+        prompt: &str,
+        correct: bool,
+        intentional: bool,
+        words_learned: u64,
+    ) -> Result<()> {
+        self.emit_event(&serde_json::json!({
+            "type": "lesson_answer",
+            "word": prompt,
+            "correct": correct,
+            "intentional": intentional,
+            "words_learned": words_learned,
+        }))
+    }
+}
+
+impl Session {
+    pub fn new(base_url: &str, timeout: Duration, max_run: Duration) -> Result<Self> {
+        let origin = crate::config::parse_origin(base_url)?;
+        let client = Client::builder()
+            .cookie_store(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .user_agent(concat!(
+                "Mozilla/5.0 (X11; Linux x86_64) LingosBot/",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .connect_timeout(timeout.min(Duration::from_secs(10)))
+            .timeout(timeout)
+            .pool_max_idle_per_host(1)
+            .pool_idle_timeout(Duration::from_secs(30))
+            .no_proxy()
+            .build()
+            .map_err(|_| Error::network("Could not initialize the HTTP/TLS client."))?;
+        let deadline = Instant::now()
+            .checked_add(max_run)
+            .ok_or_else(|| Error::config("Invalid run deadline."))?;
+        Ok(Self {
+            client,
+            origin,
+            timeout,
+            deadline,
+            http_calls: AtomicU64::new(0),
+            event_callback: None,
+        })
+    }
+
+    /// Number of completed HTTP send attempts, including login, redirects and
+    /// transport failures. Rejected destinations and expired deadlines do not count.
+    pub fn api_call_count(&self) -> u64 {
+        self.http_calls.load(Ordering::Relaxed)
+    }
+
+    /// Install an optional synchronous observer for HTTP and application events.
+    /// HTTP events arrive when headers arrive or on transport failure, before the
+    /// response body is read. They include fixed operation labels, elapsed
+    /// milliseconds, status and transport error categories, never URLs, headers
+    /// or bodies. Observer errors stop request processing
+    /// without replaying.
+    pub fn set_event_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(&Value) -> io::Result<()> + Send + Sync + 'static,
+    {
+        self.event_callback = Some(Box::new(callback));
+    }
+
+    /// Stop emitting events; the request counter continues to run.
+    pub fn clear_event_callback(&mut self) {
+        self.event_callback = None;
+    }
+
+    /// Emit an application event through the configured observer, if any.
+    /// Callers must ensure all fields are safe to expose: this method does not
+    /// sanitize arbitrary application-provided values.
+    pub fn emit_event(&self, event: &Value) -> Result<()> {
+        if let Some(callback) = &self.event_callback {
+            callback(event).map_err(|_| Error::network("Could not write realtime event."))?;
+        }
+        Ok(())
+    }
+
+    /// Write each event as one JSON line and flush it before continuing.
+    pub fn set_ndjson_writer<W: Write + Send + 'static>(&mut self, writer: W) {
+        let writer = Mutex::new(writer);
+        self.set_event_callback(move |event| {
+            let mut writer = writer
+                .lock()
+                .map_err(|_| io::Error::other("event writer unavailable"))?;
+            serde_json::to_writer(&mut *writer, event)?;
+            writer.write_all(b"\n")?;
+            writer.flush()
+        });
+    }
+
+    /// Opt in to realtime NDJSON on stdout. Do not mix with single-JSON output.
+    pub fn enable_ndjson_stdout(&mut self) {
+        self.set_ndjson_writer(io::stdout());
+    }
+
+    pub fn same_origin(&self, url: &str) -> Result<Url> {
+        self.resolve_from(&self.origin, url)
+    }
+
+    fn resolve_from(&self, base: &Url, url: &str) -> Result<Url> {
+        let target = base
+            .join(url)
+            .map_err(|_| Error::parsing("Invalid HTTP destination."))?;
+        if target.origin() != self.origin.origin()
+            || !target.username().is_empty()
+            || target.password().is_some()
+        {
+            return Err(Error::parsing(
+                "Refusing HTTP navigation outside the configured origin.",
+            ));
+        }
+        Ok(target)
+    }
+
+    fn remaining(&self) -> Result<Duration> {
+        self.deadline
+            .checked_duration_since(Instant::now())
+            .filter(|time| !time.is_zero())
+            .ok_or_else(|| Error::network("Run deadline exceeded; no request was replayed."))
+    }
+
+    pub fn wait(&self, duration: Duration) -> Result<()> {
+        if duration >= self.remaining()? {
+            return Err(Error::network(
+                "Run deadline would be exceeded by the answer delay.",
+            ));
+        }
+        if !duration.is_zero() {
+            std::thread::sleep(duration);
+        }
+        Ok(())
+    }
+
+    fn send(&self, request: RequestBuilder, is_post: bool) -> Result<Response> {
+        let timeout = self.timeout.min(self.remaining()?);
+        let started = Instant::now();
+        let request = request.timeout(timeout).build();
+        let operation = request.as_ref().map_or("load_page", request_operation);
+        let result = request.and_then(|request| self.client.execute(request));
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let count = self.http_calls.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Some(callback) = &self.event_callback {
+            let (status, error) = match &result {
+                Ok(response) => (Some(response.status().as_u16()), None),
+                Err(error) if error.is_timeout() => (None, Some("timeout")),
+                Err(error) if error.is_connect() => (None, Some("connection")),
+                Err(_) => (None, Some("request")),
+            };
+            let event = serde_json::json!({
+                "type": "http_request",
+                "api_calls": count,
+                "method": if is_post { "POST" } else { "GET" },
+                "operation": operation,
+                "duration_ms": duration_ms,
+                "status": status,
+                "error": error,
+            });
+            callback(&event).map_err(|_| {
+                Error::network(if is_post {
+                    "Could not write HTTP event; the server may have processed the request. Not retried."
+                } else {
+                    "Could not write HTTP event; request was not replayed."
+                })
+            })?;
+        }
+        result.map_err(|error| {
+            // reqwest errors can embed complete URLs. Do not expose them.
+            let reason = if error.is_timeout() {
+                "HTTP request timed out"
+            } else if error.is_connect() {
+                "HTTP connection failed"
+            } else {
+                "HTTP request failed"
+            };
+            Error::network(if is_post {
+                format!("{reason}; the server may have processed the request. Not retried.")
+            } else {
+                format!("{reason}; not retried.")
+            })
+        })
+    }
+
+    fn require_success(response: &Response) -> Result<()> {
+        match response.status() {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Error::auth(
+                "Authentication was rejected or the session expired.",
+            )),
+            status if !status.is_success() => Err(Error::network(format!(
+                "HTTP {}; stopped without retrying.",
+                status.as_u16()
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    fn is_content_type(response: &Response, expected: &str) -> bool {
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|header| header.to_str().ok())
+            .and_then(|header| header.split(';').next())
+            .unwrap_or("")
+            .trim()
+            .eq_ignore_ascii_case(expected)
+    }
+
+    fn body(response: Response, expected: &str) -> Result<String> {
+        if !Self::is_content_type(&response, expected) {
+            return Err(Error::parsing(
+                "Unexpected HTTP content type; stopped without retrying.",
+            ));
+        }
+        let length = response.content_length();
+        if length.is_some_and(|size| size > MAX_BODY_BYTES as u64) {
+            return Err(Error::parsing(
+                "HTTP response exceeds the 1 MiB safety limit.",
+            ));
+        }
+        let capacity = length.unwrap_or(8192).min(64 * 1024) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+        let mut body = response.take(MAX_BODY_BYTES as u64 + 1);
+        let mut chunk = [0; 8192];
+        loop {
+            let count = body.read(&mut chunk).map_err(|_| {
+                Error::network("Could not read HTTP response; request not replayed.")
+            })?;
+            if count == 0 {
+                break;
+            }
+            let needed = bytes.len() + count;
+            if needed > MAX_BODY_BYTES {
+                return Err(Error::parsing(
+                    "HTTP response exceeds the 1 MiB safety limit.",
+                ));
+            }
+            if needed > bytes.capacity() {
+                let capacity = (bytes.capacity().max(8192) * 2).min(MAX_BODY_BYTES);
+                bytes.reserve_exact(capacity.max(needed) - bytes.len());
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        String::from_utf8(bytes).map_err(|_| Error::parsing("HTTP response is not valid UTF-8."))
+    }
+
+    fn login_path(url: &Url) -> bool {
+        url.path()
+            .trim_end_matches('/')
+            .eq_ignore_ascii_case("/h/login")
+    }
+
+    fn get_html(&self, url: &str, allow_login: bool) -> Result<String> {
+        let mut target = self.same_origin(url)?;
+        for redirects in 0..=MAX_REDIRECTS {
+            if !allow_login && Self::login_path(&target) {
+                return Err(Error::auth(
+                    "Session expired: redirected to the login page.",
+                ));
+            }
+            let response = self.send(
+                self.client.get(target.clone()).header(ACCEPT, "text/html"),
+                false,
+            )?;
+            if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+                if redirects == MAX_REDIRECTS {
+                    break;
+                }
+                let location = response
+                    .headers()
+                    .get(LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| Error::network("HTTP redirect has no valid destination."))?;
+                target = self.resolve_from(&target, location).map_err(|_| {
+                    Error::network("Refusing HTTP redirect outside the configured origin.")
+                })?;
+                continue;
+            }
+            Self::require_success(&response)?;
+            return Self::body(response, "text/html");
+        }
+        Err(Error::network("Too many HTTP redirects; stopped safely."))
+    }
+
+    pub fn get_page(&self, url: &str) -> Result<Value> {
+        let html = self.get_html(url, false)?;
+        html::page_props(&html)
+    }
+
+    pub fn post(&self, url: &str, body: Option<&Value>) -> Result<Value> {
+        let target = self.same_origin(url)?;
+        let mut request = self
+            .client
+            .post(target.clone())
+            .header(ACCEPT, "application/json")
+            .header(ORIGIN, self.origin.origin().ascii_serialization())
+            .header(REFERER, self.origin.as_str())
+            .header("X-Requested-With", "XMLHttpRequest");
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = self.send(request, true)?;
+        if response.status().is_redirection() {
+            if let Some(location) = response
+                .headers()
+                .get(LOCATION)
+                .and_then(|v| v.to_str().ok())
+                && let Ok(destination) = self.resolve_from(&target, location)
+                && Self::login_path(&destination)
+            {
+                return Err(Error::auth("Session expired; POST was not replayed."));
+            }
+            return Err(Error::network(
+                "Unexpected POST redirect; request not followed or replayed.",
+            ));
+        }
+        Self::require_success(&response)?;
+        if Self::is_content_type(&response, "text/html") {
+            let page = Self::body(response, "text/html")?;
+            return if html::csrf_token(&page).is_ok() {
+                Err(Error::auth("Session expired; POST was not replayed."))
+            } else {
+                Err(Error::parsing(
+                    "API returned unexpected HTML; request was not replayed.",
+                ))
+            };
+        }
+        let text = Self::body(response, "application/json")?;
+        let value = json::parse(&text)
+            .map_err(|_| Error::parsing("Invalid API JSON; request was not replayed."))?;
+        if !value.is_object() {
+            return Err(Error::parsing(
+                "API returned a non-object response; request was not replayed.",
+            ));
+        }
+        Ok(value)
+    }
+
+    /// GET CSRF -> POST form -> verify dashboard with the same in-memory cookies.
+    pub fn login(&self, username: &str, password: &str, dashboard_url: &str) -> Result<Value> {
+        let dashboard_url = self.same_origin(dashboard_url)?;
+        let login_url = self.same_origin("/h/login")?;
+        let token = html::csrf_token(&self.get_html(login_url.as_str(), true)?)?;
+        let response = self.send(
+            self.client
+                .post(login_url.clone())
+                .header(ACCEPT, "text/html")
+                .header(ORIGIN, self.origin.origin().ascii_serialization())
+                .header(REFERER, login_url.as_str())
+                .form(&[
+                    ("_username", username),
+                    ("_password", password),
+                    ("_csrf_token", &token),
+                ]),
+            true,
+        )?;
+        if !response.status().is_redirection() {
+            Self::require_success(&response)?;
+            let page = Self::body(response, "text/html")?;
+            return if html::csrf_token(&page).is_ok() {
+                Err(Error::auth("Nieprawidłowy login lub hasło"))
+            } else {
+                Err(Error::parsing(
+                    "Login returned an unexpected page; stopped safely.",
+                ))
+            };
+        }
+        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Err(Error::parsing("Unexpected login redirect; stopped safely."));
+        }
+        let location = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Error::parsing("Login redirect has no destination."))?;
+        let target = self.resolve_from(&login_url, location).map_err(|_| {
+            Error::network("Refusing login redirect outside the configured origin.")
+        })?;
+        if Self::login_path(&target) {
+            return Err(Error::auth("Nieprawidłowy login lub hasło"));
+        }
+        let dashboard = self.get_page(dashboard_url.as_str())?;
+        if dashboard.get("page").and_then(Value::as_str) != Some("dashboard") {
+            return Err(Error::parsing(
+                "Authenticated student dashboard has an unexpected schema.",
+            ));
+        }
+        Ok(dashboard)
+    }
+}

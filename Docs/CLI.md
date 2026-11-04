@@ -1,6 +1,8 @@
 # Command-Line Interface
 
-Run a downloaded release as `./LingosBot <options>` on Linux or macOS, or `.\LingosBot.exe <options>` in Windows PowerShell. When running from source, use `dotnet run -- <options>`.
+This page covers the legacy .NET application in `worker-desktop/`; the independent Rust worker has a separate [CLI reference](../worker-server-rust/README.md).
+
+Run a downloaded release as `./LingosBot <options>` on Linux or macOS, or `.\LingosBot.exe <options>` in Windows PowerShell. When running from source at the repository root, use `dotnet run --project worker-desktop -- <options>`.
 
 The configuration file is `config.json` in the current working directory by default. Set a different file with `--config <path>`.
 

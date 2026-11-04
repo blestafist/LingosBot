@@ -1,0 +1,6 @@
+# Paths are relative to the repository-root build context.
+docker-webui/.env
+docker-webui/data/
+docker-webui/docker-webui
+worker-server-rust/target/
+.git/

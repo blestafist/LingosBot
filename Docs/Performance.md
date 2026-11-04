@@ -73,7 +73,7 @@ remains available as a fallback.
 ## Verification
 
 ```bash
-dotnet test LingosBot.Tests/LingosBot.Tests.csproj
+dotnet test worker-desktop/LingosBot.Tests/LingosBot.Tests.csproj
 ```
 
 Local headless Chromium/Selenium microbenchmarks on the saved `dev_pages` pages

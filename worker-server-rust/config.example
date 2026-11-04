@@ -1,0 +1,10 @@
+{
+  "lessonCount": 1,
+  "classLessonCounts": {},
+  "errorsPer100Words": 0,
+  "answerDelayMinMs": 0,
+  "answerDelayMaxMs": 0,
+  "lessonPromptSafetyCap": 30,
+  "requestTimeoutSeconds": 30,
+  "maxRunSeconds": 900
+}

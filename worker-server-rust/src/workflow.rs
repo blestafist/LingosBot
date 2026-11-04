@@ -1,0 +1,828 @@
+//! Sequential HTTP orchestration. Every selection and join is confirmed by a
+//! fresh dashboard before a lesson can start; vocabulary is never guessed.
+
+use serde::Serialize;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use crate::{
+    challenge::{
+        ChallengeSnapshot, ChallengeStatus, confirm_challenge_join, normalize_text,
+        parse_challenges,
+    },
+    config::Config,
+    error::{Error, Result},
+    infrastructure::Session,
+    lesson::run_lesson,
+    models::LearningProps,
+    vocabulary::Vocabulary,
+};
+
+// Bound allocation and work before constructing indices or scheduling requests.
+const MAX_CLASSES: usize = 256;
+const MAX_WORDSETS: usize = 256;
+const MAX_WORDSET_CARDS: usize = 10_000;
+// Unlike the answer index, an export retains duplicate entries too.
+const MAX_EXPORT_CARDS: usize = 10_000;
+const MAX_EXPORT_TEXT_BYTES: usize = 1024 * 1024;
+const MAX_EXPORT_TERM_BYTES: usize = 16 * 1024;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct RunStats {
+    pub words_learned: u64,
+    pub lessons_completed: u64,
+    pub classes_limited: u64,
+    pub classes_empty: u64,
+    /// Confirmed rejected flashcard answers in completed lessons.
+    pub errors_made: u64,
+    /// Most recently observed dashboard, not necessarily the final state.
+    pub challenge_snapshot: Option<RunChallengeSnapshot>,
+}
+
+/// A dashboard observation. If `lessons_completed_at_snapshot` is less than
+/// the run's `lessons_completed`, subsequent lessons may have changed it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RunChallengeSnapshot {
+    #[serde(serialize_with = "serialize_id")]
+    pub group_id: i64,
+    pub lessons_completed_at_snapshot: u64,
+    pub available: usize,
+    pub in_progress: usize,
+    pub completed: usize,
+    #[serde(serialize_with = "serialize_optional_id")]
+    pub active_id: Option<i64>,
+    /// Validated dashboard items, in dashboard order. Text is untrusted.
+    pub challenges: Vec<RunChallengeItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RunChallengeItem {
+    #[serde(serialize_with = "serialize_id")]
+    pub id: i64,
+    pub title: String,
+    pub description: String,
+    pub points: i32,
+    #[serde(serialize_with = "serialize_challenge_status")]
+    pub status: ChallengeStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ClassInfo {
+    pub title: String,
+    #[serde(serialize_with = "serialize_id")]
+    pub group_id: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Dashboard {
+    pub current_group_id: i64,
+    pub lesson_limit_reached: bool,
+    pub uses_context_api: bool,
+    pub classes: Vec<ClassInfo>,
+    pub challenges: ChallengeSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WordsetInfo {
+    #[serde(serialize_with = "serialize_id")]
+    pub id: i64,
+    pub name: String,
+    pub expected_count: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct VocabularyEntry {
+    pub word: String,
+    pub translation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedWordset {
+    pub info: WordsetInfo,
+    pub entries: Vec<VocabularyEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedClass {
+    pub class: ClassInfo,
+    pub wordsets: Vec<ScrapedWordset>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ScrapedAll {
+    pub classes: Vec<ClassInfo>,
+    pub scrapes: Vec<ScrapedClass>,
+}
+
+#[derive(Default)]
+struct ScrapeBudget {
+    cards: usize,
+    wordsets: usize,
+    text_bytes: usize,
+}
+
+fn serialize_id<S: serde::Serializer>(
+    id: &i64,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.collect_str(id)
+}
+
+fn serialize_optional_id<S: serde::Serializer>(
+    id: &Option<i64>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match id {
+        Some(id) => serializer.serialize_some(&id.to_string()),
+        None => serializer.serialize_none(),
+    }
+}
+
+fn serialize_challenge_status<S: serde::Serializer>(
+    status: &ChallengeStatus,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(match status {
+        ChallengeStatus::Available => "available",
+        ChallengeStatus::InProgress => "in_progress",
+        ChallengeStatus::Completed => "completed",
+    })
+}
+
+pub fn resolve_count(
+    default_count: u32,
+    counts: &BTreeMap<String, u32>,
+    class: &ClassInfo,
+    discovered_classes: &[ClassInfo],
+) -> u32 {
+    if counts.is_empty() {
+        return default_count;
+    }
+    let stable_key = format!("group:{}", class.group_id);
+    if let Some((_, count)) = counts
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&stable_key))
+    {
+        return *count;
+    }
+    // Legacy title settings may only apply when discovery makes them unique.
+    if discovered_classes
+        .iter()
+        .filter(|candidate| titles_equal(&candidate.title, &class.title))
+        .count()
+        != 1
+    {
+        return default_count;
+    }
+    counts
+        .iter()
+        .find(|(title, _)| titles_equal(title, &class.title))
+        .map_or(default_count, |(_, count)| *count)
+}
+
+fn resolve_counts(config: &Config, classes: &[ClassInfo]) -> Vec<u32> {
+    if config.class_lesson_counts.is_empty() {
+        return vec![config.lesson_count; classes.len()];
+    }
+    let overrides: HashMap<_, _> = config
+        .class_lesson_counts
+        .iter()
+        .map(|(key, count)| (key.to_lowercase(), *count))
+        .collect();
+    let mut title_counts = HashMap::new();
+    let titles: Vec<_> = classes
+        .iter()
+        .map(|class| class.title.to_lowercase())
+        .collect();
+    for title in &titles {
+        *title_counts.entry(title.as_str()).or_insert(0_usize) += 1;
+    }
+    classes
+        .iter()
+        .zip(&titles)
+        .map(|(class, title)| {
+            overrides
+                .get(&format!("group:{}", class.group_id))
+                .or_else(|| {
+                    (title_counts.get(title.as_str()) == Some(&1))
+                        .then(|| overrides.get(title))
+                        .flatten()
+                })
+                .copied()
+                .unwrap_or(config.lesson_count)
+        })
+        .collect()
+}
+
+fn titles_equal(left: &str, right: &str) -> bool {
+    left.to_lowercase() == right.to_lowercase()
+}
+
+/// Parse a dashboard's required nonempty group list without coercing IDs or
+/// names. Duplicate titles are allowed; duplicate IDs are not.
+pub fn parse_classes(dashboard: &Value) -> Result<Vec<ClassInfo>> {
+    let classes = parse_class_list(dashboard)?;
+    if classes.is_empty() {
+        return Err(Error::parsing("Empty dashboard groups."));
+    }
+    Ok(classes)
+}
+
+fn parse_class_list(dashboard: &Value) -> Result<Vec<ClassInfo>> {
+    let groups = required(dashboard, "groups")?
+        .as_array()
+        .ok_or_else(|| Error::parsing("Missing or invalid dashboard groups."))?;
+    if groups.len() > MAX_CLASSES {
+        return Err(Error::parsing(
+            "Dashboard exceeds the 256-class safety limit.",
+        ));
+    }
+    let mut classes = Vec::with_capacity(groups.len());
+    let mut ids = HashSet::with_capacity(groups.len());
+    for group in groups {
+        let id = positive_id(group, "id")?;
+        if !ids.insert(id) {
+            return Err(Error::parsing("Duplicate dashboard group ID."));
+        }
+        let title = nonempty_text(group, "name")?;
+        classes.push(ClassInfo {
+            title,
+            group_id: id,
+        });
+    }
+    Ok(classes)
+}
+
+/// Parse a complete inert page payload, including group membership and known
+/// challenge states. Absent/null `contexts` selects the legacy endpoint;
+/// a present field of another type is not a known dashboard.
+pub fn parse_dashboard(page: &Value, expected_group: Option<i64>) -> Result<Dashboard> {
+    let data = page_data(page, "dashboard", "dashboard")?;
+    let current_group_id = positive_id(required(data, "currentGroup")?, "id")?;
+    if expected_group.is_some_and(|expected| expected != current_group_id) {
+        return Err(Error::parsing(
+            "HTTP dashboard group selection was not confirmed.",
+        ));
+    }
+    let lesson_limit_reached = required(data, "lessonLimitReached")?
+        .as_bool()
+        .ok_or_else(|| Error::parsing("Invalid dashboard lesson limit flag."))?;
+    let classes = parse_classes(data)?;
+    if !classes
+        .iter()
+        .any(|class| class.group_id == current_group_id)
+    {
+        return Err(Error::parsing(
+            "Selected dashboard group is not in the group list.",
+        ));
+    }
+    let uses_context_api = match data.get("contexts") {
+        None | Some(Value::Null) => false,
+        Some(Value::Object(_)) => true,
+        Some(_) => return Err(Error::parsing("Invalid dashboard contexts.")),
+    };
+    let challenges = parse_challenges(data)?;
+    Ok(Dashboard {
+        current_group_id,
+        lesson_limit_reached,
+        uses_context_api,
+        classes,
+        challenges,
+    })
+}
+
+pub fn group_switch_request(dashboard: &Dashboard, group_id: i64) -> Result<(&'static str, Value)> {
+    if group_id <= 0
+        || !dashboard
+            .classes
+            .iter()
+            .any(|class| class.group_id == group_id)
+    {
+        return Err(Error::parsing("Cannot select an undiscovered HTTP group."));
+    }
+    Ok(if dashboard.uses_context_api {
+        (
+            "/student/context",
+            json!({ "kind": "group", "id": group_id }),
+        )
+    } else {
+        ("/student/group", json!({ "groupId": group_id }))
+    })
+}
+
+/// Fetch a fresh, validated dashboard for class discovery.
+pub fn discover(session: &Session, config: &Config) -> Result<Dashboard> {
+    read_dashboard(session, config, None)
+}
+
+/// Export a discovered group without starting lessons or writing files. The
+/// selection is confirmed by a dashboard before any vocabulary is requested.
+/// A reached lesson limit does not prevent vocabulary export. The selected
+/// group may remain changed, including when an error occurs. IDs serialize as
+/// decimal strings so JavaScript clients do not lose integer precision.
+pub fn scrape_class(session: &Session, config: &Config, group_id: i64) -> Result<ScrapedClass> {
+    scrape_class_with(session, &config.student_dashboard_url, group_id)
+}
+
+/// One all-or-nothing export, including empty classes. Budgets and the Session
+/// deadline cover the entire collection, not each class independently.
+pub fn scrape_all(session: &Session, config: &Config) -> Result<ScrapedAll> {
+    scrape_all_with(session, &config.student_dashboard_url)
+}
+
+fn scrape_all_with(client: &impl ScrapeClient, dashboard_url: &str) -> Result<ScrapedAll> {
+    let page = client.get_page(dashboard_url)?;
+    let classes = parse_class_list(page_data(&page, "dashboard", "dashboard")?)?;
+    // An account without groups has no selected group to validate or switch.
+    if !classes.is_empty() {
+        parse_dashboard(&page, None)?;
+    }
+    drop(page);
+    let mut budget = ScrapeBudget::default();
+    for class in &classes {
+        export_text(&mut budget.text_bytes, &class.title)?;
+    }
+    let mut scrapes = Vec::with_capacity(classes.len());
+    for class in &classes {
+        let scrape = scrape_class_with_budget(client, dashboard_url, class.group_id, &mut budget)?;
+        if scrape.class != *class {
+            return Err(Error::parsing(
+                "Dashboard class changed during vocabulary export.",
+            ));
+        }
+        scrapes.push(scrape);
+    }
+    Ok(ScrapedAll { classes, scrapes })
+}
+
+// Narrow adapter permits deterministic request-order tests without altering Session.
+trait ScrapeClient {
+    fn get_page(&self, url: &str) -> Result<Value>;
+    fn post(&self, url: &str, body: Option<&Value>) -> Result<Value>;
+}
+
+impl ScrapeClient for Session {
+    fn get_page(&self, url: &str) -> Result<Value> {
+        Session::get_page(self, url)
+    }
+    fn post(&self, url: &str, body: Option<&Value>) -> Result<Value> {
+        Session::post(self, url, body)
+    }
+}
+
+fn scrape_class_with(
+    client: &impl ScrapeClient,
+    dashboard_url: &str,
+    group_id: i64,
+) -> Result<ScrapedClass> {
+    scrape_class_with_budget(
+        client,
+        dashboard_url,
+        group_id,
+        &mut ScrapeBudget::default(),
+    )
+}
+
+fn scrape_class_with_budget(
+    client: &impl ScrapeClient,
+    dashboard_url: &str,
+    group_id: i64,
+    budget: &mut ScrapeBudget,
+) -> Result<ScrapedClass> {
+    if group_id <= 0 {
+        return Err(Error::parsing("Cannot select an undiscovered HTTP group."));
+    }
+    let mut dashboard = parse_dashboard(&client.get_page(dashboard_url)?, None)?;
+    // Validate membership even if no switch is required.
+    let (url, body) = group_switch_request(&dashboard, group_id)?;
+    if dashboard.current_group_id != group_id {
+        client.post(url, Some(&body))?;
+        dashboard = parse_dashboard(&client.get_page(dashboard_url)?, Some(group_id))?;
+    }
+    let class = dashboard
+        .classes
+        .iter()
+        .find(|class| class.group_id == group_id)
+        .cloned()
+        .ok_or_else(|| Error::parsing("Cannot select an undiscovered HTTP group."))?;
+    let sets = parse_wordsets(&client.get_page("/student/wordsets")?, group_id)?;
+    budget.wordsets = budget
+        .wordsets
+        .checked_add(sets.len())
+        .filter(|count| *count <= MAX_WORDSETS)
+        .ok_or_else(|| Error::parsing("Vocabulary export exceeds the total wordset limit."))?;
+    let mut wordsets = Vec::with_capacity(sets.len());
+    export_text(&mut budget.text_bytes, &class.title)?;
+    // Names are retained together with every card and count towards the budget.
+    for info in &sets {
+        export_text(&mut budget.text_bytes, &info.name)?;
+    }
+    for info in sets {
+        let page = client.get_page(&format!("/student/wordsets/{}", info.id))?;
+        let entries = parse_wordset(&page, group_id, &info)?;
+        drop(page);
+        budget.cards = budget
+            .cards
+            .checked_add(entries.len())
+            .filter(|count| *count <= MAX_EXPORT_CARDS)
+            .ok_or_else(|| Error::parsing("Vocabulary export exceeds the card limit."))?;
+        for entry in &entries {
+            export_text(&mut budget.text_bytes, &entry.word)?;
+            export_text(&mut budget.text_bytes, &entry.translation)?;
+        }
+        wordsets.push(ScrapedWordset { info, entries });
+    }
+    Ok(ScrapedClass { class, wordsets })
+}
+
+fn export_text(total: &mut usize, text: &str) -> Result<()> {
+    if text.len() > MAX_EXPORT_TERM_BYTES {
+        return Err(Error::parsing("Vocabulary text exceeds the length limit."));
+    }
+    *total = total
+        .checked_add(text.len())
+        .filter(|total| *total <= MAX_EXPORT_TEXT_BYTES)
+        .ok_or_else(|| Error::parsing("Vocabulary export exceeds the total text limit."))?;
+    Ok(())
+}
+
+/// Keep only small descriptors; the list page can be released before fetching
+/// details. Missing optional counts are permitted, malformed present counts are
+/// not. Every provided total must subsequently match the complete card array.
+pub fn parse_wordsets(page: &Value, expected_group: i64) -> Result<Vec<WordsetInfo>> {
+    let data = page_data(page, "wordsets", "wordsets")?;
+    require_group(required(data, "currentGroup")?, expected_group)?;
+    let sets = required(data, "wordsets")?
+        .as_array()
+        .ok_or_else(|| Error::parsing("Invalid HTTP wordset list."))?;
+    if sets.len() > MAX_WORDSETS {
+        return Err(Error::parsing(
+            "Vocabulary exceeds the 256-wordset safety limit.",
+        ));
+    }
+    let mut ids = HashSet::with_capacity(sets.len());
+    let mut result = Vec::with_capacity(sets.len());
+    for set in sets {
+        let id = positive_id(set, "id")?;
+        if !ids.insert(id) {
+            return Err(Error::parsing("Duplicate HTTP wordset ID."));
+        }
+        result.push(WordsetInfo {
+            id,
+            name: nonempty_text(set, "name")?,
+            expected_count: optional_total(set)?,
+        });
+    }
+    Ok(result)
+}
+
+pub fn parse_wordset(
+    page: &Value,
+    expected_group: i64,
+    expected_set: &WordsetInfo,
+) -> Result<Vec<VocabularyEntry>> {
+    let data = page_data(page, "wordset", "wordset")?;
+    require_group(required(data, "group")?, expected_group)?;
+    let metadata = required(data, "wordset")?;
+    if positive_id(metadata, "id")? != expected_set.id {
+        return Err(Error::parsing("Mismatched HTTP wordset ID."));
+    }
+    let cards = required(data, "flashcards")?
+        .as_array()
+        .ok_or_else(|| Error::parsing("Invalid HTTP flashcard array."))?;
+    if cards.len() > MAX_WORDSET_CARDS {
+        return Err(Error::parsing(
+            "Wordset exceeds the 10000-card safety limit.",
+        ));
+    }
+    for total in [
+        expected_set.expected_count,
+        optional_total(metadata)?,
+        optional_total(data)?,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if total != cards.len() {
+            return Err(Error::parsing(
+                "Incomplete HTTP vocabulary response; stopped without guessing.",
+            ));
+        }
+    }
+    let mut entries = Vec::with_capacity(cards.len());
+    let mut ids = HashSet::new();
+    for card in cards {
+        // Card IDs are optional metadata; absent/null IDs need no validation.
+        // A non-null ID must still be positive and unique within this set.
+        if card.get("id").is_some_and(|id| !id.is_null()) && !ids.insert(positive_id(card, "id")?) {
+            return Err(Error::parsing("Duplicate HTTP flashcard ID."));
+        }
+        entries.push(VocabularyEntry {
+            word: nonempty_text(card, "word")?,
+            translation: nonempty_text(card, "translation")?,
+        });
+    }
+    Ok(entries)
+}
+
+/// The lesson engine owns exercise/transition validation. Check the page
+/// envelope here and preserve the special daily-limit outcome before serde.
+pub fn parse_learning_page(page: Value) -> Result<LearningProps> {
+    match page.get("reason") {
+        Some(Value::String(reason)) if reason == "limit-exceeded" => {
+            return Err(Error::limit("Daily lesson limit reached."));
+        }
+        // Reason is nullable/optional in LearningProps, unlike the required
+        // status, identifier and step of an ordinary learning page.
+        None | Some(Value::Null | Value::String(_)) => {}
+        Some(_) => return Err(Error::parsing("Invalid learning page reason.")),
+    }
+    if required(&page, "status")?.as_str() != Some("ok") {
+        return Err(Error::parsing("Unrecognized learning page status."));
+    }
+    if required(&page, "lessonId")?
+        .as_u64()
+        .is_none_or(|id| id == 0)
+    {
+        return Err(Error::parsing("Invalid HTTP lesson identifier."));
+    }
+    if !required(&page, "step")?.is_object() {
+        return Err(Error::parsing("Missing or invalid learning page step."));
+    }
+    serde_json::from_value(page)
+        .map_err(|_| Error::parsing("Invalid learning page payload; stopped without guessing."))
+}
+
+pub fn run(
+    session: &mut Session,
+    config: &Config,
+    initial_dashboard_page: Value,
+) -> Result<RunStats> {
+    let initial = parse_dashboard(&initial_dashboard_page, None)?;
+    let classes = initial.classes.clone();
+    // Do not retain an initial page (or its stale challenge state) across runs.
+    drop(initial_dashboard_page);
+    let mut stats = RunStats::default();
+    observe_dashboard(&mut stats, &initial);
+    let counts = resolve_counts(config, &classes);
+    // login() just fetched and validated this dashboard. Reuse it only for
+    // initial selection, never as a stale challenge snapshot after a lesson.
+    let mut initial = Some(initial);
+
+    // Include default counts, not only explicit overrides, in the run budget.
+    counts.iter().try_fold(0_u32, |total, count| {
+        total
+            .checked_add(*count)
+            .filter(|total| *total <= crate::config::MAX_LESSONS)
+            .ok_or_else(|| {
+                Error::config("Total lessons across discovered classes must not exceed 10000.")
+            })
+    })?;
+
+    for (class, count) in classes.iter().zip(counts) {
+        if count == 0 {
+            session.emit_event(&json!({
+                "type": "class_skipped", "class_title": class.title,
+                "class_id": class.group_id.to_string(), "reason": "disabled",
+            }))?;
+            continue;
+        }
+        session.emit_event(&json!({
+            "type": "class_start", "class_title": class.title,
+            "class_id": class.group_id.to_string(), "lessons_total": count,
+        }))?;
+        let dashboard = match initial.take() {
+            Some(dashboard) => dashboard,
+            None => {
+                let dashboard = read_dashboard(session, config, None)?;
+                observe_dashboard(&mut stats, &dashboard);
+                dashboard
+            }
+        };
+        match run_class(session, config, class, count, &mut stats, dashboard) {
+            Ok(()) => {}
+            Err(error) if error.is_limit() => {
+                stats.classes_limited += 1;
+                session.emit_event(&json!({
+                    "type": "class_skipped", "class_title": class.title,
+                    "class_id": class.group_id.to_string(), "reason": "lesson_limit",
+                }))?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    // Zero completed lessons is valid when every class is disabled or limited.
+    Ok(stats)
+}
+
+fn run_class(
+    session: &mut Session,
+    config: &Config,
+    class: &ClassInfo,
+    count: u32,
+    stats: &mut RunStats,
+    mut dashboard: Dashboard,
+) -> Result<()> {
+    let group_id = class.group_id;
+    if dashboard.current_group_id != group_id {
+        let (url, body) = group_switch_request(&dashboard, group_id)?;
+        session.post(url, Some(&body))?;
+        dashboard = read_dashboard(session, config, Some(group_id))?;
+        observe_dashboard(stats, &dashboard);
+    }
+    check_limit(&dashboard)?;
+    let vocabulary = collect_vocabulary(session, group_id)?;
+    if vocabulary.is_empty() {
+        stats.classes_empty += 1;
+        session.emit_event(&json!({
+            "type": "class_skipped", "class_title": class.title,
+            "class_id": group_id.to_string(), "reason": "empty_vocabulary",
+        }))?;
+        return Ok(());
+    }
+
+    for lesson_number in 1..=count {
+        // Always read afresh, including after lesson completion and joins.
+        let dashboard = read_dashboard(session, config, Some(group_id))?;
+        observe_dashboard(stats, &dashboard);
+        check_limit(&dashboard)?;
+        let perfectionism = ensure_challenge(session, config, dashboard, group_id, stats)?;
+        session.emit_event(&json!({
+            "type": "lesson_start", "class_title": class.title,
+            "class_id": group_id.to_string(), "lesson": lesson_number, "lessons_total": count,
+        }))?;
+        let page = session.get_page(&format!("/learning/start/0?groupId={group_id}"))?;
+        let initial = parse_learning_page(page)?;
+        let lesson = run_lesson(session, config, &vocabulary, perfectionism, initial)?;
+        record_lesson(stats, &lesson)?;
+        session.emit_event(&json!({
+            "type": "lesson_complete", "class_title": class.title,
+            "class_id": group_id.to_string(), "lesson": lesson_number, "lessons_total": count,
+            "words_learned": lesson.words_learned,
+        }))?;
+    }
+    session.emit_event(&json!({
+        "type": "class_complete", "class_title": class.title,
+        "class_id": group_id.to_string(), "lessons_completed": count,
+    }))?;
+    Ok(())
+}
+
+fn record_lesson(stats: &mut RunStats, lesson: &crate::lesson::LessonStats) -> Result<()> {
+    let words = stats
+        .words_learned
+        .checked_add(lesson.words_learned)
+        .ok_or_else(|| Error::parsing("Learned word counter overflow."))?;
+    let errors = stats
+        .errors_made
+        .checked_add(lesson.errors_made)
+        .ok_or_else(|| Error::parsing("Error counter overflow."))?;
+    let lessons = stats
+        .lessons_completed
+        .checked_add(1)
+        .ok_or_else(|| Error::parsing("Lesson counter overflow."))?;
+    stats.words_learned = words;
+    stats.errors_made = errors;
+    stats.lessons_completed = lessons;
+    Ok(())
+}
+
+fn read_dashboard(session: &Session, config: &Config, group: Option<i64>) -> Result<Dashboard> {
+    let page = session.get_page(&config.student_dashboard_url)?;
+    parse_dashboard(&page, group)
+}
+
+fn check_limit(dashboard: &Dashboard) -> Result<()> {
+    if dashboard.lesson_limit_reached {
+        Err(Error::limit("Daily lesson limit reached."))
+    } else {
+        Ok(())
+    }
+}
+
+fn observe_dashboard(stats: &mut RunStats, dashboard: &Dashboard) {
+    let mut snapshot = RunChallengeSnapshot {
+        group_id: dashboard.current_group_id,
+        lessons_completed_at_snapshot: stats.lessons_completed,
+        available: 0,
+        in_progress: 0,
+        completed: 0,
+        active_id: None,
+        challenges: Vec::with_capacity(dashboard.challenges.challenges.len()),
+    };
+    for challenge in &dashboard.challenges.challenges {
+        match challenge.status {
+            ChallengeStatus::Available => snapshot.available += 1,
+            ChallengeStatus::InProgress => {
+                snapshot.in_progress += 1;
+                snapshot.active_id = Some(challenge.id);
+            }
+            ChallengeStatus::Completed => snapshot.completed += 1,
+        }
+        snapshot.challenges.push(RunChallengeItem {
+            id: challenge.id,
+            title: challenge.title.clone(),
+            description: challenge.description.clone(),
+            points: challenge.points,
+            status: challenge.status,
+        });
+    }
+    stats.challenge_snapshot = Some(snapshot);
+}
+
+fn ensure_challenge(
+    session: &Session,
+    config: &Config,
+    mut dashboard: Dashboard,
+    group_id: i64,
+    stats: &mut RunStats,
+) -> Result<bool> {
+    if dashboard.challenges.active().is_none()
+        && let Some(best) = dashboard.challenges.best_available()
+    {
+        let id = best.id;
+        // The URL is constructed from a strictly validated positive numeric ID.
+        session.post(&format!("/student/challenges/{id}"), None)?;
+        dashboard = read_dashboard(session, config, Some(group_id))?;
+        confirm_challenge_join(&dashboard.challenges, id)?;
+        observe_dashboard(stats, &dashboard);
+        check_limit(&dashboard)?;
+    }
+    Ok(dashboard.challenges.active_perfectionism().is_some())
+}
+
+fn collect_vocabulary(session: &Session, group_id: i64) -> Result<Vocabulary> {
+    let sets = parse_wordsets(&session.get_page("/student/wordsets")?, group_id)?;
+    let mut vocabulary = Vocabulary::new();
+    // Sequential small GETs preserve session cookie ordering. Release each
+    // detail page before the next request; never cache all wordset HTML/props.
+    for set in sets {
+        let page = session.get_page(&format!("/student/wordsets/{}", set.id))?;
+        let entries = parse_wordset(&page, group_id, &set)?;
+        drop(page);
+        for entry in entries {
+            vocabulary.insert(&entry.word, &entry.translation)?;
+        }
+    }
+    Ok(vocabulary)
+}
+
+fn page_data<'a>(page: &'a Value, page_name: &str, field: &str) -> Result<&'a Value> {
+    if required(page, "page")?.as_str() != Some(page_name) {
+        return Err(Error::parsing("Unrecognized or mismatched HTTP page."));
+    }
+    let data = required(page, field)?;
+    if !data.is_object() {
+        return Err(Error::parsing("Invalid HTTP page data."));
+    }
+    Ok(data)
+}
+
+fn required<'a>(object: &'a Value, key: &str) -> Result<&'a Value> {
+    object
+        .get(key)
+        .ok_or_else(|| Error::parsing("Missing required HTTP data field."))
+}
+
+fn positive_id(object: &Value, field: &str) -> Result<i64> {
+    required(object, field)?
+        .as_i64()
+        .filter(|id| *id > 0)
+        .ok_or_else(|| Error::parsing("Invalid HTTP identifier."))
+}
+
+fn nonempty_text(object: &Value, field: &str) -> Result<String> {
+    required(object, field)?
+        .as_str()
+        .map(normalize_text)
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| Error::parsing("Missing or empty HTTP text field."))
+}
+
+fn require_group(group: &Value, expected_group: i64) -> Result<()> {
+    if positive_id(group, "id")? != expected_group {
+        return Err(Error::parsing("Mismatched HTTP vocabulary group."));
+    }
+    Ok(())
+}
+
+fn optional_total(object: &Value) -> Result<Option<usize>> {
+    let Some(counts) = object.get("counts") else {
+        return Ok(None);
+    };
+    if !counts.is_object() {
+        return Err(Error::parsing("Invalid HTTP vocabulary counts."));
+    }
+    let Some(total) = counts.get("total") else {
+        return Ok(None);
+    };
+    total
+        .as_u64()
+        .and_then(|total| usize::try_from(total).ok())
+        .map(Some)
+        .ok_or_else(|| Error::parsing("Invalid HTTP vocabulary total count."))
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/workflow.rs"]
+mod tests;
