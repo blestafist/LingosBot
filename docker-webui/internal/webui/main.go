@@ -159,6 +159,7 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/library", x.libraryAPI)
 	mux.HandleFunc("GET /api/library/topics/{id}", x.topicAPI)
 	mux.HandleFunc("GET /api/library/export", x.exportAPI)
+	mux.HandleFunc("POST /api/library/export", x.exportAPI)
 	return mux
 }
 

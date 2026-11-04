@@ -152,6 +152,36 @@ func (x *app) exportAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	format := r.URL.Query().Get("format")
+	var topics []int64
+	if r.Method == http.MethodPost {
+		if r.URL.RawQuery != "" {
+			apiError(w, 400, "Send export options in the JSON body only.")
+			return
+		}
+		var body struct {
+			Format string  `json:"format"`
+			Topics []int64 `json:"topics"`
+		}
+		if !decodeJSON(w, r, &body) {
+			return
+		}
+		if len(body.Topics) < 1 || len(body.Topics) > 500 {
+			apiError(w, 400, "Choose between 1 and 500 topics.")
+			return
+		}
+		seen := make(map[int64]bool, len(body.Topics))
+		for _, id := range body.Topics {
+			if id < 1 {
+				apiError(w, 400, "Invalid topic.")
+				return
+			}
+			if !seen[id] {
+				topics = append(topics, id)
+				seen[id] = true
+			}
+		}
+		format = body.Format
+	}
 	if format != "json" && format != "md" {
 		apiError(w, 400, "Choose Markdown or JSON.")
 		return
@@ -177,6 +207,12 @@ func (x *app) exportAPI(w http.ResponseWriter, r *http.Request) {
 		query += ` AND t.id=?`
 		args = append(args, id)
 	}
+	if len(topics) > 0 {
+		query += ` AND t.id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(topics)), ",") + `)`
+		for _, id := range topics {
+			args = append(args, id)
+		}
+	}
 	query += ` ORDER BY c.title COLLATE NOCASE,c.class_id,t.id`
 	rows, err := x.db.Query(query, args...)
 	if err != nil {
@@ -185,6 +221,7 @@ func (x *app) exportAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	classes := []scrapedClass{}
+	topicCount := 0
 	for rows.Next() {
 		var c cachedClass
 		var data sql.NullString
@@ -203,13 +240,14 @@ func (x *app) exportAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			last := &classes[len(classes)-1]
 			last.Wordsets = append(last.Wordsets, topic)
+			topicCount++
 		}
 	}
 	if rows.Err() != nil {
 		apiError(w, 500, "Could not read vocabulary.")
 		return
 	}
-	if len(classes) == 0 {
+	if len(classes) == 0 || len(topics) > 0 && topicCount != len(topics) {
 		apiError(w, 404, "No saved vocabulary found for this selection.")
 		return
 	}
