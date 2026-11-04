@@ -12,9 +12,10 @@ Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../.g
 Artifacts of a draft (16 files):
 
 ```text
-win-x64.zip, linux-x64.zip, macos-x86_64.zip, macos-arm64.zip           (+ .sha256 each)
-lingosbot-x86_64-unknown-linux-musl, lingosbot-aarch64-unknown-linux-musl (+ .sha256 each)
-lingos-webui-linux-amd64, lingos-webui-linux-arm64                     (+ .sha256 each)
+lingosbot-desktop-windows-x64.zip, lingosbot-desktop-linux-x64.zip     (+ .sha256 each)
+lingosbot-desktop-macos-x64.zip, lingosbot-desktop-macos-arm64.zip     (+ .sha256 each)
+lingosbot-worker-linux-x64, lingosbot-worker-linux-arm64               (+ .sha256 each)
+lingosbot-webui-linux-x64, lingosbot-webui-linux-arm64                 (+ .sha256 each)
 ```
 
 - Desktop archives are self-contained single-file builds cross-compiled on Linux, each with exactly `LingosBot[.exe]` and `selenium-manager[.exe]` at the root. CI does not run them on Windows or macOS.
@@ -40,6 +41,8 @@ git push origin v2.0.0
 
 Stop if the working tree is not clean or `main` is not the intended reviewed commit. Use a new tag for each release; never move an existing published tag. Edited notes are never overwritten: rerunning the workflow for a tag whose draft exists only refreshes the files (`--clobber`). If a release for the tag is already published, the workflow fails without changing it.
 
+The v2.0.0 draft assets were renamed without rebuilding binaries or moving the tag. Do not rerun its original tagged workflow to refresh those assets: it still uses the old filenames. Future tags use the naming in the workflow committed with them.
+
 ## Review and publish
 
 Open the draft in GitHub Releases, check the notes and all 16 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation is documented in the [Rust worker README](../worker-server-rust/README.md) and [WebUI README](../docker-webui/README.md).
@@ -59,10 +62,10 @@ The remaining checklist builds and publishes the four archives for the existing 
 
 | Platform | .NET runtime identifier | Release asset |
 | --- | --- | --- |
-| Windows x64 | `win-x64` | `win-x64.zip` |
-| Linux x64 | `linux-x64` | `linux-x64.zip` |
-| macOS Intel | `osx-x64` | `macos-x86_64.zip` |
-| macOS Apple Silicon | `osx-arm64` | `macos-arm64.zip` |
+| Windows x64 | `win-x64` | `lingosbot-desktop-windows-x64.zip` |
+| Linux x64 | `linux-x64` | `lingosbot-desktop-linux-x64.zip` |
+| macOS Intel | `osx-x64` | `lingosbot-desktop-macos-x64.zip` |
+| macOS Apple Silicon | `osx-arm64` | `lingosbot-desktop-macos-arm64.zip` |
 
 These are self-contained, single-file application builds: users do not need .NET installed. Selenium Manager remains a **separate binary** and must also be included for optional browser mode. The default API mode requires no browser or driver.
 
@@ -97,10 +100,10 @@ mkdir -p "$RELEASE_DIR/assets"
 
 for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
     case "$rid" in
-        win-x64)   asset=win-x64;      app=LingosBot.exe; manager=selenium-manager.exe ;;
-        linux-x64) asset=linux-x64;    app=LingosBot;     manager=selenium-manager ;;
-        osx-x64)   asset=macos-x86_64; app=LingosBot;     manager=selenium-manager ;;
-        osx-arm64) asset=macos-arm64;  app=LingosBot;     manager=selenium-manager ;;
+        win-x64)   asset=lingosbot-desktop-windows-x64; app=LingosBot.exe; manager=selenium-manager.exe ;;
+        linux-x64) asset=lingosbot-desktop-linux-x64;   app=LingosBot;     manager=selenium-manager ;;
+        osx-x64)   asset=lingosbot-desktop-macos-x64;   app=LingosBot;     manager=selenium-manager ;;
+        osx-arm64) asset=lingosbot-desktop-macos-arm64; app=LingosBot;     manager=selenium-manager ;;
     esac
 
     output="$RELEASE_DIR/$rid"
@@ -132,11 +135,11 @@ With the current Selenium.WebDriver package, `dotnet publish` puts the platform-
 Each ZIP must contain exactly these files **at its root**, without a wrapping folder:
 
 ```text
-win-x64.zip
+lingosbot-desktop-windows-x64.zip
 ├── LingosBot.exe
 └── selenium-manager.exe
 
-linux-x64.zip / macos-x86_64.zip / macos-arm64.zip
+lingosbot-desktop-linux-x64.zip / lingosbot-desktop-macos-x64.zip / lingosbot-desktop-macos-arm64.zip
 ├── LingosBot
 └── selenium-manager
 ```
@@ -170,10 +173,10 @@ EOF
 ${EDITOR:-nano} "$NOTES"
 
 gh release create "$TAG" \
-    "$RELEASE_DIR/assets/win-x64.zip" \
-    "$RELEASE_DIR/assets/linux-x64.zip" \
-    "$RELEASE_DIR/assets/macos-x86_64.zip" \
-    "$RELEASE_DIR/assets/macos-arm64.zip" \
+    "$RELEASE_DIR/assets/lingosbot-desktop-windows-x64.zip" \
+    "$RELEASE_DIR/assets/lingosbot-desktop-linux-x64.zip" \
+    "$RELEASE_DIR/assets/lingosbot-desktop-macos-x64.zip" \
+    "$RELEASE_DIR/assets/lingosbot-desktop-macos-arm64.zip" \
     --repo blestafist/LingosBot \
     --target "$RELEASE_COMMIT" \
     --title "${TAG/-/ }" \

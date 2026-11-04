@@ -12,13 +12,13 @@
 
 ```bash
 set -euo pipefail
-TAG=v1.6.0  # Замените на выбранный опубликованный тег.
+TAG=v2.0.0  # Замените на выбранный опубликованный тег.
 case "$(uname -m)" in
-    x86_64) TARGET=x86_64-unknown-linux-musl ;;
-    aarch64|arm64) TARGET=aarch64-unknown-linux-musl ;;
+    x86_64) ARCH=x64 ;;
+    aarch64|arm64) ARCH=arm64 ;;
     *) echo 'Для этой архитектуры нет готового бинарника' >&2; exit 1 ;;
 esac
-ASSET="lingosbot-$TARGET"
+ASSET="lingosbot-worker-linux-$ARCH"
 URL="https://github.com/blestafist/LingosBot/releases/download/$TAG"
 curl -fLO "$URL/$ASSET"
 curl -fLO "$URL/$ASSET.sha256"
