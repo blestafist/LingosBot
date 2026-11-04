@@ -85,7 +85,7 @@ func (x *app) loadSchedule(userID int64) (Schedule, error) {
 	if err := json.Unmarshal([]byte(days), &s.Days); err != nil {
 		return s, err
 	}
-	if s.LastRunID != 0 && s.LastStatus != "waiting" {
+	if s.LastRunID != 0 && s.LastStatus != "waiting" && s.LastStatus != "skipped" {
 		var status, summary string
 		err := x.db.QueryRow(`SELECT status,summary FROM runs WHERE id=? AND user_id=?`, s.LastRunID, userID).Scan(&status, &summary)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -133,7 +133,7 @@ func (x *app) scheduleAPI(w http.ResponseWriter, r *http.Request) {
 			VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
 			enabled=excluded.enabled,time=excluded.time,timezone=excluded.timezone,days=excluded.days,
 			cron=excluded.cron,next_run=excluded.next_run,version=user_schedules.version+1,
-			last_status=CASE WHEN user_schedules.last_status='waiting' THEN '' ELSE user_schedules.last_status END,
+			last_status=CASE WHEN user_schedules.last_status IN ('waiting','skipped') THEN '' ELSE user_schedules.last_status END,
 			last_error='',lease_until=0 WHERE user_schedules.lease_until<=?`,
 			u.ID, s.Enabled, s.Time, s.Timezone, string(days), strings.TrimSpace(s.Cron), next, now.Unix())
 		if err != nil {
@@ -150,6 +150,72 @@ func (x *app) scheduleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := x.loadSchedule(u.ID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "schedule storage error")
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (x *app) skipScheduleAPI(w http.ResponseWriter, r *http.Request) {
+	u, ok := x.apiUser(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		apiError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var in struct {
+		NextRun int64 `json:"nextRun"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.NextRun <= 0 {
+		apiError(w, http.StatusBadRequest, "nextRun must be a positive Unix timestamp")
+		return
+	}
+	s, err := x.loadSchedule(u.ID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "schedule storage error")
+		return
+	}
+	if !s.Enabled || s.NextRun <= 0 || s.NextRun != in.NextRun {
+		apiError(w, http.StatusConflict, "schedule changed; reload before skipping")
+		return
+	}
+	parsed, err := s.parse()
+	if err != nil {
+		apiError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	now := time.Now()
+	next := parsed.Next(time.Unix(max(now.Unix(), s.NextRun), 0))
+	if next.IsZero() {
+		apiError(w, http.StatusBadRequest, "schedule has no occurrence within the next five years")
+		return
+	}
+	// A durable run can outlive its lease after a crash; it is already too late to skip it.
+	result, err := x.db.Exec(`UPDATE user_schedules SET next_run=?,last_status='skipped',last_error='',
+		lease_until=0,version=version+1 WHERE user_id=? AND enabled=1 AND next_run=? AND version=? AND lease_until<=?
+		AND NOT EXISTS(SELECT 1 FROM runs WHERE user_id=? AND scheduled_for=?)`,
+		next.Unix(), u.ID, in.NextRun, s.version, now.Unix(), u.ID, in.NextRun)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "schedule storage error")
+		return
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "schedule storage error")
+		return
+	}
+	if n != 1 {
+		apiError(w, http.StatusConflict, "schedule changed or is being started; reload before skipping")
+		return
+	}
+	s, err = x.loadSchedule(u.ID)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "schedule storage error")
 		return

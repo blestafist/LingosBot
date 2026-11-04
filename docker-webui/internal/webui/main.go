@@ -153,6 +153,7 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
 	mux.HandleFunc("/api/settings", x.settingsAPI)
 	mux.HandleFunc("/api/schedule", x.scheduleAPI)
+	mux.HandleFunc("/api/schedule/skip", x.skipScheduleAPI)
 	mux.HandleFunc("/api/runs", x.runsAPI)
 	mux.HandleFunc("/api/runs/", x.runsAPI)
 	mux.HandleFunc("GET /api/classes", x.classesAPI)
