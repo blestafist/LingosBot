@@ -76,7 +76,7 @@ func workerArgs(mode, id string) ([]string, error) {
 }
 
 func (x *app) startRun(userID int64, mode, id, source string) (int64, error) {
-	return x.launchRun(userID, mode, id, source, nil)
+	return x.launchRun(userID, mode, id, source, nil, nil)
 }
 
 func (x *app) startScheduledRun(userID int64, due int64) (int64, error) {
@@ -88,13 +88,21 @@ func (x *app) startScheduledRun(userID int64, due int64) (int64, error) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	return x.launchRun(userID, "run", "", "schedule", &due)
+	return x.launchRun(userID, "run", "", "schedule", &due, nil)
 }
 
-func (x *app) launchRun(userID int64, mode, id, source string, due *int64) (int64, error) {
+func (x *app) launchRun(userID int64, mode, id, source string, due *int64, lessonCount *int) (int64, error) {
 	args, err := workerArgs(mode, id)
 	if err != nil {
 		return 0, err
+	}
+	if lessonCount != nil {
+		if mode != "run" {
+			return 0, errors.New("lesson_count is only allowed for lesson runs.")
+		}
+		if *lessonCount < 1 || *lessonCount > 10000 {
+			return 0, errors.New("lesson_count must be between 1 and 10000.")
+		}
 	}
 	if !x.workerMu.TryLock() {
 		return 0, errWorkerBusy
@@ -112,6 +120,9 @@ func (x *app) launchRun(userID int64, mode, id, source string, due *int64) (int6
 	s, err := x.loadSettings(userID)
 	if err != nil {
 		return 0, errors.New("Could not load lesson settings.")
+	}
+	if lessonCount != nil {
+		s.LessonCount = *lessonCount
 	}
 	limit, err := workerExecutionLimit()
 	if err != nil {
@@ -357,13 +368,20 @@ func (x *app) runsAPI(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			var in struct {
-				Mode    string `json:"mode"`
-				ClassID string `json:"class_id"`
+				Mode        string          `json:"mode"`
+				ClassID     string          `json:"class_id"`
+				LessonCount json.RawMessage `json:"lesson_count"`
 			}
 			if !decodeJSON(w, r, &in) {
 				return
 			}
-			id, err := x.startRun(u.ID, in.Mode, in.ClassID, "manual")
+			var lessonCount *int
+			// RawMessage distinguishes omission (saved count) from an explicit null.
+			if in.LessonCount != nil && (json.Unmarshal(in.LessonCount, &lessonCount) != nil || lessonCount == nil) {
+				apiError(w, 400, "lesson_count must be an integer between 1 and 10000.")
+				return
+			}
+			id, err := x.launchRun(u.ID, in.Mode, in.ClassID, "manual", nil, lessonCount)
 			if err != nil {
 				status := http.StatusBadRequest
 				if errors.Is(err, errWorkerBusy) {
@@ -404,6 +422,42 @@ func (x *app) runsAPI(w http.ResponseWriter, r *http.Request) {
 		default:
 			apiError(w, 405, "Method not allowed.")
 		}
+		return
+	}
+	if r.URL.Path == "/api/runs/latest" {
+		if r.Method != "GET" {
+			apiError(w, 405, "Method not allowed.")
+			return
+		}
+		run, err := scanRun(x.db.QueryRow(`SELECT `+runColumns+` FROM runs WHERE user_id=? AND mode='run' AND status!='running' ORDER BY id DESC LIMIT 1`, u.ID))
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, 200, map[string]any{"run": nil, "result": nil})
+			return
+		}
+		if err != nil {
+			apiError(w, 500, "Could not load the latest lesson run.")
+			return
+		}
+		var data string
+		err = x.db.QueryRow(`SELECT data FROM run_events WHERE run_id=?
+			AND CASE WHEN json_valid(data) THEN json_extract(data,'$.type') END = 'result'
+			ORDER BY seq DESC LIMIT 1`, run.ID).Scan(&data)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			apiError(w, 500, "Could not load the latest lesson result.")
+			return
+		}
+		var result map[string]json.RawMessage
+		if err == nil {
+			if json.Unmarshal([]byte(data), &result) != nil {
+				apiError(w, 500, "Could not read the latest lesson result.")
+				return
+			}
+			// Legacy events may predate collectRun's payload stripping.
+			for _, key := range []string{"username", "scrape", "classes", "credentials"} {
+				delete(result, key)
+			}
+		}
+		writeJSON(w, 200, map[string]any{"run": run, "result": result})
 		return
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/runs/"), "/")
