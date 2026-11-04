@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classCounts, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError } from './helpers.js';
+import { classCounts, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
 
 test('class overrides preserve titles, skip blank defaults, accept zero and reject duplicate or excessive counts', () => {
   assert.deepEqual({ ...classCounts([{ title: 'My class', count: '' }, { title: 'Skipped', count: '0' }]) }, { Skipped: 0 });
@@ -54,4 +54,22 @@ test('settings dirty state ignores class key order and passwords enforce rune an
   assert.match(passwordError('é'.repeat(513)), /1,024/);
   assert.equal(passwordError('é'.repeat(512)), '');
   assert.match(passwordError('😀'.repeat(6), true), /12/);
+});
+
+test('library search matches wordsets or their class without changing the stored library', () => {
+  const library = [{ title: 'English', topics: [{ id: 1, name: 'Food' }, { id: 2, name: 'Travel' }] }, { title: 'French', topics: [{ id: 3, name: 'Food' }] }];
+  assert.deepEqual(filterLibrary(library, ' FOOD ').flatMap(item => item.topics.map(topic => topic.id)), [1, 3]);
+  assert.deepEqual(filterLibrary(library, 'english').flatMap(item => item.topics.map(topic => topic.id)), [1, 2]);
+  assert.equal(filterLibrary(library, 'missing').length, 0);
+  assert.equal(library[0].topics.length, 2);
+});
+
+test('batch selection spans filters, deduplicates and rejects overflow atomically', () => {
+  let selected = selectTopics(new Set([1]), [1, 2, 3], true);
+  selected = selectTopics(selected, [2], false);
+  assert.deepEqual([...selected], [1, 3]);
+  const full = new Set(Array.from({ length: 500 }, (_, i) => i + 1));
+  assert.equal(selectTopics(full, [1], true).size, 500);
+  assert.throws(() => selectTopics(full, [501], true), /500/);
+  assert.equal(full.size, 500);
 });

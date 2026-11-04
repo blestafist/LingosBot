@@ -1,4 +1,4 @@
-import { settingLimits, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError } from './helpers.js';
+import { settingLimits, settingsPayload, settingsSignature, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -88,6 +88,7 @@ function initWorkspace() {
     pollTimer: null, watchTimer: null, httpCount: 0, logTrimmed: false,
     progress: { lessons: 0, words: 0, lessonWords: 0 }, starting: false,
     schedule: null, scheduleLoaded: false, scheduleDirty: false,
+    selectedTopics: new Set(), downloading: false,
   };
   let account = null;
   let overrideID = 0;
@@ -96,7 +97,7 @@ function initWorkspace() {
   const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
 
-  async function api(path, { method = 'GET', body, signal } = {}) {
+  async function api(path, { method = 'GET', body, signal, download = false } = {}) {
     let response;
     try {
       response = await fetch(path, {
@@ -107,6 +108,11 @@ function initWorkspace() {
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       throw new Error('Could not reach the server. Check your connection and try again.');
+    }
+    if (response.ok && download) {
+      const expected = body.format === 'md' ? 'text/markdown' : 'application/json';
+      if (response.headers.get('Content-Type')?.split(';')[0].trim() !== expected) throw new Error('The server did not return a vocabulary file. Check that you are still signed in and try again.');
+      return response.blob();
     }
     const text = await response.text();
     let data;
@@ -188,7 +194,7 @@ function initWorkspace() {
 
   function showPage(focus = false) {
     const id = location.hash.slice(1).split('?')[0];
-    const page = $$('[data-page]').find(item => item.id === id) || $('#lessons');
+    const page = $$('[data-page]').find(item => item.id === (id === 'collect-words' ? 'library' : id)) || $('#lessons');
     $$('[data-page]').forEach(item => { item.hidden = item !== page; });
     $$('[data-page-link]').forEach(link => {
       if (link.dataset.pageLink === page.id) link.setAttribute('aria-current', 'page');
@@ -197,7 +203,12 @@ function initWorkspace() {
     const heading = $('h1', page);
     $('#page-context').textContent = heading.textContent;
     document.title = `${heading.textContent} · Your workspace`;
-    if (focus) heading.focus({ preventScroll: true });
+    if (focus) {
+      const target = id === 'collect-words' ? $('#collect-words h2') : heading;
+      target.tabIndex = -1; target.focus({ preventScroll: true });
+    }
+    if (id === 'collect-words') $('#collect-words').scrollIntoView();
+    else if (focus) window.scrollTo(0, 0);
     if (page.id === 'schedule' && state.scheduleLoaded && !state.scheduleDirty) loadSchedule(false);
   }
   window.addEventListener('hashchange', () => showPage(true));
@@ -218,15 +229,17 @@ function initWorkspace() {
   function updateRunControls() {
     const busy = state.starting || Boolean(state.activeRun);
     $$('[data-start], [data-run-control]').forEach(control => { control.disabled = busy; });
-    $('#run-lessons').disabled = !state.settings || state.settingsBusy || busy;
+    $('#run-lessons').disabled = !state.settings || state.settingsBusy || busy || !state.credentials?.saved;
     $('#save-settings').disabled = !state.settings || state.settingsBusy;
     const dirty = settingsDirty();
+    $('#class-plan-count').textContent = state.classesLoaded ? `${state.classes.length} classes` : '';
     $('#run-lessons').textContent = state.settingsBusy ? 'Saving plan…' : state.starting ? 'Starting…' : dirty ? 'Save & run lessons →' : 'Run lessons →';
     if (state.settings) {
       status($('#settings-state'), state.settingsBusy ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved', dirty ? '' : 'good');
-      $('#settings-hint').textContent = dirty ? 'Running saves and uses this plan first.' : 'Manual and scheduled runs use your saved plan.';
+      $('#settings-hint').textContent = !state.credentials ? 'Check your account connection before running.' : !state.credentials.saved ? 'Connect Lingos in Account before running lessons.' : dirty ? 'Running saves and uses this plan first.' : 'Manual and scheduled runs use your saved plan.';
     }
     $('#library-run-status').textContent = state.activeRun ? `${runLabels[state.activeRun.mode] || 'Worker'} is running. Follow progress in Lessons.` : '';
+    $('#library-run-status').hidden = !state.activeRun;
   }
   function addOverride(title = '', value = '', manual = false) {
     const row = element('div', `override-row${manual ? ' manual' : ''}`);
@@ -331,23 +344,18 @@ function initWorkspace() {
   $('#run-lessons').addEventListener('click', () => startRun('run'));
 
   function renderClassLists() {
-    for (const selector of ['#lesson-classes', '#library-classes']) {
-      const container = $(selector);
-      container.replaceChildren();
-      if (!state.classes.length) {
-        empty(container, 'No classes synced yet.', 'Save your Lingos credentials in Account, then sync classes.');
-        continue;
-      }
-      for (const item of state.classes) {
-        const row = element('div', 'class-row');
-        const copy = element('div');
-        copy.append(element('strong', '', item.title || 'Untitled class'), element('small', '', `Class ID ${item.group_id}`));
-        const collect = button('Collect words', () => startRun('scrape', item.group_id));
-        collect.dataset.runControl = '';
-        collect.setAttribute('aria-label', `Collect words from ${item.title || 'class'}`);
-        row.append(copy, collect);
-        container.append(row);
-      }
+    const container = $('#library-classes');
+    container.replaceChildren();
+    if (!state.classes.length) empty(container, 'No classes synced yet.', 'Save your Lingos credentials in Account, then sync classes.');
+    for (const item of state.classes) {
+      const row = element('div', 'class-row');
+      const copy = element('div');
+      copy.append(element('strong', '', item.title || 'Untitled class'), element('small', '', `Class ID ${item.group_id}`));
+      const collect = button('Collect words', () => startRun('scrape', item.group_id));
+      collect.dataset.runControl = '';
+      collect.setAttribute('aria-label', `Collect words from ${item.title || 'class'}`);
+      row.append(copy, collect);
+      container.append(row);
     }
     updateRunControls();
   }
@@ -374,7 +382,7 @@ function initWorkspace() {
         updateRunControls();
       }
     } catch (error) {
-      for (const selector of ['#lesson-classes', '#library-classes']) empty($(selector), 'Classes unavailable', error.message, loadClasses);
+      empty($('#library-classes'), 'Classes unavailable', error.message, loadClasses);
     }
   }
   $$('[data-start]').forEach(control => control.addEventListener('click', () => startRun(control.dataset.start)));
@@ -397,6 +405,7 @@ function initWorkspace() {
       state.runs = [data.run, ...state.runs.filter(run => String(run.id) !== String(data.run.id))];
       selectRun(data.run);
       renderHistory();
+      if (mode === 'run') { const activity = $('.activity'); activity.tabIndex = -1; activity.focus(); }
       notify(mode === 'classes' ? 'Syncing your classes. Progress is saved in Lessons.' : mode === 'scrape' ? 'Collecting words into your library. You can leave this tab.' : 'Lessons started. You can leave this tab; the run continues on the server.');
     } catch (error) { notify(error.message, true); }
     finally { state.starting = false; updateRunControls(); }
@@ -479,6 +488,7 @@ function initWorkspace() {
       try { event = JSON.parse(event); } catch { addActivity('One saved event could not be read.', seq, true); return; }
     }
     if (!event || typeof event !== 'object') return;
+    if (event.type === 'error' || event.type === 'result' && !event.success) $('.run-details').open = true;
     if (event.type === 'http_request') {
       state.httpCount++;
       const copy = httpDescription(event);
@@ -537,6 +547,7 @@ function initWorkspace() {
     state.logTrimmed = false;
     state.progress = { lessons: 0, words: 0, lessonWords: 0 };
     $('#activity-log').replaceChildren();
+    $('.run-details').open = ['failed', 'interrupted'].includes(run.status);
     $('#http-log').replaceChildren();
     $('#http-summary').textContent = 'HTTP requests (0)';
     message('#poll-error', '');
@@ -566,6 +577,7 @@ function initWorkspace() {
       }
       if (Number.isInteger(data.last_seq) && data.last_seq > state.cursor) state.cursor = data.last_seq;
       const finished = run.status === 'running' && data.run.status !== 'running';
+      if (finished && ['failed', 'interrupted'].includes(data.run.status)) $('.run-details').open = true;
       state.selectedRun = data.run;
       const index = state.runs.findIndex(item => String(item.id) === String(data.run.id));
       if (index !== -1) state.runs[index] = data.run;
@@ -614,7 +626,12 @@ function initWorkspace() {
       const data = await api(`/api/library/topics/${encodeURIComponent(topic.id)}`);
       if (!Array.isArray(data?.topic?.entries)) throw new Error('This topic could not be read.');
       container.replaceChildren();
-      if (!data.topic.entries.length) { empty(container, 'No words in this topic.', 'Collect the class again to refresh it.'); return; }
+      container.append(exportLinks('topic', topic.id));
+      if (!data.topic.entries.length) {
+        container.append(element('p', 'empty', 'No words in this wordset. Collect the class again to refresh it.'));
+        container.dataset.loaded = 'true';
+        return;
+      }
       const table = element('table');
       const caption = element('caption', 'visually-hidden', data.topic.info?.name || topic.name || 'Vocabulary');
       const head = element('thead');
@@ -635,25 +652,33 @@ function initWorkspace() {
     } catch (error) { empty(container, 'Words unavailable', error.message, () => loadTopic(topic, container)); }
   }
   function renderLibrary() {
-    const search = $('#library-search').value.trim().toLocaleLowerCase('en');
     const container = $('#library-collection');
     container.replaceChildren();
-    if (!state.library.length) { empty(container, 'Your collection starts here.', 'Sync your classes, then choose Collect words below. Topics will be saved here for reading and export.'); return; }
+    if (!state.library.length) { empty(container, 'Your collection starts here.', 'Sync your classes, then choose Collect words below. Wordsets will be saved here for reading and download.'); updateSelection(); return; }
     let matches = 0;
-    for (const item of state.library) {
-      const topics = (item.topics || []).filter(topic => !search || (topic.name || '').toLocaleLowerCase('en').includes(search));
-      if (search && !topics.length) continue;
+    for (const item of filterLibrary(state.library, $('#library-search').value)) {
+      const topics = item.topics;
       matches++;
       const section = element('section', 'panel library-class');
       const heading = element('div', 'panel-heading');
-      const copy = element('div');
-      copy.append(element('h2', '', item.title || 'Untitled class'), element('p', '', `${item.topics?.length || 0} topics · collected ${dateLabel(item.collected_at)}`));
-      heading.append(copy, exportLinks('class', item.class_id));
+      const copy = element('div', 'class-selection');
+      const select = element('input', 'class-select'); select.type = 'checkbox';
+      select.setAttribute('aria-label', `Select shown wordsets in ${item.title || 'class'}`);
+      select.addEventListener('change', () => changeSelection(topics.map(topic => topic.id), select.checked));
+      const label = element('label', 'select-topic'); label.append(select);
+      const title = element('div');
+      title.append(element('h2', '', item.title || 'Untitled class'), element('p', '', `${topics.length} wordsets · collected ${dateLabel(item.collected_at)}`));
+      copy.append(label, title);
+      heading.append(copy);
       section.append(heading);
       if (!topics.length) section.append(element('p', 'empty', 'No topics collected for this class yet.'));
       for (const topic of topics) {
         const row = element('div', 'topic');
         const head = element('div', 'topic-head');
+        const select = element('input', 'topic-select'); select.type = 'checkbox'; select.value = String(topic.id);
+        select.setAttribute('aria-label', `Select ${topic.name || 'untitled wordset'}`);
+        select.addEventListener('change', () => changeSelection([topic.id], select.checked));
+        const label = element('label', 'select-topic'); label.append(select);
         const content = element('div', 'topic-content');
         content.id = `topic-${topic.id}`; content.hidden = true;
         const toggle = button('', async () => {
@@ -667,22 +692,74 @@ function initWorkspace() {
         }, 'topic-toggle');
         toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', content.id);
         toggle.append(element('span', 'topic-name', topic.name || 'Untitled topic'), element('span', 'topic-count', `${topic.count ?? 0} words`));
-        head.append(toggle, exportLinks('topic', topic.id));
+        head.append(label, toggle);
         row.append(head, content); section.append(row);
       }
+      const exports = element('details', 'class-download');
+      exports.append(element('summary', '', 'Download entire class'), exportLinks('class', item.class_id));
+      section.append(exports);
       container.append(section);
     }
-    if (!matches) empty(container, 'No matching topics.', 'Try a different topic name or clear your search.');
+    if (!matches) empty(container, 'No matching wordsets.', 'Try a different name or clear your search. Your selection is kept when searching.');
+    updateSelection();
   }
   async function loadLibrary() {
     try {
       const data = await api('/api/library');
       if (!Array.isArray(data?.classes)) throw new Error('The library could not be read.');
       state.library = data.classes;
+      const available = new Set(state.library.flatMap(item => item.topics.map(topic => topic.id)));
+      const kept = new Set([...state.selectedTopics].filter(id => available.has(id)));
+      if (kept.size !== state.selectedTopics.size) message('#library-error', 'Some selected wordsets were refreshed or removed. Review your selection before downloading.');
+      state.selectedTopics = kept;
       renderLibrary();
     } catch (error) { empty($('#library-collection'), 'Library unavailable', error.message, loadLibrary); }
   }
   $('#library-search').addEventListener('input', renderLibrary);
+
+  function changeSelection(ids, checked) {
+    try { state.selectedTopics = selectTopics(state.selectedTopics, ids, checked); message('#library-error', ''); }
+    catch (error) { message('#library-error', error.message); }
+    updateSelection();
+  }
+  function updateSelection() {
+    const visible = filterLibrary(state.library, $('#library-search').value).flatMap(item => item.topics);
+    const visibleSelected = visible.filter(topic => state.selectedTopics.has(topic.id)).length;
+    const hidden = state.selectedTopics.size - visibleSelected;
+    $('#selection-count').textContent = `${state.selectedTopics.size} selected${hidden ? ` · ${hidden} hidden by search` : ''}`;
+    $('#select-visible').disabled = !visible.length || state.downloading;
+    $('#clear-selection').disabled = !state.selectedTopics.size || state.downloading;
+    $('#download-selection').disabled = $('#download-selection-json').disabled = !state.selectedTopics.size || state.downloading;
+    $('#download-selection').textContent = state.downloading ? 'Preparing file…' : 'Download MD ↓';
+    for (const input of $$('.topic-select')) {
+      input.checked = state.selectedTopics.has(Number(input.value));
+      input.disabled = state.downloading;
+      input.closest('.topic').classList.toggle('selected', input.checked);
+    }
+    for (const input of $$('.class-select')) {
+      const children = $$('.topic-select', input.closest('.library-class'));
+      const checked = children.filter(child => child.checked).length;
+      input.checked = children.length > 0 && checked === children.length;
+      input.indeterminate = checked > 0 && checked < children.length;
+      input.disabled = !children.length || state.downloading;
+    }
+  }
+  $('#select-visible').addEventListener('click', () => changeSelection(filterLibrary(state.library, $('#library-search').value).flatMap(item => item.topics.map(topic => topic.id)), true));
+  $('#clear-selection').addEventListener('click', () => { state.selectedTopics.clear(); message('#library-error', ''); updateSelection(); });
+  async function downloadSelection(format) {
+    if (state.downloading || !state.selectedTopics.size) return;
+    state.downloading = true; updateSelection(); message('#library-error', '');
+    try {
+      const blob = await api('/api/library/export', { method: 'POST', body: { format, topics: [...state.selectedTopics] }, download: true });
+      const url = URL.createObjectURL(blob);
+      const link = element('a'); link.href = url; link.download = `vocabulary.${format}`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) { message('#library-error', `${error.message} Your selection has been kept. If words were recollected, refresh the page and select them again.`); }
+    finally { state.downloading = false; updateSelection(); }
+  }
+  $('#download-selection').addEventListener('click', () => downloadSelection('md'));
+  $('#download-selection-json').addEventListener('click', () => downloadSelection('json'));
 
   function scheduleValues() {
     return {
@@ -761,11 +838,13 @@ function initWorkspace() {
 
   function renderCredentials() {
     const saved = Boolean(state.credentials?.saved);
+    $('#setup-card').hidden = saved;
     status($('#credentials-state'), saved ? 'Saved · not verified' : 'Not saved', saved ? 'good' : '');
     status($('#credentials-overview'), saved ? 'Credentials saved · not verified' : 'Connect your account →', saved ? 'good' : '');
     $('#remove-credentials').disabled = !saved;
     $('#save-credentials').disabled = false;
     $('#credentials-fields').disabled = false;
+    updateRunControls();
   }
   async function loadCredentials() {
     message('#credentials-error', '');
@@ -781,6 +860,7 @@ function initWorkspace() {
       status($('#credentials-state'), 'Unavailable', 'bad');
       status($('#credentials-overview'), 'Check account connection', 'bad');
       $('#retry-credentials').hidden = false;
+      updateRunControls();
     }
   }
   $('#retry-credentials').addEventListener('click', loadCredentials);

@@ -148,3 +148,20 @@ export function passwordError(password, minimum = false) {
 export function settingsSignature(settings) {
   return JSON.stringify({ ...settings, classLessonCounts: Object.entries(settings.classLessonCounts || {}).sort(([a], [b]) => a.localeCompare(b)) });
 }
+
+export function filterLibrary(classes, search) {
+  const query = search.trim().toLocaleLowerCase('en');
+  return classes.map(item => ({ ...item, topics: (item.topics || []).filter(topic =>
+    !query || (item.title || '').toLocaleLowerCase('en').includes(query) || (topic.name || '').toLocaleLowerCase('en').includes(query))
+  })).filter(item => !query || item.topics.length);
+}
+
+export function selectTopics(selected, ids, checked) {
+  const result = new Set(selected);
+  for (const id of ids) {
+    if (checked) result.add(id);
+    else result.delete(id);
+  }
+  if (result.size > 500) throw new Error('Choose up to 500 wordsets per download. Clear your selection to start another batch.');
+  return result;
+}
