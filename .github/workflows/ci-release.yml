@@ -2,8 +2,9 @@ name: CI and release
 
 # Every push to any branch and every pull request: tests and builds of all
 # artifacts, never publishing. Pushing a tag v* (or running the workflow
-# manually on a tag) additionally creates a DRAFT release with the commit
-# message as release notes. Publishing stays a manual step in the GitHub UI.
+# manually on a tag) additionally creates a DRAFT release using
+# Docs/releases/<tag>.md, falling back to the tagged commit message.
+# Publishing stays a manual step in the GitHub UI.
 on:
   push:
     branches: ['**']
@@ -45,6 +46,90 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet test worker-desktop/LingosBot.Tests/LingosBot.Tests.csproj -c Release
+
+  test-webui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker-webui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: docker-webui/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: test -z "$(gofmt -l .)"
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Check frontend scripts
+        run: |
+          for SCRIPT in internal/webui/web/static/*.js; do
+            node --check "$SCRIPT"
+          done
+          node --test internal/webui/web/static/*.test.js
+
+  build-webui:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            elf-machine: Advanced Micro Devices X86-64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            elf-machine: AArch64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: docker-webui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: docker-webui/go.sum
+      - name: Build static WebUI with embedded assets
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags='-s -w' -o "dist/lingos-webui-linux-$ARCH" .
+      - name: Verify ELF, configuration guard and checksum
+        env:
+          ARCH: ${{ matrix.arch }}
+          ELF_MACHINE: ${{ matrix.elf-machine }}
+          LC_ALL: C
+        run: |
+          BINARY="dist/lingos-webui-linux-$ARCH"
+          MACHINE=$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')
+          test "$MACHINE" = "$ELF_MACHINE"
+          HEADERS=$(readelf -l "$BINARY")
+          DYNAMIC=$(readelf -d "$BINARY")
+          if grep -q 'INTERP' <<< "$HEADERS" || grep -q '(NEEDED)' <<< "$DYNAMIC"; then
+            echo 'Expected a static binary without INTERP or NEEDED' >&2
+            exit 1
+          fi
+          if OUTPUT=$(env -i "$BINARY" 2>&1); then
+            echo 'Expected startup without an encryption key to fail' >&2
+            exit 1
+          fi
+          grep -Fq 'ENCRYPTION_KEY must be base64 for exactly 32 bytes' <<< "$OUTPUT"
+          cd dist
+          sha256sum "lingos-webui-linux-$ARCH" > "lingos-webui-linux-$ARCH.sha256"
+          sha256sum -c "lingos-webui-linux-$ARCH.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webui-linux-${{ matrix.arch }}
+          path: docker-webui/dist/*
+          if-no-files-found: error
 
   build-rust:
     strategy:
@@ -190,7 +275,7 @@ jobs:
   draft-release:
     # Only tags v*. Branch pushes, PRs and manual runs on branches stop above.
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    needs: [test-rust, test-desktop, build-rust, build-desktop]
+    needs: [test-rust, test-desktop, test-webui, build-rust, build-desktop, build-webui]
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.ref }}
@@ -223,12 +308,13 @@ jobs:
           for FILE in \
             lingosbot-x86_64-unknown-linux-musl \
             lingosbot-aarch64-unknown-linux-musl \
+            lingos-webui-linux-amd64 lingos-webui-linux-arm64 \
             win-x64.zip linux-x64.zip macos-x86_64.zip macos-arm64.zip; do
             test -s "$FILE"
             test -s "$FILE.sha256"
             sha256sum -c "$FILE.sha256"
           done
-          test "$(ls | wc -l)" -eq 12
+          test "$(ls | wc -l)" -eq 16
       - name: Create or refresh the draft release
         run: |
           STATE=$(gh release list --limit 200 --json tagName,isDraft \
@@ -243,7 +329,11 @@ jobs:
               exit 1
               ;;
             *)
-              git log -1 --format=%B "$GITHUB_SHA" > notes.md
+              if [[ -f "Docs/releases/$TAG.md" ]]; then
+                cp "Docs/releases/$TAG.md" notes.md
+              else
+                git log -1 --format=%B "$GITHUB_SHA" > notes.md
+              fi
               FLAGS=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
               if [[ "$TAG" =~ -([Aa]lpha|[Bb]eta|[Rr][Cc]|[Pp]re) ]]; then
                 FLAGS+=(--prerelease)
