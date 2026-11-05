@@ -16,6 +16,7 @@ type User struct {
 	Email    string `json:"email"`
 	Admin    bool   `json:"admin"`
 	Disabled bool   `json:"disabled"`
+	Pending  bool   `json:"pending"`
 }
 
 func normalizeEmail(email string) (string, bool) {
@@ -34,7 +35,7 @@ func (x *app) sessionUser(r *http.Request) (User, string, string, error) {
 		return u, "", "", sql.ErrNoRows
 	}
 	var csrf string
-	err = x.db.QueryRowContext(r.Context(), `SELECT u.id,u.email,u.admin,u.disabled,s.csrf FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.disabled=0`, tokenHash(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &csrf)
+	err = x.db.QueryRowContext(r.Context(), `SELECT u.id,u.email,u.admin,u.disabled,u.pending,s.csrf FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.disabled=0`, tokenHash(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending, &csrf)
 	return u, cookie.Value, csrf, err
 }
 
@@ -311,7 +312,7 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/admin/users" && r.Method == http.MethodGet {
-		rows, err := x.db.QueryContext(r.Context(), `SELECT id,email,admin,disabled FROM users ORDER BY id`)
+		rows, err := x.db.QueryContext(r.Context(), `SELECT id,email,admin,disabled,pending FROM users ORDER BY id`)
 		if err != nil {
 			apiError(w, http.StatusInternalServerError, "storage error")
 			return
@@ -320,7 +321,7 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		users := []User{}
 		for rows.Next() {
 			var u User
-			if err = rows.Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled); err != nil {
+			if err = rows.Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending); err != nil {
 				apiError(w, http.StatusInternalServerError, "storage error")
 				return
 			}
@@ -342,8 +343,13 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		Password *string `json:"password"`
 		Admin    *bool   `json:"admin"`
 		Disabled *bool   `json:"disabled"`
+		Approve  *bool   `json:"approve"`
 	}
 	if r.Method != http.MethodDelete && !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Approve != nil && (r.Method != http.MethodPatch || !*body.Approve || body.Admin != nil || body.Disabled != nil || body.Password != nil) {
+		apiError(w, http.StatusBadRequest, "approve must be true and sent without other changes")
 		return
 	}
 	var u User
@@ -415,13 +421,27 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		status = http.StatusCreated
 	} else {
-		err = tx.QueryRow(`SELECT id,email,admin,disabled FROM users WHERE id=?`, u.ID).Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled)
+		err = tx.QueryRow(`SELECT id,email,admin,disabled,pending FROM users WHERE id=?`, u.ID).Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending)
 		if errors.Is(err, sql.ErrNoRows) {
 			apiError(w, http.StatusNotFound, "user not found")
 			return
 		}
 		if err != nil {
 			apiError(w, http.StatusInternalServerError, "storage error")
+			return
+		}
+		if r.Method == http.MethodDelete && r.URL.Query().Get("pending") == "1" && !u.Pending {
+			apiError(w, http.StatusConflict, "registration request is no longer pending")
+			return
+		}
+		if body.Approve != nil {
+			if !u.Pending {
+				apiError(w, http.StatusConflict, "user is not pending approval")
+				return
+			}
+			u.Pending, u.Disabled, u.Admin = false, false, false
+		} else if u.Pending && ((body.Disabled != nil && !*body.Disabled) || (body.Admin != nil && *body.Admin)) {
+			apiError(w, http.StatusConflict, "approve the pending user first")
 			return
 		}
 		if body.Admin != nil {
@@ -474,11 +494,11 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 				_, err = tx.Exec(`DELETE FROM credentials WHERE id=1; DELETE FROM schedule WHERE id=1`)
 			}
 		} else {
-			_, err = tx.Exec(`UPDATE users SET admin=?,disabled=? WHERE id=?`, u.Admin, u.Disabled, u.ID)
+			_, err = tx.Exec(`UPDATE users SET admin=?,disabled=?,pending=? WHERE id=?`, u.Admin, u.Disabled, u.Pending, u.ID)
 			if err == nil && body.Password != nil {
 				_, err = tx.Exec(`UPDATE users SET password_hash=? WHERE id=?`, hash, u.ID)
 			}
-			if err == nil && (u.Disabled || body.Password != nil) {
+			if err == nil && (u.Disabled || body.Password != nil || body.Approve != nil) {
 				_, err = tx.Exec(`DELETE FROM user_sessions WHERE user_id=?`, u.ID)
 			}
 		}

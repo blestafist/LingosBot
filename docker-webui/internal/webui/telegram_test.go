@@ -269,6 +269,8 @@ func TestTelegramOutboxOptInRecoveryAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	telegramTestRun(t, x, userID, "classes", "failed")
+	check(0)
+	telegramTestRun(t, x, userID, "run", "failed")
 	check(1)
 	if _, err := x.db.Exec(`UPDATE users SET disabled=1 WHERE id=?`, userID); err != nil {
 		t.Fatal(err)
@@ -278,11 +280,48 @@ func TestTelegramOutboxOptInRecoveryAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	telegramTestRun(t, x, userID, "scrape_all", "completed")
+	check(0)
+	telegramTestRun(t, x, userID, "run", "completed")
 	check(1)
 	if err := x.unlinkTelegramChat(context.Background(), 100); err != nil {
 		t.Fatal(err)
 	}
 	check(0)
+}
+
+func TestTelegramOutboxLessonOnlyMigration(t *testing.T) {
+	x := telegramAPITestApp(t)
+	telegramTestBind(t, x, 1, 100)
+	if _, err := x.db.Exec(`UPDATE telegram_links SET notifications=1;
+		DROP TRIGGER telegram_run_finished;
+		CREATE TRIGGER telegram_run_finished AFTER UPDATE OF status ON runs
+		WHEN OLD.status='running' AND NEW.status IN ('completed','failed','cancelled','interrupted')
+		BEGIN INSERT OR IGNORE INTO telegram_outbox(run_id,chat_id)
+		SELECT NEW.id,l.chat_id FROM telegram_links l JOIN users u ON u.id=l.user_id
+		WHERE l.user_id=NEW.user_id AND l.notifications=1 AND u.disabled=0; END;`); err != nil {
+		t.Fatal(err)
+	}
+	lesson := telegramTestRun(t, x, 1, "run", "completed")
+	for _, mode := range []string{"classes", "scrape", "scrape_all"} {
+		telegramTestRun(t, x, 1, mode, "failed")
+	}
+	var count int
+	if err := x.db.QueryRow(`SELECT count(*) FROM telegram_outbox`).Scan(&count); err != nil || count != 4 {
+		t.Fatalf("legacy queue not seeded: %d %v", count, err)
+	}
+	for range 2 {
+		if err := initTelegramDB(x.db); err != nil {
+			t.Fatal(err)
+		}
+		for _, mode := range []string{"classes", "scrape", "scrape_all"} {
+			telegramTestRun(t, x, 1, mode, "completed")
+		}
+		var runID int64
+		var enabled bool
+		if err := x.db.QueryRow(`SELECT count(*),min(run_id),(SELECT notifications FROM telegram_links WHERE user_id=1) FROM telegram_outbox`).Scan(&count, &runID, &enabled); err != nil || count != 1 || runID != lesson || !enabled {
+			t.Fatalf("migration lost lesson, kept non-lessons or changed opt-in: %d %d %v %v", count, runID, enabled, err)
+		}
+	}
 }
 
 func TestTelegramAdminDeleteCascades(t *testing.T) {

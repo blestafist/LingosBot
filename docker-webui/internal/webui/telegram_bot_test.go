@@ -434,9 +434,8 @@ func TestTelegramNotificationStatusesAndPlainText(t *testing.T) {
 		io.WriteString(w, `{"ok":true,"result":{}}`)
 	})
 	transportTestLink(t, x, 1, 123, true)
-	for i, status := range []string{"completed", "failed", "cancelled", "interrupted"} {
-		mode := []string{"run", "classes", "scrape", "scrape_all"}[i]
-		id := transportTestRun(t, x, 1, mode, status, "schedule")
+	for _, status := range []string{"completed", "failed", "cancelled", "interrupted"} {
+		id := transportTestRun(t, x, 1, "run", status, "schedule")
 		if _, err := x.db.Exec(`INSERT INTO run_events(run_id,seq,data) VALUES(?,1,'{"password":"worker-private","email":"private@example.com","report":"raw report"}')`, id); err != nil {
 			t.Fatal(err)
 		}
@@ -448,7 +447,7 @@ func TestTelegramNotificationStatusesAndPlainText(t *testing.T) {
 		t.Fatal("notifications were lost or not removed")
 	}
 	for i, text := range texts {
-		if !strings.Contains(text, "Run #") || !strings.Contains(text, "schedule") || !strings.Contains(text, "Backend summary") || !strings.Contains(text, []string{"Completed", "Failed", "Cancelled", "Interrupted"}[i]) || strings.Contains(text, "private") || strings.Contains(text, "raw report") {
+		if !strings.HasPrefix(text, []string{"✅ Lessons complete", "❌ Lessons failed", "⏹ Lessons stopped", "⚠️ Lessons interrupted"}[i]+"\n") || !strings.Contains(text, "Backend summary") || strings.Contains(text, "Run #") || strings.Contains(text, "Status:") || strings.Contains(text, "private") || strings.Contains(text, "raw report") {
 			t.Fatalf("unsafe or incomplete notification: %s", text)
 		}
 	}
@@ -456,8 +455,49 @@ func TestTelegramNotificationStatusesAndPlainText(t *testing.T) {
 		t.Fatalf("empty queue: %v %v", processed, err)
 	}
 	text := telegramNotificationText(RunRecord{ID: 1, Mode: "secret-mode", Source: "private@example.com", Status: "completed", Summary: strings.Repeat("ж", 1100)})
-	if !utf8.ValidString(text) || strings.Contains(text, "secret-mode") || strings.Contains(text, "private@") || utf8.RuneCountInString(strings.Split(text, "\n")[3]) != 1000 {
+	if !utf8.ValidString(text) || strings.Contains(text, "secret-mode") || strings.Contains(text, "private@") || utf8.RuneCountInString(strings.Split(text, "\n")[1]) != 180 || !strings.HasSuffix(text, "…") {
 		t.Fatal("notification labels or summary are not bounded")
+	}
+}
+
+func TestTelegramNotificationCompactText(t *testing.T) {
+	run := RunRecord{Mode: "run", Status: "completed", Summary: "  3 lessons completed\n\t60 words learned  ", CreatedAt: 100, FinishedAt: 230}
+	if text := telegramNotificationText(run); text != "✅ Lessons complete\n3 lessons completed 60 words learned\n⏱ 2m10s" {
+		t.Fatalf("unexpected compact message: %q", text)
+	}
+	for _, times := range [][2]int64{{0, 0}, {0, 100}, {100, 0}, {100, 99}} {
+		run.CreatedAt, run.FinishedAt, run.Summary = times[0], times[1], ""
+		if text := telegramNotificationText(run); text != "✅ Lessons complete" {
+			t.Fatalf("missing timestamps invented duration or empty lines: %q", text)
+		}
+	}
+	run.CreatedAt, run.FinishedAt = 100, 100
+	if text := telegramNotificationText(run); text != "✅ Lessons complete\n⏱ 0s" {
+		t.Fatalf("zero duration lost: %q", text)
+	}
+}
+
+func TestTelegramNotificationOnlyLessons(t *testing.T) {
+	var sent atomic.Int32
+	x := transportTestApp(t, func(w http.ResponseWriter, r *http.Request) {
+		sent.Add(1)
+		io.WriteString(w, `{"ok":true,"result":{}}`)
+	})
+	transportTestLink(t, x, 1, 123, true)
+	for _, mode := range []string{"classes", "scrape", "scrape_all", "unknown"} {
+		for _, status := range []string{"completed", "failed", "cancelled", "interrupted"} {
+			id := transportTestRun(t, x, 1, mode, status, "manual")
+			if transportTestQueueCount(t, x) != 0 {
+				t.Fatalf("%s/%s queued a notification", mode, status)
+			}
+			// Old backups can still contain non-lesson notifications, even before their retry is due.
+			if _, err := x.db.Exec(`INSERT INTO telegram_outbox(run_id,chat_id,next_attempt) VALUES(?,123,?)`, id, time.Now().Add(time.Hour).Unix()); err != nil {
+				t.Fatal(err)
+			}
+			if processed, err := x.deliverTelegramNotification(context.Background()); err != nil || !processed || sent.Load() != 0 || transportTestQueueCount(t, x) != 0 {
+				t.Fatalf("non-lesson notification was sent or retained: %v %v %d", processed, err, sent.Load())
+			}
+		}
 	}
 }
 

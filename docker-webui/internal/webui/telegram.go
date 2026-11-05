@@ -28,13 +28,15 @@ CREATE TABLE IF NOT EXISTS telegram_outbox (
  attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS telegram_outbox_due ON telegram_outbox(next_attempt);
-CREATE TRIGGER IF NOT EXISTS telegram_run_finished AFTER UPDATE OF status ON runs
-WHEN OLD.status='running' AND NEW.status IN ('completed','failed','cancelled','interrupted')
+DROP TRIGGER IF EXISTS telegram_run_finished;
+CREATE TRIGGER telegram_run_finished AFTER UPDATE OF status ON runs
+WHEN OLD.status='running' AND NEW.mode='run' AND NEW.status IN ('completed','failed','cancelled','interrupted')
 BEGIN
  INSERT OR IGNORE INTO telegram_outbox(run_id,chat_id)
  SELECT NEW.id,l.chat_id FROM telegram_links l JOIN users u ON u.id=l.user_id
  WHERE l.user_id=NEW.user_id AND l.notifications=1 AND u.disabled=0;
 END;
+DELETE FROM telegram_outbox WHERE run_id IN (SELECT id FROM runs WHERE mode<>'run');
 CREATE TRIGGER IF NOT EXISTS telegram_unlinked AFTER DELETE ON telegram_links
 BEGIN
  DELETE FROM telegram_outbox WHERE run_id IN (SELECT id FROM runs WHERE user_id=OLD.user_id);

@@ -77,6 +77,67 @@ $('#login-form')?.addEventListener('submit', async event => {
   }
 });
 
+if ($('#register-form')) {
+  function showAuthView(focus = false) {
+    const registering = location.hash === '#register';
+    $('#login-view').hidden = registering;
+    $('#register-view').hidden = !registering;
+    $('#register-error').hidden = $('#register-result').hidden = true;
+    const heading = $(registering ? '#register-heading' : '#login-heading');
+    $('.login-panel').setAttribute('aria-labelledby', heading.id);
+    if (focus) heading.focus();
+  }
+  window.addEventListener('hashchange', () => showAuthView(true));
+  showAuthView();
+  $('#register-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const errorNode = $('#register-error');
+    const result = $('#register-result');
+    errorNode.hidden = result.hidden = true;
+    if ($('#register-password').value !== $('#register-confirm').value) {
+      errorNode.textContent = 'The passwords do not match.';
+      errorNode.hidden = false;
+      $('#register-confirm').focus();
+      return;
+    }
+    const body = new URLSearchParams(new FormData(form));
+    const email = $('#register-email').value;
+    const controls = $$('button, input', form);
+    const submit = $('button[type="submit"]', form);
+    const label = submit.textContent;
+    controls.forEach(control => { control.disabled = true; });
+    submit.textContent = 'Sending…';
+    form.setAttribute('aria-busy', 'true');
+    try {
+      let response;
+      try { response = await fetch('/register', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body }); }
+      catch { throw new Error('Could not reach the server. Check your connection and try again.'); }
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(response.status === 429 ? 'Too many requests. Wait a few minutes before trying again.' : data?.error || 'Registration could not be completed. Please try again.');
+      if (typeof data?.pending !== 'boolean') throw new Error('The server did not confirm your request. Please try again.');
+      form.reset();
+      $$('[data-reveal]', form).forEach(control => {
+        document.getElementById(control.dataset.reveal).type = 'password';
+        control.textContent = 'Show';
+        control.setAttribute('aria-pressed', 'false');
+      });
+      $('#login-email').value = email;
+      result.textContent = data.pending ? 'Request received. If this email is available, an administrator must approve your account before you can sign in. Existing accounts are unchanged.' : 'Request received. If this email is available, your account is ready to sign in. Existing accounts are unchanged.';
+      result.hidden = false;
+      result.focus();
+    } catch (error) {
+      errorNode.textContent = error.message;
+      errorNode.hidden = false;
+      errorNode.focus();
+    } finally {
+      controls.forEach(control => { control.disabled = false; });
+      submit.textContent = label;
+      form.removeAttribute('aria-busy');
+    }
+  });
+}
+
 const csrf = $('#csrf-token')?.value;
 if (csrf) initWorkspace();
 
@@ -92,6 +153,7 @@ function initWorkspace() {
     selectedTopics: new Set(), downloading: false,
     telegram: null, telegramLink: null, telegramBusy: false, telegramRequest: null, telegramTimer: null, telegramError: null,
     adminTelegramRequest: null, adminTelegramBusy: false,
+    registrationMode: null,
   };
   let account = null;
   let overrideID = 0;
@@ -209,7 +271,6 @@ function initWorkspace() {
       else link.removeAttribute('aria-current');
     });
     const heading = $('h1', page);
-    $('#page-context').textContent = heading.textContent;
     document.title = `${heading.textContent} · Your workspace`;
     if (focus) {
       const target = id === 'schedule' ? $('#schedule-heading') : heading;
@@ -221,7 +282,7 @@ function initWorkspace() {
     if (['config', 'dashboard'].includes(page.id) && state.scheduleLoaded) loadSchedule(false);
     if (page.id === 'account' && !document.hidden) loadTelegram();
     else stopTelegramPolling();
-    if (page.id === 'users') loadAdminTelegram();
+    if (page.id === 'users') loadUsers();
   }
   window.addEventListener('hashchange', () => showPage(true));
   showPage();
@@ -693,7 +754,7 @@ function initWorkspace() {
   function exportLinks(kind, id) {
     const links = element('div', 'export-links');
     for (const [format, title] of [['md', 'Markdown'], ['json', 'JSON']]) {
-      const link = element('a', kind === 'class' ? 'button tonal' : '', title);
+      const link = element('a', '', title);
       link.href = exportURL(format, kind, id);
       link.setAttribute('aria-label', `Download ${kind} as ${title}`);
       links.append(link);
@@ -775,12 +836,6 @@ function initWorkspace() {
         head.append(label, toggle);
         row.append(head, content); section.append(row);
       }
-      const exports = element('section', 'class-download');
-      exports.setAttribute('aria-label', `Download ${item.title || 'entire class'}`);
-      const exportCopy = element('div', 'class-download-copy');
-      exportCopy.append(element('h3', '', 'Download entire class'), element('p', '', 'All saved wordsets in one file.'));
-      exports.append(exportCopy, exportLinks('class', item.class_id));
-      section.append(exports);
       container.append(section);
     }
     if (!matches) empty(container, 'No matching wordsets.', 'Try a different name or clear your search. Your selection is kept when searching.');
@@ -1219,6 +1274,50 @@ function initWorkspace() {
     } catch (error) { $('#account-identity').textContent = error.message; }
   }
 
+  function registrationMode(data) {
+    if (!$$('[name="registration-mode"]').some(input => input.value === data?.mode)) throw new Error('The registration mode could not be read. Retry to load the current policy.');
+    return data.mode;
+  }
+  function updateRegistrationControls() {
+    const dirty = $('[name="registration-mode"]:checked')?.value !== state.registrationMode;
+    status($('#registration-state'), state.registrationMode ? dirty ? 'Unsaved changes' : 'Saved' : 'Unavailable', state.registrationMode && !dirty ? 'good' : '');
+    $('#save-registration').disabled = !state.registrationMode || !dirty;
+  }
+  async function loadRegistration() {
+    if (!$('#registration-form')) return;
+    message('#registration-error', '');
+    $('#retry-registration').hidden = true;
+    try {
+      state.registrationMode = registrationMode(await api('/api/admin/registration'));
+      $$('[name="registration-mode"]').forEach(input => { input.checked = input.value === state.registrationMode; });
+      $('#registration-fields').disabled = false;
+    } catch (error) {
+      message('#registration-error', error.message);
+      $('#retry-registration').hidden = false;
+    }
+    updateRegistrationControls();
+  }
+  $('#retry-registration')?.addEventListener('click', loadRegistration);
+  $('#registration-form')?.addEventListener('input', updateRegistrationControls);
+  $('#registration-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const mode = $('[name="registration-mode"]:checked')?.value;
+    if (!state.registrationMode || !mode) return;
+    await withForm(event.currentTarget, '#registration-error', async () => {
+      try {
+        state.registrationMode = registrationMode(await api('/api/admin/registration', { method: 'PUT', body: { mode } }));
+      } catch (error) {
+        // A lost response can hide a committed policy change; recheck before allowing another save.
+        state.registrationMode = null;
+        try { state.registrationMode = registrationMode(await api('/api/admin/registration')); }
+        catch { $('#registration-fields').disabled = true; $('#retry-registration').hidden = false; }
+        throw error;
+      }
+      notify('Registration mode saved. Existing accounts and pending requests are unchanged.');
+    });
+    updateRegistrationControls();
+  });
+
   function makeSecretField(id, label) {
     const field = element('div', 'field');
     const caption = element('label', '', label); caption.htmlFor = id;
@@ -1233,6 +1332,7 @@ function initWorkspace() {
       await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: 'PATCH', body });
       notify('User updated.');
       await loadUsers();
+      return true;
     } catch (error) { notify(error.message, true); }
     finally { control.disabled = false; }
   }
@@ -1326,14 +1426,37 @@ function initWorkspace() {
     try {
       const data = await api('/api/admin/users');
       if (!Array.isArray(data?.users)) throw new Error('The user list could not be read.');
+      const pending = data.users.filter(user => user.pending).length;
+      $('#registration-requests').textContent = pending ? `Review ${pending} pending ${pending === 1 ? 'request' : 'requests'} →` : 'Manage members and requests →';
       container.replaceChildren();
       if (!data.users.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
-      for (const user of data.users) {
+      for (const user of data.users.sort((a, b) => Number(Boolean(b.pending)) - Number(Boolean(a.pending)))) {
         const row = element('article', 'user-row');
         const head = element('div', 'user-row-head');
         const copy = element('div');
         copy.append(element('p', 'user-email', user.email), element('small', '', `${user.admin ? 'Administrator' : 'Member'}${String(user.id) === String(account?.id) ? ' · You' : ''}`));
-        const badge = element('span'); status(badge, user.disabled ? 'Disabled' : 'Active', user.disabled ? 'bad' : 'good'); head.append(copy, badge);
+        const badge = element('span'); status(badge, user.pending ? 'Awaiting approval' : user.disabled ? 'Disabled' : 'Active', user.pending ? '' : user.disabled ? 'bad' : 'good'); head.append(copy, badge);
+        if (user.pending) {
+          const controls = element('div', 'user-controls');
+          const approve = button('Approve account', async () => {
+            if (await patchUser(user, { approve: true }, approve)) $('#refresh-users').focus({ preventScroll: true });
+          }, 'button tonal');
+          const reject = button('Reject request', async () => {
+            if (!await confirmAction('Reject this request?', `The pending account for ${user.email} will be removed. They can request access again while registration allows it.`, 'Reject request')) return;
+            reject.disabled = true;
+            try {
+              await api(`/api/admin/users/${encodeURIComponent(user.id)}?pending=1`, { method: 'DELETE' });
+              notify('Registration request rejected.');
+              await loadUsers();
+              $('#refresh-users').focus({ preventScroll: true });
+            } catch (error) { notify(error.message, true); }
+            finally { reject.disabled = false; }
+          }, 'button danger');
+          controls.append(approve, reject);
+          row.append(head, controls);
+          container.append(row);
+          continue;
+        }
         const details = element('details'); details.append(element('summary', '', 'Manage access'));
         const controls = element('div', 'user-controls');
         const toggle = button(user.disabled ? 'Enable account' : 'Disable account', async () => {
@@ -1408,5 +1531,5 @@ function initWorkspace() {
     if (!document.hidden && !$('#account').hidden) loadTelegram();
     else stopTelegramPolling();
   });
-  Promise.allSettled([loadSettings(), loadClasses().then(loadLatestResult), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
+  Promise.allSettled([loadSettings(), loadClasses().then(loadLatestResult), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadAccount().then(loadUsers), loadRegistration()]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
 }
