@@ -1426,8 +1426,6 @@ function initWorkspace() {
     try {
       const data = await api('/api/admin/users');
       if (!Array.isArray(data?.users)) throw new Error('The user list could not be read.');
-      const pending = data.users.filter(user => user.pending).length;
-      $('#registration-requests').textContent = pending ? `Review ${pending} pending ${pending === 1 ? 'request' : 'requests'} →` : 'Manage members and requests →';
       container.replaceChildren();
       if (!data.users.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
       for (const user of data.users.sort((a, b) => Number(Boolean(b.pending)) - Number(Boolean(a.pending)))) {
