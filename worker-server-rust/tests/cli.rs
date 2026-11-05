@@ -99,9 +99,16 @@ fn site(options: Options) -> Server {
     let mut word = 1;
     Server::start(move |request, _| {
         let step = |word| {
-            json!({"state":"exercise","exercise":{
-                "identifier":word,"type":if word == 2 {"new_teacher"} else {"flashcard"},"main":"dom"
-            }})
+            if word == 2 {
+                json!({"state":"exercise","exercise":{
+                    "identifier":word,"type":"new_teacher",
+                    "word":"probiere eine Massage aus","translation":"wypróbuj masaż","context":""
+                }})
+            } else {
+                json!({"state":"exercise","exercise":{
+                    "identifier":word,"type":"flashcard","main":"dom"
+                }})
+            }
         };
         Some(match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/h/login") => Reply::html("<input name=_csrf_token value='csrf&amp;token'>")

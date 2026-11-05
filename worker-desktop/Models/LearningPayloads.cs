@@ -20,6 +20,7 @@ internal sealed class LearningExercise
     public string Type { get; set; } = string.Empty;
     public long Identifier { get; set; }
     public string Main { get; set; } = string.Empty;
+    public string Word { get; set; } = string.Empty;
 }
 
 internal sealed class LearningAnswerResult

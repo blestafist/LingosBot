@@ -59,6 +59,19 @@ fn reads_camel_case_learning_payload_and_exercise_type() {
 }
 
 #[test]
+fn exercise_text_may_be_absent_but_must_be_a_string_when_present() {
+    for kind in ["new_teacher", "new_premium", "flashcard"] {
+        let mut payload = json!({"type": kind, "identifier": 1});
+        let exercise: LearningExercise = serde_json::from_value(payload.clone()).unwrap();
+        assert!(exercise.main.is_empty());
+        for invalid in [json!(null), json!(42), json!([])] {
+            payload["main"] = invalid;
+            assert_rejects::<LearningExercise>(payload.clone());
+        }
+    }
+}
+
+#[test]
 fn compact_limit_payload_does_not_need_a_lesson() {
     for value in [
         json!({"reason": "limit-exceeded"}),
@@ -114,8 +127,8 @@ fn required_answer_step_and_feedback_result_do_not_default() {
     for value in [
         json!({"identifier": 1, "main": "dom"}),
         json!({"type": "flashcard", "main": "dom"}),
-        json!({"type": "flashcard", "identifier": 1}),
         json!({"type": "flashcard", "identifier": -1, "main": "dom"}),
+        json!({"type": "new_premium", "word": "dom"}),
     ] {
         assert!(serde_json::from_value::<LearningExercise>(value).is_err());
     }
