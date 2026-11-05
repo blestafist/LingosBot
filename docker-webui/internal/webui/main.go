@@ -70,6 +70,15 @@ func serve() error {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return errors.New("another WebUI process is already using this database")
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	worker, workerLock, err := prepareWorker(ctx)
+	if err != nil {
+		return err
+	}
+	if workerLock != nil {
+		defer workerLock.Close()
+	}
 	// Set permissions before SQLite creates WAL/SHM files, which inherit the database mode.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -96,9 +105,7 @@ func serve() error {
 	if err := initDB(db); err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	x := &app{db: db, aead: a, worker: env("WORKER_BIN", "/usr/local/bin/lingosbot"), admin: os.Getenv("ADMIN_USER"), password: os.Getenv("ADMIN_PASSWORD"), ctx: ctx}
+	x := &app{db: db, aead: a, worker: worker, admin: os.Getenv("ADMIN_USER"), password: os.Getenv("ADMIN_PASSWORD"), ctx: ctx}
 	if err := x.bootstrapAdmin(); err != nil {
 		return err
 	}

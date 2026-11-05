@@ -56,12 +56,26 @@
           <div class="workspace-grid">
             <div class="primary-column">
               <form id="quick-run-form" class="panel"><div class="panel-heading"><div class="panel-title"><span class="section-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z"/></svg></span><h2>Ready when you are.</h2></div></div><div class="fields plan-default"><label for="quick-lesson-count">Lessons per class<input id="quick-lesson-count" type="number" min="1" max="10000" step="1" value="1" required></label></div><div class="panel-footer"><p id="quick-run-hint">Loading config…</p><button id="run-lessons" class="button primary" type="submit" disabled>Run now <span aria-hidden="true">→</span></button></div></form>
+              <details id="activity-details" class="panel">
+                <summary class="activity-summary"><span>Lesson activity<small>Live progress and run history</small></span></summary>
+                <section class="activity" aria-labelledby="activity-heading">
+                  <div class="panel-heading"><h2 id="activity-heading">Current run</h2><span id="run-status" class="status">Loading…</span></div>
+                  <div class="activity-body">
+                    <p id="run-title" class="activity-title" aria-live="polite">Restoring your latest run…</p>
+                    <p id="run-meta" class="muted"></p>
+                    <div id="run-progress" class="progress-copy"></div>
+                    <button id="cancel-run" class="button danger" type="button" hidden>Stop run</button>
+                    <p id="poll-error" class="message error" role="alert" hidden></p>
+                    <details class="run-details"><summary>Run details</summary><ol id="activity-log" class="activity-log" aria-label="Run events" tabindex="0"></ol><details class="http-details"><summary id="http-summary">HTTP requests (0)</summary><ol id="http-log" class="http-log" aria-label="HTTP requests" tabindex="0"></ol></details></details>
+                  </div>
+                </section>
+                <details class="history"><summary>Run history</summary><div class="history-tools"><button id="refresh-runs" class="button quiet" type="button">Refresh history</button></div><div id="run-history"><p class="empty">Loading history…</p></div></details>
+              </details>
               <section class="panel" aria-labelledby="up-next-heading"><div class="panel-heading"><h2 id="up-next-heading">Next automatic run</h2><a class="text-link" href="#schedule">Edit schedule</a></div><div class="inset next-session"><p id="dashboard-next" class="activity-title">Loading schedule…</p><p id="dashboard-schedule-hint" class="muted"></p><button id="skip-next-run" class="button" type="button" disabled>Skip next run</button><p id="skip-error" class="message error" role="alert" hidden></p></div></section>
               <a class="library-shortcut" href="#library"><span><strong>Library</strong><small>Browse and download your wordsets.</small></span><span aria-hidden="true">→</span></a>
             </div>
-            <aside class="activity-column" aria-label="Results and activity">
+            <aside class="activity-column" aria-label="Latest lesson result">
               <section class="panel" aria-labelledby="latest-run-heading"><div class="panel-heading"><h2 id="latest-run-heading">Last lesson run</h2><span id="latest-run-status" class="status">Loading…</span></div><div id="latest-run-result" class="inset"><p class="muted">Loading result…</p></div></section>
-              <details id="activity-details" class="panel"><summary>Activity &amp; run history</summary><section class="activity" aria-labelledby="activity-heading"><div class="panel-heading"><h2 id="activity-heading">Activity</h2><span id="run-status" class="status">Loading…</span></div><div class="activity-body"><p id="run-title" class="activity-title" aria-live="polite">Restoring your latest run…</p><p id="run-meta" class="muted"></p><div id="run-progress" class="progress-copy"></div><button id="cancel-run" class="button danger" type="button" hidden>Stop run</button><p id="poll-error" class="message error" role="alert" hidden></p><details class="run-details"><summary>Run details</summary><ol id="activity-log" class="activity-log" aria-label="Run events" tabindex="0"></ol><details class="http-details"><summary id="http-summary">HTTP requests (0)</summary><ol id="http-log" class="http-log" aria-label="HTTP requests" tabindex="0"></ol></details></details></div></section><details class="history"><summary>Run history</summary><div class="history-tools"><button id="refresh-runs" class="button quiet" type="button" aria-label="Refresh run history">Refresh history</button></div><div id="run-history"><p class="empty">Loading history…</p></div></details></details>
             </aside>
           </div>
         </section>
@@ -76,7 +90,7 @@
                     <label for="lesson-count">Default lessons per class<input id="lesson-count" name="lessonCount" type="number" min="1" max="10000" step="1" value="1" required></label>
                     <label for="error-rate">Errors per 100 words<input id="error-rate" name="errorsPer100Words" type="number" min="0" max="100" step="1" value="0" required></label>
                   </div>
-                  <div class="section-heading"><div><h3>Lessons per class <span id="class-plan-count" class="summary-meta"></span></h3><p class="muted">Blank = default. 0 = skip.</p></div><button type="button" class="button quiet" data-start="classes">Sync classes</button></div>
+                  <div class="section-heading"><div><h3>Lessons per class <span id="class-plan-count" class="summary-meta"></span></h3><p id="override-count-hint" class="muted">Auto (blank) uses the default. 0 skips a class.</p></div><button type="button" class="button quiet" data-start="classes">Sync classes</button></div>
                   <div id="class-counts" class="override-list"><p class="empty">Loading saved classes…</p></div>
                   <div class="inset"><button id="add-override" class="button quiet" type="button">+ Add a class by title</button></div>
                   <details class="settings-details"><summary>Advanced settings</summary><div class="fields two-columns">

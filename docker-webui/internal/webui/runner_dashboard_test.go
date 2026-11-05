@@ -262,6 +262,24 @@ func TestRunnerDashboardLatestWithoutResult(t *testing.T) {
 	}
 }
 
+func TestRunnerDashboardLatestPreservesAllChallengeSnapshots(t *testing.T) {
+	x := newAuthTestApp(t)
+	token, _ := authTestSession(t, x, 1)
+	result := `{"type":"result","success":true,"lessons_completed":2,"challenge_snapshots":[{"group_id":"42","available":1,"lessons_completed_at_snapshot":0},{"group_id":"43","completed":2,"lessons_completed_at_snapshot":1}]}`
+	dashboardTestRun(t, x, 1, "run", "completed", result)
+	w := authTestRequest(x.runsAPI, "GET", "/api/runs/latest", "", token, "")
+	var response struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &response) != nil {
+		t.Fatalf("latest: %d %s", w.Code, w.Body.String())
+	}
+	var got, want any
+	if json.Unmarshal(response.Result, &got) != nil || json.Unmarshal([]byte(result), &want) != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("challenge snapshots lost: %s", response.Result)
+	}
+}
+
 func TestRunnerDashboardLatestStorageErrors(t *testing.T) {
 	for _, kind := range []string{"runs", "run_events", "scan"} {
 		t.Run(kind, func(t *testing.T) {

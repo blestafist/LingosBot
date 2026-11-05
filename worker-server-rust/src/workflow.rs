@@ -37,6 +37,8 @@ pub struct RunStats {
     pub errors_made: u64,
     /// Most recently observed dashboard, not necessarily the final state.
     pub challenge_snapshot: Option<RunChallengeSnapshot>,
+    /// Latest observation per group, in first-observed order; not final state.
+    pub challenge_snapshots: Vec<RunChallengeSnapshot>,
 }
 
 /// A dashboard observation. If `lessons_completed_at_snapshot` is less than
@@ -726,6 +728,15 @@ fn observe_dashboard(stats: &mut RunStats, dashboard: &Dashboard) {
             points: challenge.points,
             status: challenge.status,
         });
+    }
+    if let Some(existing) = stats
+        .challenge_snapshots
+        .iter_mut()
+        .find(|existing| existing.group_id == snapshot.group_id)
+    {
+        *existing = snapshot.clone();
+    } else {
+        stats.challenge_snapshots.push(snapshot.clone());
     }
     stats.challenge_snapshot = Some(snapshot);
 }

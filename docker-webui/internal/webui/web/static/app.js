@@ -1,4 +1,4 @@
-import { settingLimits, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics, lessonReport } from './helpers.js';
+import { settingLimits, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, dateLabel, exportURL, passwordError, filterLibrary, selectTopics, lessonReport, lessonProgress, lessonProgressValue } from './helpers.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -86,7 +86,7 @@ function initWorkspace() {
     classes: [], classesLoaded: false, credentials: null, runs: [], library: [],
     selectedRun: null, activeRun: null, cursor: 0, pollingGeneration: 0,
     pollTimer: null, watchTimer: null, httpCount: 0, logTrimmed: false,
-    progress: { lessons: 0, words: 0, lessonWords: 0 }, starting: false,
+    progress: lessonProgress(undefined, {}), starting: false,
     schedule: null, scheduleLoaded: false, scheduleDirty: false, skipping: false,
     latestRunID: null, latestLoading: false, verification: null,
     selectedTopics: new Set(), downloading: false,
@@ -262,7 +262,8 @@ function initWorkspace() {
     const count = element('input', 'override-count');
     count.id = unique;
     count.type = 'number'; count.min = '0'; count.max = '10000'; count.step = '1';
-    count.placeholder = 'Default'; count.value = value;
+    count.placeholder = 'Auto'; count.value = value;
+    count.setAttribute('aria-describedby', 'override-count-hint');
     if (manual) {
       const titleLabel = element('label', '', 'Class title');
       const input = element('input', 'override-title');
@@ -429,7 +430,7 @@ function initWorkspace() {
         return;
       }
       status($('#latest-run-status'), statusLabels[run.status] || run.status, run.status === 'completed' ? 'good' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '');
-      const report = lessonReport(run, data.result);
+      const report = lessonReport(run, data.result, state.classes);
       container.append(element('p', 'muted', `${dateLabel(run.finished_at || run.created_at)}${run.source === 'schedule' ? ' · scheduled' : ''}`));
       const metrics = element('dl', 'result-metrics');
       for (const metric of report.metrics) {
@@ -437,18 +438,22 @@ function initWorkspace() {
       }
       if (report.metrics.length) container.append(metrics);
       if (report.note) container.append(element('p', 'footnote', report.note));
-      if (report.challenge) {
-        const { title, note, counts, items } = report.challenge;
+      if (report.challenges.length) container.append(element('h3', 'challenge-heading', 'Wyzwania'));
+      for (const { title, note, counts, items } of report.challenges) {
         const section = element('section', 'challenge-report');
-        section.append(element('h3', '', title), element('p', 'footnote', note));
-        if (counts) section.append(element('p', 'footnote', counts));
+        section.append(element('h3', 'challenge-class-name', title));
+        const chips = element('div', 'challenge-counts');
+        for (const { label, value } of counts) chips.append(element('span', '', `${value} ${label}`));
+        if (counts.length) section.append(chips);
         if (items.length) {
           const list = element('ul', 'challenge-list');
           for (const item of items) list.append(element('li', '', item));
           section.append(list);
         }
+        section.append(element('p', 'footnote', note));
         container.append(section);
-      } else container.append(element('p', 'footnote', 'Wyzwania: no saved data.'));
+      }
+      if (!report.challenges.length) container.append(element('p', 'footnote', 'Wyzwania: no saved data.'));
       container.append(button('View saved activity', () => { selectRun(run); $('#activity-details').open = true; $('.activity').scrollIntoView({ block: 'center' }); }, 'button quiet'));
     } catch (error) {
       status($('#latest-run-status'), 'Unavailable', 'bad');
@@ -457,23 +462,31 @@ function initWorkspace() {
   }
 
   function updateVerification(run) {
-    if (String(state.verification?.id) !== String(run?.id) || !run) return;
-    state.verification = run;
+    if (!run || run.mode !== 'classes') return;
+    const sameRun = String(state.verification?.id) === String(run.id);
+    if (!sameRun && state.verification?.status === 'running') return;
+    const finished = run.status !== 'running' && (!sameRun || !state.verification?.refreshed);
+    state.verification = { ...run, refreshed: run.status !== 'running' };
     renderCredentials();
+    if (finished) loadCredentials(false);
   }
 
   function renderHistory() {
     const container = $('#run-history');
+    const focusedRun = container.contains(document.activeElement) ? document.activeElement.dataset.runId : null;
     container.replaceChildren();
     if (!state.runs.length) { empty(container, 'A fresh start.', 'Your runs will appear here, even after closing this tab.'); return; }
     for (const run of state.runs) {
       const control = button('', () => selectRun(run), 'history-item');
+      control.dataset.runId = String(run.id);
       control.setAttribute('aria-pressed', String(String(run.id) === String(state.selectedRun?.id)));
       const title = element('strong', '', `${runLabels[run.mode] || 'Run'}${run.source === 'schedule' ? ' · scheduled' : ''}`);
       const badge = element('span');
       status(badge, statusLabels[run.status] || run.status, run.status === 'running' ? 'running' : run.status === 'completed' ? 'good' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '');
       control.append(title, badge, element('small', '', dateLabel(run.created_at)));
+      if (run.summary) control.append(element('small', 'history-summary', run.summary));
       container.append(control);
+      if (focusedRun === String(run.id)) control.focus({ preventScroll: true });
     }
   }
   async function loadRuns({ initial = false, quiet = false } = {}) {
@@ -483,7 +496,7 @@ function initWorkspace() {
       const previousActive = state.activeRun;
       state.runs = data.runs;
       const latest = state.runs.find(run => run.mode === 'run' && run.status !== 'running');
-      if (latest && String(latest.id) !== String(state.latestRunID)) loadLatestResult();
+      const latestChanged = !initial && latest && String(latest.id) !== String(state.latestRunID);
       if (state.verification) updateVerification(state.runs.find(run => String(run.id) === String(state.verification.id)));
       state.activeRun = state.runs.find(run => run.status === 'running') || null;
       if (initial && state.runs.length) selectRun(state.activeRun || state.runs[0]);
@@ -497,7 +510,7 @@ function initWorkspace() {
         $('#run-title').textContent = 'Ready when you are.';
         $('#run-meta').textContent = 'Run lessons, sync classes or collect words.';
       }
-      if (previousActive && !state.activeRun) refreshAfterRun();
+      if (latestChanged || previousActive && !state.activeRun) refreshAfterRun();
       if (state.activeRun && (initial || String(previousActive?.id) !== String(state.activeRun.id))) $('#activity-details').open = true;
       renderHistory();
       updateRunControls();
@@ -559,17 +572,8 @@ function initWorkspace() {
     if (['class_start', 'lesson_start', 'lesson_complete', 'class_complete', 'class_skipped'].includes(event.type)) {
       $('#run-title').textContent = event.type === 'lesson_start' ? `${event.class_title || 'Class'} · lesson ${event.lesson ?? '—'} of ${event.lessons_total ?? '—'}` : description;
     }
-    if (event.type === 'lesson_start') state.progress.lessonWords = 0;
-    if (event.type === 'lesson_answer') state.progress.lessonWords = event.words_learned ?? state.progress.lessonWords;
-    if (event.type === 'lesson_complete') {
-      state.progress.lessons++;
-      state.progress.words += Number(event.words_learned) || 0;
-      state.progress.lessonWords = 0;
-    }
+    state.progress = lessonProgress(state.progress, event);
     if (event.type === 'result') {
-      state.progress.lessons = event.lessons_completed ?? state.progress.lessons;
-      state.progress.words = event.words_learned ?? state.progress.words;
-      state.progress.lessonWords = 0;
       $('#run-title').textContent = description;
     }
     renderProgress();
@@ -578,8 +582,28 @@ function initWorkspace() {
     const copy = $('#run-progress');
     copy.replaceChildren();
     if (state.selectedRun?.mode !== 'run') return;
-    copy.append(element('span', '', `${state.progress.lessons} lessons complete`), element('span', '', `${state.progress.words} words learned`));
-    if (state.progress.lessonWords) copy.append(element('span', '', `${state.progress.lessonWords} words in this lesson`));
+    const stats = element('dl', 'run-stats');
+    for (const [label, value] of [['Lessons complete', state.progress.lessons], ['Words learned', state.progress.words]]) {
+      const metric = element('div');
+      metric.append(element('dt', '', label), element('dd', '', String(value)));
+      stats.append(metric);
+    }
+    const lesson = state.progress.lesson;
+    if (lesson) {
+      const card = element('div', 'lesson-progress');
+      const heading = element('div', 'lesson-progress-heading');
+      const value = lessonProgressValue(lesson);
+      heading.append(element('strong', '', `${lesson.title} · lesson ${lesson.number ?? '—'} of ${lesson.total ?? '—'}`), element('span', '', lesson.complete ? 'Complete' : `${value} / 20`));
+      const track = element('progress', 'lesson-progress-track');
+      track.max = 20; track.value = value;
+      track.setAttribute('aria-label', `${lesson.title} lesson progress`);
+      track.setAttribute('aria-valuetext', lesson.complete ? 'Lesson complete' : `${value} of 20 words`);
+      const note = lesson.complete ? `${lesson.words} words learned in this lesson during this run. Confirmed complete on Lingos.`
+        : state.selectedRun.status === 'running' ? '20 words per lesson. A resumed lesson may finish earlier.' : 'Lesson not confirmed complete.';
+      card.append(heading, track, element('p', 'lesson-progress-note', note));
+      copy.append(card);
+    }
+    copy.append(stats);
   }
   function renderRun() {
     const run = state.selectedRun;
@@ -600,7 +624,7 @@ function initWorkspace() {
     state.cursor = 0;
     state.httpCount = 0;
     state.logTrimmed = false;
-    state.progress = { lessons: 0, words: 0, lessonWords: 0 };
+    state.progress = lessonProgress(undefined, {});
     $('#activity-log').replaceChildren();
     $('.run-details').open = ['failed', 'interrupted'].includes(run.status);
     $('#http-log').replaceChildren();
@@ -652,7 +676,7 @@ function initWorkspace() {
     if (continuePolling && generation === state.pollingGeneration) state.pollTimer = setTimeout(() => pollRun(generation), delay);
   }
   function refreshAfterRun() {
-    loadClasses(); loadLibrary(); loadLatestResult();
+    loadClasses().then(loadLatestResult); loadLibrary();
     loadSchedule(false);
   }
   $('#refresh-runs').addEventListener('click', () => loadRuns({ initial: !state.selectedRun }));
@@ -668,10 +692,10 @@ function initWorkspace() {
 
   function exportLinks(kind, id) {
     const links = element('div', 'export-links');
-    for (const [format, title] of [['md', 'MD'], ['json', 'JSON']]) {
-      const link = element('a', '', title);
+    for (const [format, title] of [['md', 'Markdown'], ['json', 'JSON']]) {
+      const link = element('a', kind === 'class' ? 'button tonal' : '', title);
       link.href = exportURL(format, kind, id);
-      link.setAttribute('aria-label', `Download ${kind} as ${format === 'md' ? 'Markdown' : 'JSON'}`);
+      link.setAttribute('aria-label', `Download ${kind} as ${title}`);
       links.append(link);
     }
     return links;
@@ -751,8 +775,11 @@ function initWorkspace() {
         head.append(label, toggle);
         row.append(head, content); section.append(row);
       }
-      const exports = element('details', 'class-download');
-      exports.append(element('summary', '', 'Download entire class'), exportLinks('class', item.class_id));
+      const exports = element('section', 'class-download');
+      exports.setAttribute('aria-label', `Download ${item.title || 'entire class'}`);
+      const exportCopy = element('div', 'class-download-copy');
+      exportCopy.append(element('h3', '', 'Download entire class'), element('p', '', 'All saved wordsets in one file.'));
+      exports.append(exportCopy, exportLinks('class', item.class_id));
       section.append(exports);
       container.append(section);
     }
@@ -1109,36 +1136,44 @@ function initWorkspace() {
   function renderCredentials() {
     const saved = Boolean(state.credentials?.saved);
     const verification = state.verification;
-    const verified = saved && verification?.status === 'completed';
+    const verified = saved && state.credentials.verified_at > 0;
     const checking = saved && verification?.status === 'running';
-    const failed = saved && verification && !checking && !verified;
+    const failed = saved && verification && !checking && verification.status !== 'completed';
     $('#setup-card').hidden = saved;
-    const label = !saved ? 'Not saved' : verified ? 'Verified this session' : checking ? 'Checking connection…' : failed ? 'Check did not complete' : 'Saved · not verified';
+    const label = !saved ? 'Not saved' : verified ? 'Verified' : checking ? 'Checking connection…' : failed ? 'Check did not complete' : 'Saved · not verified';
     status($('#credentials-state'), label, verified ? 'good' : failed ? 'bad' : '');
     status($('#credentials-overview'), saved ? label : 'Connect your account →', verified ? 'good' : failed ? 'bad' : '');
-    $('#verification-result').textContent = !saved ? 'Save your Lingos login first.' : verified ? `Connected · ${dateLabel(verification.finished_at)}. Classes synced.` : checking ? 'Checking saved login…' : failed ? 'Check did not complete. See Dashboard for details.' : 'Not checked yet.';
+    $('#verification-result').textContent = !saved ? 'Save your Lingos login first.' : checking ? 'Checking saved login…' : failed ? 'Check did not complete. See Dashboard for details.' : verified ? `Verified ${dateLabel(state.credentials.verified_at)}. Classes synced.` : 'Not checked yet.';
     $('#verification-result').classList.toggle('error', Boolean(failed));
     $('#verify-credentials').textContent = checking ? 'Verifying…' : 'Verify credentials';
-    $('#remove-credentials').disabled = !saved;
-    $('#save-credentials').disabled = false;
-    $('#credentials-fields').disabled = false;
-    updateRunControls();
+    if (!$('#credentials-form').hasAttribute('aria-busy')) {
+      $('#remove-credentials').disabled = !saved;
+      $('#save-credentials').disabled = false;
+      $('#credentials-fields').disabled = false;
+      updateRunControls();
+    }
   }
-  async function loadCredentials() {
+  async function loadCredentials(fill = true) {
+    const credentials = state.credentials;
     message('#credentials-error', '');
     try {
       const data = await api('/api/credentials');
       if (typeof data?.saved !== 'boolean') throw new Error('Your credential status could not be read.');
+      if (state.credentials !== credentials) return;
       state.credentials = data;
-      $('#credentials-email').value = data.email || '';
+      if (fill) $('#credentials-email').value = data.email || '';
       renderCredentials();
       $('#retry-credentials').hidden = true;
     } catch (error) {
+      if (state.credentials !== credentials) return;
       message('#credentials-error', error.message);
-      status($('#credentials-state'), 'Unavailable', 'bad');
-      status($('#credentials-overview'), 'Check account connection', 'bad');
+      if (state.credentials) renderCredentials();
+      else {
+        status($('#credentials-state'), 'Unavailable', 'bad');
+        status($('#credentials-overview'), 'Check account connection', 'bad');
+        updateRunControls();
+      }
       $('#retry-credentials').hidden = false;
-      updateRunControls();
     }
   }
   $('#retry-credentials').addEventListener('click', loadCredentials);
@@ -1148,8 +1183,7 @@ function initWorkspace() {
     const payload = { email: $('#credentials-email').value.trim(), password: $('#credentials-password').value };
     if (!payload.password) return;
     await withForm(event.currentTarget, '#credentials-error', async () => {
-      await api('/api/credentials', { method: 'PUT', body: payload });
-      state.credentials = { saved: true, email: payload.email };
+      state.credentials = await api('/api/credentials', { method: 'PUT', body: payload });
       state.verification = null;
       resetSecrets($('#credentials-form'));
       notify('Lingos login saved. Ready to verify.');
@@ -1159,8 +1193,7 @@ function initWorkspace() {
   $('#remove-credentials').addEventListener('click', async () => {
     if (!await confirmAction('Remove Lingos credentials?', 'New runs cannot connect until you save credentials again. Your library and history will stay saved.', 'Remove credentials')) return;
     await withForm($('#credentials-form'), '#credentials-error', async () => {
-      await api('/api/credentials', { method: 'DELETE' });
-      state.credentials = { saved: false, email: '' };
+      state.credentials = await api('/api/credentials', { method: 'DELETE' });
       state.verification = null;
       $('#credentials-email').value = '';
       resetSecrets($('#credentials-form'));
@@ -1375,5 +1408,5 @@ function initWorkspace() {
     if (!document.hidden && !$('#account').hidden) loadTelegram();
     else stopTelegramPolling();
   });
-  Promise.allSettled([loadSettings(), loadClasses(), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadLatestResult(), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
+  Promise.allSettled([loadSettings(), loadClasses().then(loadLatestResult), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadAccount().then(loadUsers)]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
 }

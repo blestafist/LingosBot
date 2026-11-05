@@ -1,6 +1,4 @@
-# Paths are relative to the repository-root build context.
-docker-webui/.env
-docker-webui/data/
-docker-webui/docker-webui
-worker-server-rust/target/
-.git/
+# Only the release downloader is needed; never send credentials or databases.
+**
+!deploy/
+!deploy/download_release.py

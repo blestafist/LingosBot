@@ -131,7 +131,11 @@ func (x *app) launchRun(userID int64, mode, id, source string, due *int64, lesso
 		return 0, err
 	}
 	s.MaxRunSeconds = min(s.MaxRunSeconds, limit)
-	email, password, err := x.loadCredentials(userID)
+	email, encrypted, err := x.loadEncryptedCredentials(userID)
+	if err != nil {
+		return 0, errCredentials
+	}
+	password, err := x.decryptCredentials(userID, encrypted, true)
 	if err != nil {
 		return 0, errCredentials
 	}
@@ -215,7 +219,7 @@ func (x *app) launchRun(userID int64, mode, id, source string, due *int64, lesso
 	x.cancels[runID] = cancel
 	x.workers.Add(1)
 	started = true
-	go x.collectRun(ctx, cancel, waitWorker, out, runID, userID, mode, id)
+	go x.collectRun(ctx, cancel, waitWorker, out, runID, userID, mode, id, email, encrypted)
 	return runID, nil
 }
 
@@ -239,7 +243,7 @@ func (x *app) cancelUserRuns(userID int64) error {
 	return rows.Err()
 }
 
-func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWorker func() error, out io.ReadCloser, runID, userID int64, mode, class string) {
+func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWorker func() error, out io.ReadCloser, runID, userID int64, mode, class, email string, encrypted []byte) {
 	defer x.workers.Done()
 	defer x.workerMu.Unlock()
 	defer cancel()
@@ -355,6 +359,16 @@ func (x *app) collectRun(ctx context.Context, cancel context.CancelFunc, waitWor
 			status, summary = "failed", "The worker stopped before its vocabulary result could be saved."
 		} else if err := x.saveAllVocabulary(userID, allClasses, allScrapes); err != nil {
 			status, summary = "failed", "The worker finished, but its result could not be saved."
+		}
+	}
+	if mode == "classes" && status == "completed" {
+		if waitErr != nil || ctx.Err() != nil {
+			status, summary = "failed", "The worker stopped before its credential check could finish."
+		} else {
+			// Each save uses a fresh encryption nonce, so an older check cannot verify replacement credentials.
+			if _, err := x.db.Exec(`UPDATE user_credentials SET verified_at=? WHERE user_id=? AND email=? AND password=?`, time.Now().Unix(), userID, email, encrypted); err != nil {
+				status, summary = "failed", "Classes synced, but credential verification could not be saved."
+			}
 		}
 	}
 	x.finishRun(runID, status, summary)

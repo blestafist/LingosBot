@@ -20,6 +20,12 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
+  test-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s deploy/tests -v
+
   test-rust:
     runs-on: ubuntu-latest
     defaults:
@@ -280,7 +286,7 @@ jobs:
   draft-release:
     # Only tags v*. Branch pushes, PRs and manual runs on branches stop above.
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    needs: [test-rust, test-desktop, test-webui, build-rust, build-desktop, build-webui]
+    needs: [test-deploy, test-rust, test-desktop, test-webui, build-rust, build-desktop, build-webui]
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.ref }}

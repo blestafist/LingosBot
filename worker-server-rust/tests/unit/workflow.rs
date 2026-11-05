@@ -558,8 +558,20 @@ fn challenge_observation_is_marked_at_the_lesson_count_it_was_read() {
         {"id":3,"title":"C","description":"available","prize":-1,"status":"available"}
     ]);
     let mut stats = RunStats::default();
+    let empty = serde_json::to_value(&stats).unwrap();
+    assert_eq!(empty["challenge_snapshot"], Value::Null);
+    assert_eq!(empty["challenge_snapshots"], json!([]));
     observe_dashboard(&mut stats, &parse_dashboard(&page, None).unwrap());
     stats.lessons_completed = 1;
+    assert_eq!(stats.challenge_snapshots.len(), 1);
+    assert_eq!(
+        stats.challenge_snapshots[0].lessons_completed_at_snapshot,
+        0
+    );
+    assert_eq!(
+        stats.challenge_snapshot.as_ref(),
+        stats.challenge_snapshots.first()
+    );
     let snapshot = stats.challenge_snapshot.unwrap();
     assert_eq!(snapshot.lessons_completed_at_snapshot, 0);
     assert_eq!(
@@ -567,6 +579,7 @@ fn challenge_observation_is_marked_at_the_lesson_count_it_was_read() {
         (1, 1, 1)
     );
     let serialized = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(serialized["group_id"], "1");
     assert_eq!(serialized["active_id"], "9223372036854775807");
     assert_eq!(
         serialized["challenges"],
@@ -603,7 +616,7 @@ fn lesson_statistics_accumulate_without_partial_updates_on_overflow() {
 }
 
 #[test]
-fn latest_dashboard_replaces_challenge_items_and_snapshot_is_owned() {
+fn latest_dashboard_is_retained_per_group_and_existing_groups_are_updated() {
     let mut page = dashboard();
     page["dashboard"]["challenges"] = json!([
         {"id":1,"title":"Old","description":"Old description","prize":5,"status":"in_progress"}
@@ -616,11 +629,28 @@ fn latest_dashboard_replaces_challenge_items_and_snapshot_is_owned() {
     page["dashboard"]["currentGroup"]["id"] = json!(2);
     page["dashboard"]["challenges"] = json!([]);
     observe_dashboard(&mut stats, &parse_dashboard(&page, Some(2)).unwrap());
-    let current = stats.challenge_snapshot.unwrap();
+    let current = stats.challenge_snapshot.as_ref().unwrap();
     assert_eq!(current.group_id, 2);
     assert_eq!(current.lessons_completed_at_snapshot, 2);
     assert!(current.challenges.is_empty());
     assert_eq!(current.active_id, None);
+    assert_eq!(stats.challenge_snapshots, [saved.clone(), current.clone()]);
+    let second = current.clone();
+    stats.lessons_completed = 3;
+    page["dashboard"]["currentGroup"]["id"] = json!(1);
+    observe_dashboard(&mut stats, &parse_dashboard(&page, Some(1)).unwrap());
+    assert_eq!(stats.challenge_snapshots.len(), 2);
+    let updated = &stats.challenge_snapshots[0];
+    assert_eq!(updated.group_id, 1);
+    assert_eq!(updated.lessons_completed_at_snapshot, 3);
+    assert_eq!(
+        (updated.available, updated.in_progress, updated.completed),
+        (0, 0, 0)
+    );
+    assert_eq!(updated.active_id, None);
+    assert!(updated.challenges.is_empty());
+    assert_eq!(stats.challenge_snapshots[1], second);
+    assert_eq!(stats.challenge_snapshot.as_ref(), Some(updated));
     assert_eq!(saved.challenges[0].title, "Old");
     assert_eq!(saved.active_id, Some(1));
 }

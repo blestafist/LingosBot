@@ -1,4 +1,5 @@
 /.env
 /data/
+/.data/
 /docker-webui
 !/internal/webui/web/templates/*.html

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classCounts, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, durationLabel, lessonReport, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
+import { classCounts, settingsPayload, settingsSignature, timezoneError, schedulePayload, normalizeSchedule, scheduleSummary, httpDescription, eventDescription, durationLabel, lessonReport, lessonProgress, lessonProgressValue, dateLabel, exportURL, passwordError, filterLibrary, selectTopics } from './helpers.js';
 
 test('class overrides preserve titles, skip blank defaults, accept zero and reject duplicate or excessive counts', () => {
   assert.deepEqual({ ...classCounts([{ title: 'My class', count: '' }, { title: 'Skipped', count: '0' }]) }, { Skipped: 0 });
@@ -64,14 +64,14 @@ test('duration labels round seconds, use compact units and reject unknown or inv
 
 test('missing final reports never invent totals but may show elapsed run duration', () => {
   for (const result of [undefined, null]) {
-    const report = { metrics: [], note: 'No final worker report was saved. Totals are unavailable.', challenge: null };
+    const report = { metrics: [], note: 'No final worker report was saved. Totals are unavailable.', challenges: [] };
     assert.deepEqual(lessonReport(undefined, result), report);
     assert.deepEqual(lessonReport({ created_at: 100, finished_at: 165 }, result), { ...report, metrics: [{ label: 'Duration', value: '1m 5s' }] });
   }
 });
 
 test('sparse reports include only finite nonnegative numbers, without coercing strings or inventing fields', () => {
-  assert.deepEqual(lessonReport({}, {}), { metrics: [], note: '', challenge: null });
+  assert.deepEqual(lessonReport({}, {}), { metrics: [], note: '', challenges: [] });
   assert.deepEqual(lessonReport(null, { lessons_completed: 2, words_learned: '30', duration_seconds: Infinity, errors_made: -1, classes_limited: null, classes_empty: NaN }).metrics, [{ label: 'Lessons', value: '2' }]);
   for (const value of [undefined, null, '', '0', true, false, NaN, Infinity, -Infinity, -1, {}, []]) {
     assert.deepEqual(lessonReport({}, { lessons_completed: value, words_learned: value, duration_seconds: value, errors_made: value, classes_limited: value, classes_empty: value }).metrics, []);
@@ -81,7 +81,7 @@ test('sparse reports include only finite nonnegative numbers, without coercing s
 
 test('explicit zero metrics remain visible in dashboard order', () => {
   assert.deepEqual(lessonReport({ created_at: 100, finished_at: 165 }, { lessons_completed: 0, words_learned: 0, duration_seconds: 0, errors_made: 0, classes_limited: 0, classes_empty: 0 }).metrics,
-    ['Lessons', 'Words learned', 'Duration', 'Errors', 'Classes at limit', 'Empty classes'].map(label => ({ label, value: label === 'Duration' ? '0s' : '0' })));
+    ['Lessons', 'Words learned', 'Duration', 'Errors'].map(label => ({ label, value: label === 'Duration' ? '0s' : '0' })));
 });
 
 test('elapsed duration is a fallback only, with finite positive ordered timestamps', () => {
@@ -98,7 +98,7 @@ test('elapsed duration is a fallback only, with finite positive ordered timestam
 
 test('only failed reports display a string worker message without inventing totals', () => {
   const report = lessonReport({ created_at: 100, finished_at: 105 }, { success: false, message: 'Sign-in failed.' });
-  assert.deepEqual(report, { metrics: [{ label: 'Duration', value: '5s' }], note: 'Sign-in failed.', challenge: null });
+  assert.deepEqual(report, { metrics: [{ label: 'Duration', value: '5s' }], note: 'Sign-in failed.', challenges: [] });
   for (const result of [{ success: true, message: 'Done' }, { message: 'Not a failure' }, { success: false }, { success: false, message: {} }]) assert.equal(lessonReport(null, result).note, '');
 });
 
@@ -108,44 +108,91 @@ test('challenge snapshots describe only the last observed class and warn when su
     challenges: [{ title: 'First', status: 'available', points: 0 }, { title: 'Second', status: 'in_progress', points: 20 }, { title: 'Third', status: 'completed', points: -1 }],
   } };
   const before = structuredClone(result);
-  assert.deepEqual(lessonReport(null, result).challenge, {
-    title: 'Wyzwania · class 9223372036854775807',
-    note: 'Last check for this class only. Not live. More lessons ran after this check.',
-    counts: '1 available · 1 in progress · 1 completed',
+  assert.deepEqual(lessonReport(null, result).challenges, [{
+    title: 'Class 9223372036854775807',
+    note: 'Saved snapshot · not live. Recorded before the run finished.',
+    counts: [{ label: 'available', value: 1 }, { label: 'in progress', value: 1 }, { label: 'completed', value: 1 }],
     items: ['First · available · 0 points', 'Second · in progress · 20 points', 'Third · completed · -1 points'],
-  });
+  }]);
   assert.deepEqual(result, before);
 });
 
 test('unknown snapshot freshness never promises the final state', () => {
   for (const [observed, total] of [[undefined, 2], [2, undefined], ['2', 2], [2, '2'], [NaN, 2], [-1, 2]]) {
-    const { challenge } = lessonReport(null, { lessons_completed: total, challenge_snapshot: { group_id: '7', lessons_completed_at_snapshot: observed } });
-    assert.match(challenge.note, /Last check for this class only. Not live/);
+    const { challenges: [challenge] } = lessonReport(null, { lessons_completed: total, challenge_snapshot: { group_id: '7', lessons_completed_at_snapshot: observed } });
+    assert.match(challenge.note, /Saved snapshot · not live/);
     assert.match(challenge.note, /Final state not confirmed/);
-    assert.doesNotMatch(challenge.note, /More lessons ran/);
+    assert.doesNotMatch(challenge.note, /Recorded before/);
   }
-  const { challenge } = lessonReport(null, { lessons_completed: 0, challenge_snapshot: { group_id: '7', lessons_completed_at_snapshot: 0 } });
-  assert.equal(challenge.note, 'Last check for this class only. Not live.');
+  const { challenges: [challenge] } = lessonReport(null, { lessons_completed: 0, challenge_snapshot: { group_id: '7', lessons_completed_at_snapshot: 0 } });
+  assert.equal(challenge.note, 'Saved snapshot · not live.');
 });
 
 test('missing challenge snapshots and unknown counts differ from an observed zero available count', () => {
-  for (const challenge_snapshot of [undefined, null, false, 'missing', []]) assert.equal(lessonReport(null, { challenge_snapshot }).challenge, null);
-  const unknown = lessonReport(null, { challenge_snapshot: { group_id: '7', available: '0', in_progress: -1, completed: Infinity } }).challenge;
-  assert.equal(unknown.counts, '');
+  for (const challenge_snapshot of [undefined, null, false, 'missing', []]) assert.deepEqual(lessonReport(null, { challenge_snapshot }).challenges, []);
+  const [unknown] = lessonReport(null, { challenge_snapshot: { group_id: '7', available: '0', in_progress: -1, completed: Infinity } }).challenges;
+  assert.deepEqual(unknown.counts, []);
   assert.deepEqual(unknown.items, []);
-  const zero = lessonReport(null, { challenge_snapshot: { group_id: '7', available: 0 } }).challenge;
-  assert.equal(zero.counts, '0 available');
+  const [zero] = lessonReport(null, { challenge_snapshot: { group_id: '7', available: 0 } }).challenges;
+  assert.deepEqual(zero.counts, [{ label: 'available', value: 0 }]);
   assert.deepEqual(zero.items, []);
 });
 
 test('untrusted challenge and failure text stays an inert string, without HTML escaping or object coercion', () => {
   const text = '<img src=x onerror=alert(1)> &lt;script&gt; "&';
-  const { note, challenge } = lessonReport(null, { success: false, message: text, challenge_snapshot: {
+  const { note, challenges: [challenge] } = lessonReport(null, { success: false, message: text, challenge_snapshot: {
     group_id: text, challenges: [{ title: text, status: 'in_progress', points: 0 }, null, { title: {}, status: '__proto__', points: '5' }],
   } });
   assert.equal(note, text);
-  assert.equal(challenge.title, `Wyzwania · class ${text}`);
+  assert.equal(challenge.title, `Class ${text}`);
   assert.deepEqual(challenge.items, [`${text} · in progress · 0 points`, 'Challenge']);
+});
+
+test('reports display every observed class once using cached titles and support old worker results', () => {
+  const first = { group_id: '7', available: 1, lessons_completed_at_snapshot: 0 };
+  const second = { group_id: '8', completed: 2, lessons_completed_at_snapshot: 1 };
+  const result = { lessons_completed: 2, challenge_snapshot: second, challenge_snapshots: [first, second] };
+  const classes = [{ group_id: '7', title: 'English' }, { group_id: '8', title: 'French' }];
+  const report = lessonReport(null, result, classes);
+  assert.deepEqual(report.challenges.map(item => item.title), ['English', 'French']);
+  assert.ok(report.challenges.every(item => item.note.includes('not live')));
+  for (const challenge_snapshots of [undefined, null, [], 'invalid']) {
+    assert.equal(lessonReport(null, { ...result, challenge_snapshots }, classes).challenges[0].title, 'French');
+  }
+});
+
+test('lesson progress fills on completion of a resumed lesson without inventing learned words', () => {
+  let progress = lessonProgress(undefined, { type: 'lesson_start', class_title: 'English', lesson: 1, lessons_total: 2 });
+  assert.equal(lessonProgressValue(progress.lesson), 0);
+  progress = lessonProgress(progress, { type: 'lesson_answer', words_learned: 7 });
+  assert.equal(lessonProgressValue(progress.lesson), 7);
+  const before = structuredClone(progress);
+  const complete = lessonProgress(progress, { type: 'lesson_complete', class_title: 'English', lesson: 1, lessons_total: 2, words_learned: 7 });
+  assert.deepEqual(progress, before);
+  assert.equal(lessonProgressValue(complete.lesson), 20);
+  assert.equal(complete.words, 7);
+  assert.equal(complete.lessons, 1);
+  progress = lessonProgress(complete, { type: 'lesson_start', class_title: 'French', lesson: 1, lessons_total: 1 });
+  assert.equal(lessonProgressValue(progress.lesson), 0);
+  assert.equal(progress.words, 7);
+  assert.equal(progress.lesson.title, 'French');
+});
+
+test('progress is bounded and monotonic, invalid events and failure do not complete lessons', () => {
+  let progress = lessonProgress(undefined, { type: 'lesson_start' });
+  progress = lessonProgress(progress, { type: 'lesson_answer', words_learned: 9 });
+  for (const words_learned of [null, -1, '20', Infinity, NaN, 4]) {
+    progress = lessonProgress(progress, { type: 'lesson_answer', words_learned });
+    assert.equal(lessonProgressValue(progress.lesson), 9);
+  }
+  for (const event of [{ type: 'error' }, { type: 'result', success: false }, { type: 'result', success: true, lessons_completed: 0 }]) {
+    progress = lessonProgress(progress, event);
+    assert.equal(lessonProgressValue(progress.lesson), 9);
+  }
+  assert.equal(lessonProgressValue(lessonProgress(progress, { type: 'lesson_answer', words_learned: 21 }).lesson), 20);
+  const final = lessonProgress(progress, { type: 'result', lessons_completed: 3, words_learned: 47 });
+  assert.equal(final.lessons, 3); assert.equal(final.words, 47);
+  assert.equal(lessonProgress(undefined, { type: 'lesson_answer', words_learned: 7 }).lesson, null);
 });
 
 test('settings dirty state ignores class key order and passwords enforce rune and UTF-8 limits', () => {
