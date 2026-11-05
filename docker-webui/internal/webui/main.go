@@ -168,6 +168,7 @@ func (x *app) routes() http.Handler {
 	mux.Handle("GET /static/", staticFiles())
 	mux.HandleFunc("GET /{$}", x.home)
 	mux.HandleFunc("POST /login", x.login)
+	mux.HandleFunc("/register", x.register)
 	mux.HandleFunc("POST /logout", x.logout)
 	mux.HandleFunc("/api/account", x.accountAPI)
 	mux.HandleFunc("/api/credentials", x.credentialsAPI)
@@ -175,6 +176,7 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/telegram/link", x.telegramLinkAPI)
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
+	mux.HandleFunc("/api/admin/registration", x.registrationAPI)
 	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
 	mux.HandleFunc("/api/admin/telegram/", x.adminTelegramAPI)
 	mux.HandleFunc("/api/settings", x.settingsAPI)
@@ -200,7 +202,11 @@ func env(k, d string) string {
 func (x *app) home(w http.ResponseWriter, r *http.Request) {
 	u, in := x.user(r)
 	_, csrf := x.session(r)
-	data := map[string]any{"In": in, "User": u, "CSRF": csrf, "LoginError": r.URL.Query().Get("error") == "1"}
+	mode, err := x.registrationMode(r.Context())
+	if err != nil {
+		log.Printf("load registration policy: %v", err)
+	}
+	data := map[string]any{"In": in, "User": u, "CSRF": csrf, "LoginError": r.URL.Query().Get("error") == "1", "RegistrationMode": mode}
 	if err := page.ExecuteTemplate(w, "index.html", data); err != nil {
 		log.Printf("render page: %v", err)
 	}

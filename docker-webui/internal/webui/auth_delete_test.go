@@ -207,6 +207,59 @@ func TestAuthAdminDeleteFullCleanup(t *testing.T) {
 	}
 }
 
+func TestAuthAdminDeletePendingPrecondition(t *testing.T) {
+	for _, state := range []string{"pending", "approved", "approved with active run"} {
+		t.Run(state, func(t *testing.T) {
+			x := integrationApp(t)
+			id := authTestUser(t, x, "pending@example.com", false)
+			if _, err := x.db.Exec(`UPDATE users SET disabled=1,pending=1 WHERE id=?`, id); err != nil {
+				t.Fatal(err)
+			}
+			a, ac := authTestSession(t, x, 1)
+			path := fmt.Sprintf("/api/admin/users/%d", id)
+			if state != "pending" {
+				if w := authTestRequest(x.adminUsersAPI, "PATCH", path, `{"approve":true}`, a, ac); w.Code != http.StatusOK {
+					t.Fatalf("approve: %d %s", w.Code, w.Body.String())
+				}
+			}
+			runID := seedAuthDeleteData(t, x, id)
+			token, _ := authTestSession(t, x, id)
+			if state == "approved with active run" {
+				if _, err := x.db.Exec(`UPDATE runs SET status='running' WHERE id=?`, runID); err != nil {
+					t.Fatal(err)
+				}
+				x.cancels = map[int64]context.CancelFunc{runID: func() { t.Error("stale rejection canceled a run") }}
+			}
+			w := authTestRequest(x.routes().ServeHTTP, "DELETE", path+"?pending=1", "", a, ac)
+			if state == "pending" {
+				if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"deleted":true}` {
+					t.Fatalf("reject pending: %d %s", w.Code, w.Body.String())
+				}
+				checkAuthDeleteData(t, x, id, runID, 0)
+				return
+			}
+			if w.Code != http.StatusConflict || strings.TrimSpace(w.Body.String()) != `{"error":"registration request is no longer pending"}` {
+				t.Fatalf("stale rejection: %d %s", w.Code, w.Body.String())
+			}
+			checkAuthDeleteData(t, x, id, runID, 1)
+			if w := authTestRequest(x.accountAPI, "GET", "/api/account", "", token, ""); w.Code != http.StatusOK {
+				t.Fatalf("stale rejection revoked session: %d %s", w.Code, w.Body.String())
+			}
+			if email, password, err := x.loadCredentials(id); err != nil || email != "lingos@example.com" || password != "lingos secret" {
+				t.Fatalf("stale rejection changed credentials: %q %q %v", email, password, err)
+			}
+			var status string
+			wantStatus := "completed"
+			if state == "approved with active run" {
+				wantStatus = "running"
+			}
+			if err := x.db.QueryRow(`SELECT status FROM runs WHERE id=?`, runID).Scan(&status); err != nil || status != wantStatus {
+				t.Fatalf("stale rejection changed run: %q %v", status, err)
+			}
+		})
+	}
+}
+
 func TestAuthAdminDeleteBusy(t *testing.T) {
 	for _, state := range []string{"running record", "terminal live worker", "other live worker"} {
 		t.Run(state, func(t *testing.T) {

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS schedule (id INTEGER PRIMARY KEY CHECK(id=1), enabled
 INSERT OR IGNORE INTO schedule(id,enabled,time,lessons,errors) VALUES(1,0,'09:00',1,0);
 CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash BLOB NOT NULL,
- admin INTEGER NOT NULL DEFAULT 0 CHECK(admin IN (0,1)), disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)), created_at INTEGER NOT NULL
+ admin INTEGER NOT NULL DEFAULT 0 CHECK(admin IN (0,1)), disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)), created_at INTEGER NOT NULL,
+ pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1) AND (pending=0 OR disabled=1))
 );
 CREATE TABLE IF NOT EXISTS user_id_counter (id INTEGER PRIMARY KEY CHECK(id=1), last_id INTEGER NOT NULL CHECK(last_id>=0));
 INSERT OR IGNORE INTO user_id_counter(id,last_id) VALUES(1,0);
@@ -46,9 +47,20 @@ CREATE TABLE IF NOT EXISTS user_credentials (
 CREATE TABLE IF NOT EXISTS auth_meta (key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS auth_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS auth_limits_expiry ON auth_limits(expires);
+CREATE TABLE IF NOT EXISTS registration_policy (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL CHECK(mode IN ('admin_only','approval','open')));
+INSERT OR IGNORE INTO registration_policy(id,mode) VALUES(1,'admin_only');
 `)
 	if err != nil {
 		return err
+	}
+	var pendingColumn bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name='pending')`).Scan(&pendingColumn); err != nil {
+		return err
+	}
+	if !pendingColumn {
+		if _, err = tx.Exec(`ALTER TABLE users ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1) AND (pending=0 OR disabled=1))`); err != nil {
+			return err
+		}
 	}
 	var verifiedColumn bool
 	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('user_credentials') WHERE name='verified_at')`).Scan(&verifiedColumn); err != nil {

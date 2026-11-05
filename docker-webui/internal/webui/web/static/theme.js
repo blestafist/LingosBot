@@ -1,17 +1,25 @@
 (() => {
-  const choices = ['system', 'light', 'dark'];
-  let choice = 'system';
-  try { choice = localStorage.getItem('lingos-theme') || 'system'; } catch { /* Storage can be disabled. */ }
-  if (!choices.includes(choice)) choice = 'system';
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  let choice, button;
+  try { choice = localStorage.getItem('lingos-theme'); } catch { /* Storage can be disabled. */ }
+  if (choice !== 'light' && choice !== 'dark') choice = null;
   function apply() {
-    document.documentElement.dataset.theme = choice;
+    const theme = choice || (systemTheme.matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+    if (button) {
+      const label = `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('title', label);
+    }
   }
   apply();
+  systemTheme.addEventListener('change', apply);
   document.addEventListener('DOMContentLoaded', () => {
-    const select = document.getElementById('theme-choice');
-    select.value = choice;
-    select.addEventListener('change', () => {
-      choice = choices.includes(select.value) ? select.value : 'system';
+    button = document.getElementById('theme-toggle');
+    if (!button) return;
+    apply();
+    button.addEventListener('click', () => {
+      choice = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       apply();
       try { localStorage.setItem('lingos-theme', choice); } catch { /* Keep the choice for this page. */ }
     });

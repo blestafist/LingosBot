@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -349,17 +348,21 @@ func (x *app) telegramLoop(ctx context.Context) {
 }
 
 func telegramNotificationText(run RunRecord) string {
-	mode := map[string]string{"run": "Lessons", "classes": "Class sync", "scrape": "Vocabulary", "scrape_all": "All vocabulary"}[run.Mode]
-	if mode == "" {
-		mode = "Task"
+	text := map[string]string{"completed": "✅ Lessons complete", "failed": "❌ Lessons failed", "cancelled": "⏹ Lessons stopped", "interrupted": "⚠️ Lessons interrupted"}[run.Status]
+	if text == "" {
+		text = "Lessons update"
 	}
-	status := map[string]string{"completed": "Completed", "failed": "Failed", "cancelled": "Cancelled", "interrupted": "Interrupted"}[run.Status]
-	source := "manual"
-	if run.Source == "schedule" {
-		source = "schedule"
+	summary := []rune(strings.Join(strings.Fields(run.Summary), " "))
+	if len(summary) > 180 {
+		summary = append(summary[:179], '…')
 	}
-	summary := []rune(run.Summary)
-	return fmt.Sprintf("LingosBot · %s\nRun #%d · %s\nStatus: %s\n%s", mode, run.ID, source, status, string(summary[:min(len(summary), 1000)]))
+	if len(summary) > 0 {
+		text += "\n" + string(summary)
+	}
+	if run.CreatedAt > 0 && run.FinishedAt >= run.CreatedAt {
+		text += "\n⏱ " + time.Unix(run.FinishedAt, 0).Sub(time.Unix(run.CreatedAt, 0)).String()
+	}
+	return text
 }
 
 func (x *app) deliverTelegramNotification(ctx context.Context) (bool, error) {
@@ -367,12 +370,12 @@ func (x *app) deliverTelegramNotification(ctx context.Context) (bool, error) {
 	var chatID, linkedAt int64
 	var attempts int
 	var active bool
-	err := x.db.QueryRowContext(ctx, `SELECT q.run_id,q.chat_id,q.attempts,r.user_id,r.mode,r.source,r.status,r.summary,
-		coalesce(l.linked_at,0),coalesce(l.notifications=1 AND u.disabled=0 AND r.status IN ('completed','failed','cancelled','interrupted'),0)
+	err := x.db.QueryRowContext(ctx, `SELECT q.run_id,q.chat_id,q.attempts,r.user_id,r.mode,r.source,r.status,r.summary,r.created_at,r.finished_at,
+		coalesce(l.linked_at,0),coalesce(l.notifications=1 AND u.disabled=0 AND r.mode='run' AND r.status IN ('completed','failed','cancelled','interrupted'),0)
 		FROM telegram_outbox q JOIN runs r ON r.id=q.run_id JOIN users u ON u.id=r.user_id
 		LEFT JOIN telegram_links l ON l.user_id=r.user_id AND l.chat_id=q.chat_id
-		WHERE q.next_attempt<=? OR l.user_id IS NULL OR l.notifications=0 OR u.disabled=1 OR r.status NOT IN ('completed','failed','cancelled','interrupted')
-		ORDER BY q.run_id LIMIT 1`, time.Now().Unix()).Scan(&run.ID, &chatID, &attempts, &run.UserID, &run.Mode, &run.Source, &run.Status, &run.Summary, &linkedAt, &active)
+		WHERE q.next_attempt<=? OR l.user_id IS NULL OR l.notifications=0 OR u.disabled=1 OR r.mode<>'run' OR r.status NOT IN ('completed','failed','cancelled','interrupted')
+		ORDER BY q.run_id LIMIT 1`, time.Now().Unix()).Scan(&run.ID, &chatID, &attempts, &run.UserID, &run.Mode, &run.Source, &run.Status, &run.Summary, &run.CreatedAt, &run.FinishedAt, &linkedAt, &active)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
