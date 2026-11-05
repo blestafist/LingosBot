@@ -133,6 +133,28 @@ export function eventDescription(event) {
 }
 
 const nonnegativeNumber = value => Number.isFinite(value) && value >= 0;
+export function lessonProgress(previous = { lessons: 0, words: 0, lesson: null }, event) {
+  const progress = { ...previous };
+  if (event.type === 'lesson_start') {
+    progress.lesson = { title: event.class_title || 'Class', number: event.lesson, total: event.lessons_total, words: 0, complete: false };
+  } else if (event.type === 'lesson_answer' && progress.lesson && !progress.lesson.complete && nonnegativeNumber(event.words_learned)) {
+    progress.lesson = { ...progress.lesson, words: Math.max(progress.lesson.words, event.words_learned) };
+  } else if (event.type === 'lesson_complete') {
+    progress.lessons++;
+    progress.words += nonnegativeNumber(event.words_learned) ? event.words_learned : 0;
+    progress.lesson = { title: event.class_title || progress.lesson?.title || 'Class', number: event.lesson, total: event.lessons_total,
+      words: nonnegativeNumber(event.words_learned) ? event.words_learned : progress.lesson?.words ?? 0, complete: true };
+  } else if (event.type === 'result') {
+    if (nonnegativeNumber(event.lessons_completed)) progress.lessons = event.lessons_completed;
+    if (nonnegativeNumber(event.words_learned)) progress.words = event.words_learned;
+  }
+  return progress;
+}
+
+export function lessonProgressValue(lesson) {
+  return lesson?.complete ? 20 : Math.min(20, lesson?.words ?? 0);
+}
+
 export function durationLabel(seconds) {
   if (!nonnegativeNumber(seconds)) return '—';
   const total = Math.round(seconds);
@@ -143,39 +165,38 @@ export function durationLabel(seconds) {
   return `${total}s`;
 }
 
-export function lessonReport(run, result) {
+export function lessonReport(run, result, classes = []) {
   const duration = nonnegativeNumber(result?.duration_seconds) ? result.duration_seconds
     : Number.isFinite(run?.created_at) && run.created_at > 0 && Number.isFinite(run?.finished_at) && run.finished_at > 0 && run.finished_at >= run.created_at
       ? run.finished_at - run.created_at : undefined;
   const metrics = [
     ['Lessons', result?.lessons_completed], ['Words learned', result?.words_learned], ['Duration', duration],
-    ['Errors', result?.errors_made], ['Classes at limit', result?.classes_limited], ['Empty classes', result?.classes_empty],
+    ['Errors', result?.errors_made],
   ].filter(([, value]) => nonnegativeNumber(value)).map(([label, value]) => ({ label, value: label === 'Duration' ? durationLabel(value) : String(value) }));
   const note = !result ? 'No final worker report was saved. Totals are unavailable.'
     : result.success === false && typeof result.message === 'string' ? result.message : '';
-  let challenge = null;
-  const snapshot = result?.challenge_snapshot;
-  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+  const snapshots = Array.isArray(result?.challenge_snapshots) && result.challenge_snapshots.length ? result.challenge_snapshots : [result?.challenge_snapshot];
+  const challenges = snapshots.filter(snapshot => snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)).map(snapshot => {
     const group = typeof snapshot.group_id === 'string' || Number.isFinite(snapshot.group_id) ? snapshot.group_id : '—';
-    let snapshotNote = 'Last check for this class only. Not live.';
+    let snapshotNote = 'Saved snapshot · not live.';
     if (!nonnegativeNumber(snapshot.lessons_completed_at_snapshot) || !nonnegativeNumber(result.lessons_completed)) {
       snapshotNote += ' Final state not confirmed.';
     } else if (snapshot.lessons_completed_at_snapshot < result.lessons_completed) {
-      snapshotNote += ' More lessons ran after this check.';
+      snapshotNote += ' Recorded before the run finished.';
     }
-    challenge = {
-      title: `Wyzwania · class ${group}`,
+    return {
+      title: classes.find(item => String(item.group_id) === String(group))?.title || `Class ${group}`,
       note: snapshotNote,
       counts: [['available', snapshot.available], ['in progress', snapshot.in_progress], ['completed', snapshot.completed]]
-        .filter(([, value]) => nonnegativeNumber(value)).map(([label, value]) => `${value} ${label}`).join(' · '),
+        .filter(([, value]) => nonnegativeNumber(value)).map(([label, value]) => ({ label, value })),
       items: (Array.isArray(snapshot.challenges) ? snapshot.challenges : []).filter(item => item && typeof item === 'object' && !Array.isArray(item)).map(item => [
         typeof item.title === 'string' ? item.title : 'Challenge',
         ['available', 'in_progress', 'completed'].includes(item.status) ? item.status.replace('_', ' ') : '',
         Number.isFinite(item.points) ? `${item.points} points` : '',
       ].filter(Boolean).join(' · ')),
     };
-  }
-  return { metrics, note, challenge };
+  });
+  return { metrics, note, challenges };
 }
 
 export function dateLabel(seconds, timezone) {

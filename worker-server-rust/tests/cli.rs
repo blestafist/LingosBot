@@ -896,6 +896,22 @@ fn complete_cli_runs_all_classes_challenges_and_lessons() {
     assert_eq!(result["success"], true);
     assert_eq!(result["username"], "test@example.org");
     assert_eq!(result["words_learned"], 4);
+    assert_eq!(result["lessons_completed"], 4);
+    let snapshots = result["challenge_snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 2);
+    assert_eq!(snapshots[0]["group_id"], "1");
+    assert_eq!(snapshots[0]["lessons_completed_at_snapshot"], 2);
+    assert_eq!(snapshots[1]["group_id"], "2");
+    assert_eq!(snapshots[1]["lessons_completed_at_snapshot"], 3);
+    assert_eq!(result["challenge_snapshot"], snapshots[1]);
+    for snapshot in snapshots {
+        assert_eq!(snapshot["available"], 0);
+        assert_eq!(snapshot["in_progress"], 1);
+        assert_eq!(snapshot["completed"], 1);
+        assert_eq!(snapshot["active_id"], "11");
+        assert_eq!(snapshot["challenges"][0]["status"], "completed");
+        assert_eq!(snapshot["challenges"][1]["status"], "in_progress");
+    }
     assert!(result["duration_seconds"].as_f64().unwrap() >= 0.0);
     assert_eq!(count(&server, "/learning/start"), 4);
     assert_eq!(count(&server, "/learning/answer"), 10);
@@ -1068,6 +1084,17 @@ fn skipped_classes_are_never_switched_or_started() {
     let (output, result) = run(&config);
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(result["words_learned"], 0);
+    assert_eq!(result["challenge_snapshots"].as_array().unwrap().len(), 1);
+    assert_eq!(result["challenge_snapshots"][0]["group_id"], "1");
+    assert_eq!(
+        result["challenge_snapshots"][0]["lessons_completed_at_snapshot"],
+        0
+    );
+    assert_eq!(
+        result["challenge_snapshot"],
+        result["challenge_snapshots"][0]
+    );
+    assert_eq!(count(&server, "/student/dashboard"), 1);
     assert_eq!(count(&server, "/student/context"), 0);
     assert_eq!(count(&server, "/learning"), 0);
 }

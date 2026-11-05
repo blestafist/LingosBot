@@ -20,6 +20,7 @@ struct Success<'a> {
     classes_limited: u64,
     classes_empty: u64,
     challenge_snapshot: Option<workflow::RunChallengeSnapshot>,
+    challenge_snapshots: Vec<workflow::RunChallengeSnapshot>,
     duration_seconds: f64,
     message: &'a str,
 }
@@ -108,6 +109,7 @@ fn run(
         classes_limited: stats.classes_limited,
         classes_empty: stats.classes_empty,
         challenge_snapshot: stats.challenge_snapshot,
+        challenge_snapshots: stats.challenge_snapshots,
         duration_seconds: 0.0,
         message,
     })

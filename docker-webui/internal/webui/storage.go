@@ -41,13 +41,28 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS user_sessions_expiry ON user_sessions(expires);
 CREATE TABLE IF NOT EXISTS user_credentials (
- user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, password BLOB NOT NULL
+ user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, email TEXT NOT NULL, password BLOB NOT NULL, verified_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS auth_meta (key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS auth_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS auth_limits_expiry ON auth_limits(expires);
 `)
 	if err != nil {
+		return err
+	}
+	var verifiedColumn bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('user_credentials') WHERE name='verified_at')`).Scan(&verifiedColumn); err != nil {
+		return err
+	}
+	if !verifiedColumn {
+		if _, err = tx.Exec(`ALTER TABLE user_credentials ADD COLUMN verified_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	// Older WebUIs also write these columns, so invalidate verification in SQLite.
+	if _, err = tx.Exec(`CREATE TRIGGER IF NOT EXISTS reset_credential_verification
+		AFTER UPDATE OF email,password ON user_credentials BEGIN
+		UPDATE user_credentials SET verified_at=0 WHERE user_id=NEW.user_id; END`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -135,9 +150,13 @@ func (x *app) decryptCredentials(userID int64, encrypted []byte, bound bool) (st
 	return string(password), err
 }
 
-func (x *app) loadCredentials(userID int64) (email, password string, err error) {
-	var encrypted []byte
+func (x *app) loadEncryptedCredentials(userID int64) (email string, encrypted []byte, err error) {
 	err = x.db.QueryRow(`SELECT c.email,c.password FROM user_credentials c JOIN users u ON u.id=c.user_id WHERE c.user_id=? AND u.disabled=0`, userID).Scan(&email, &encrypted)
+	return email, encrypted, err
+}
+
+func (x *app) loadCredentials(userID int64) (email, password string, err error) {
+	email, encrypted, err := x.loadEncryptedCredentials(userID)
 	if err != nil {
 		return "", "", err
 	}

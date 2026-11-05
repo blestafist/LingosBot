@@ -1,26 +1,22 @@
-FROM rust:1.88-alpine AS worker
-RUN apk add --no-cache musl-dev
-WORKDIR /src/worker-server-rust
-COPY worker-server-rust/Cargo.toml worker-server-rust/Cargo.lock ./
-COPY worker-server-rust/src ./src
-RUN cargo build --locked --release --bin lingosbot
-
-FROM golang:1.27.3-alpine AS build
-WORKDIR /src
-COPY docker-webui/go.mod docker-webui/go.sum* ./
-RUN go mod download
-COPY docker-webui/main.go ./
-COPY docker-webui/internal ./internal
-RUN CGO_ENABLED=0 go build -o /lingos-webui .
+FROM alpine:3.22 AS download
+RUN apk add --no-cache ca-certificates python3
+COPY deploy/download_release.py /download_release.py
+ARG RELEASE_VERSION=latest
+ARG TARGETARCH
+RUN python3 /download_release.py "$RELEASE_VERSION" "$TARGETARCH" /release
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates \
     && addgroup -S webui && adduser -S -G webui webui \
     && mkdir /data && chown webui:webui /data
-COPY --from=build /lingos-webui /usr/local/bin/webui
-COPY --from=worker /src/worker-server-rust/target/release/lingosbot /usr/local/bin/lingosbot
+COPY --from=download /release/webui /usr/local/bin/webui
+COPY --from=download /release/lingosbot /release/worker-release.json /usr/local/share/lingosbot/
+# Older published WebUIs do not yet manage workers; keep their default path usable.
+RUN ln -s /usr/local/share/lingosbot/lingosbot /usr/local/bin/lingosbot
 VOLUME /data
+WORKDIR /data
 USER webui
-ENV DB_PATH=/data/webui.db LISTEN=:8080 WORKER_BIN=/usr/local/bin/lingosbot
+ARG RELEASE_VERSION=latest
+ENV DB_PATH=/data/webui.db LISTEN=:8080 COOKIE_SECURE=1 RELEASE_VERSION=$RELEASE_VERSION
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/webui"]

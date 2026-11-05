@@ -7,3 +7,4 @@ dev_pages/
 .example/
 *.json
 .playwright-mcp/
+__pycache__/

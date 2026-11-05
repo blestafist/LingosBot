@@ -261,12 +261,13 @@ func (x *app) credentialsAPI(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var email string
-		err := x.db.QueryRowContext(r.Context(), `SELECT email FROM user_credentials WHERE user_id=?`, u.ID).Scan(&email)
+		var verifiedAt int64
+		err := x.db.QueryRowContext(r.Context(), `SELECT email,verified_at FROM user_credentials WHERE user_id=?`, u.ID).Scan(&email, &verifiedAt)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			apiError(w, http.StatusInternalServerError, "storage error")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"saved": err == nil, "email": email})
+		writeJSON(w, http.StatusOK, map[string]any{"saved": err == nil, "email": email, "verified_at": verifiedAt})
 	case http.MethodPut:
 		var body struct {
 			Email    string `json:"email"`
@@ -288,13 +289,13 @@ func (x *app) credentialsAPI(w http.ResponseWriter, r *http.Request) {
 			apiError(w, http.StatusInternalServerError, "storage error")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"saved": true, "email": email})
+		writeJSON(w, http.StatusOK, map[string]any{"saved": true, "email": email, "verified_at": 0})
 	case http.MethodDelete:
 		if _, err := x.db.ExecContext(r.Context(), `DELETE FROM user_credentials WHERE user_id=?`, u.ID); err != nil {
 			apiError(w, http.StatusInternalServerError, "storage error")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"saved": false, "email": ""})
+		writeJSON(w, http.StatusOK, map[string]any{"saved": false, "email": "", "verified_at": 0})
 	default:
 		apiError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
