@@ -27,12 +27,12 @@
         <div class="field"><label for="login-password">Password</label><div class="secret-field"><input id="login-password" name="password" type="password" autocomplete="current-password" required><button type="button" data-reveal="login-password" aria-controls="login-password" aria-pressed="false">Show</button></div></div>
         <button class="button primary" type="submit">Sign in</button>
       </form>
-      {{if eq .RegistrationMode "admin_only"}}<p class="footnote">Accounts are created by your administrator.</p>{{else}}<p class="footnote">New here? <a class="text-link" href="#register">Create an account</a></p>{{end}}
+      {{if eq .RegistrationMode "admin_only"}}<p class="footnote">Accounts are created by your administrator.</p>{{else}}<a class="button tonal register-cta" href="#register">Create an account <span aria-hidden="true">→</span></a>{{end}}
       </div>
       {{if ne .RegistrationMode "admin_only"}}
       <div id="register-view" hidden>
         <h1 id="register-heading" tabindex="-1">Your fresh start.</h1>
-        <p id="register-hint" class="description">{{if eq .RegistrationMode "approval"}}Request a workspace account. An administrator must approve it before you can sign in.{{else}}Create your own private workspace.{{end}}</p>
+        <p id="register-hint" class="description">Your workspace email and password do not need to match your Lingos.pl login. Add your Lingos credentials separately in Account after signing in.{{if eq .RegistrationMode "approval"}} An administrator must approve your account before you can sign in.{{end}}</p>
         <p id="register-error" class="message error" role="alert" tabindex="-1" hidden></p>
         <p id="register-result" class="message" role="status" tabindex="-1" hidden></p>
         <form id="register-form" action="/register" method="post" class="form-stack" aria-describedby="register-hint">
@@ -91,19 +91,6 @@
               <section id="next-run-card" class="panel" aria-labelledby="up-next-heading"><div class="panel-heading"><h2 id="up-next-heading">Next automatic run</h2><a class="text-link" href="#schedule">Edit schedule</a></div><div class="inset next-session"><p id="dashboard-next" class="activity-title">Loading schedule…</p><p id="dashboard-schedule-hint" class="muted"></p><button id="skip-next-run" class="button" type="button" disabled>Skip next run</button><p id="skip-error" class="message error" role="alert" hidden></p></div></section>
               <a class="library-shortcut" href="#library"><span><strong>Library</strong><small>Browse and download your wordsets.</small></span><span aria-hidden="true">→</span></a>
           </div>
-          {{if .User.Admin}}
-          <form id="registration-form" class="panel registration-panel" aria-labelledby="registration-heading">
-            <div class="panel-heading"><div><h2 id="registration-heading">Workspace registration</h2><p>Choose how new members join. Existing accounts are unchanged.</p></div><span id="registration-state" class="status">Loading…</span></div>
-            <p id="registration-error" class="message error" role="alert" hidden></p>
-            <fieldset id="registration-fields" class="registration-options" disabled><legend class="visually-hidden">Registration mode</legend>
-              <label><input type="radio" name="registration-mode" value="admin_only"><span><strong>Admin-created accounts</strong><small>Registration is closed. Add accounts in Users.</small></span></label>
-              <label><input type="radio" name="registration-mode" value="approval"><span><strong>Approval required</strong><small>Anyone can request an account. You approve or reject each request in Users.</small></span></label>
-              <label><input type="radio" name="registration-mode" value="open"><span><strong>Open registration</strong><small>Anyone can create an account and sign in immediately.</small></span></label>
-            </fieldset>
-            <div class="panel-footer"><p>Pending requests still need approval after a mode change. Email addresses are not verified.</p><div class="actions"><button id="retry-registration" class="button" type="button" hidden>Retry</button><button id="save-registration" class="button primary" type="submit" disabled>Save mode</button></div></div>
-            <a id="registration-requests" class="registration-requests text-link" href="#users">Manage members and requests →</a>
-          </form>
-          {{end}}
         </section>
 
         <section id="config" class="page narrow-page" data-page hidden aria-labelledby="config-heading">
@@ -192,7 +179,19 @@
         </section>
 
         {{if .User.Admin}}
-        <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading"><div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div><section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section>
+        <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading">
+          <div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div>
+          <form id="registration-form" class="panel" aria-labelledby="registration-heading">
+            <div class="panel-heading"><div><h2 id="registration-heading">Workspace registration</h2><p>Choose how new members join. Existing accounts are unchanged.</p></div><span id="registration-state" class="status">Loading…</span></div>
+            <p id="registration-error" class="message error" role="alert" hidden></p>
+            <fieldset id="registration-fields" class="registration-options" disabled><legend class="visually-hidden">Registration mode</legend>
+              <label><input type="radio" name="registration-mode" value="admin_only"><span><strong>Admin-created accounts</strong><small>Registration is closed. Add accounts below.</small></span></label>
+              <label><input type="radio" name="registration-mode" value="approval"><span><strong>Approval required</strong><small>Anyone can request an account. Approve or reject requests below.</small></span></label>
+              <label><input type="radio" name="registration-mode" value="open"><span><strong>Open registration</strong><small>Anyone can create an account and sign in immediately.</small></span></label>
+            </fieldset>
+            <div class="panel-footer"><p>Pending requests still need approval after a mode change. Email addresses are not verified.</p><div class="actions"><button id="retry-registration" class="button" type="button" hidden>Retry</button><button id="save-registration" class="button primary" type="submit" disabled>Save mode</button></div></div>
+          </form>
+          <section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section>
           <section id="admin-telegram-panel" class="panel" aria-labelledby="admin-telegram-heading">
             <div class="panel-heading"><div><h2 id="admin-telegram-heading">Telegram connections</h2><p>All connected accounts, including disabled users. Only users can opt in to notifications.</p></div><button id="refresh-admin-telegram" class="button" type="button">Refresh connections</button></div>
             <p id="admin-telegram-error" class="message error" role="alert" tabindex="-1" hidden></p><div id="admin-telegram-list"><p class="empty">Loading connections…</p></div>
