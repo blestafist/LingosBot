@@ -82,6 +82,7 @@ internal sealed class ApiLessonRunner(
                     break;
                 case "new_teacher":
                 case "new_premium":
+                    prompt = TextNormalizer.Normalize(string.IsNullOrWhiteSpace(exercise.Word) ? exercise.Main : exercise.Word);
                     answer = string.Empty;
                     break;
                 default:

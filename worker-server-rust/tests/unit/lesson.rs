@@ -624,6 +624,89 @@ fn new_word_cards_are_acknowledged_without_injecting_errors_or_learning_stats() 
 }
 
 #[test]
+fn new_word_payloads_are_acknowledged_on_entry_and_in_answer_responses() {
+    let initial = crate::workflow::parse_learning_page(serde_json::json!({
+        "status": "ok", "lessonId": 17581846,
+        "leaveUrl": "/learning/leave/dashboard",
+        "step": {
+            "state": "exercise", "progress": {"current": 10, "total": 20},
+            "exercise": {
+                "type": "new_teacher", "identifier": 335171564,
+                "word": "probiere eine Massage aus",
+                "translation": "wypróbuj masaż", "context": ""
+            }
+        }
+    }))
+    .unwrap();
+    let next: AnswerResult = serde_json::from_value(serde_json::json!({
+        "step": {"state": "exercise", "exercise": {
+            "type": "new_premium", "identifier": 335171565,
+            "word": "nächstes Wort", "translation": "następne słowo", "context": ""
+        }}
+    }))
+    .unwrap();
+    let mut client = MockClient::default();
+    client
+        .results
+        .extend([Ok(next), result(state("finished"), None)]);
+    let mut settings = config();
+    settings.errors_per100_words = 100;
+
+    let stats = run_lesson(&mut client, &settings, &Vocabulary::new(), false, initial).unwrap();
+
+    assert_eq!(submitted(&client), ["", ""]);
+    assert!(
+        client
+            .requests
+            .iter()
+            .all(|(id, request)| *id == 17581846 && !request.skip)
+    );
+    assert_eq!(client.requests[0].1.identifier, 335171564);
+    assert_eq!(client.requests[1].1.identifier, 335171565);
+    assert_eq!(
+        stats,
+        LessonStats {
+            answers_submitted: 2,
+            ..LessonStats::default()
+        }
+    );
+    assert!(client.progress.is_empty());
+}
+
+#[test]
+fn new_word_acknowledgements_need_no_text_fields() {
+    for kind in ["new_teacher", "new_premium"] {
+        let step: LearningStep = serde_json::from_value(serde_json::json!({
+            "state": "exercise", "exercise": {"type": kind, "identifier": 1}
+        }))
+        .unwrap();
+        let mut client = MockClient::default();
+        client.results.push_back(result(state("finished"), None));
+
+        let stats = run(&mut client, &config(), step).unwrap();
+
+        assert_eq!(submitted(&client), [""]);
+        assert_eq!(stats.words_learned, 0);
+    }
+}
+
+#[test]
+fn flashcards_without_main_and_unknown_types_stop_before_posting() {
+    for kind in ["flashcard", "unknown"] {
+        let step: LearningStep = serde_json::from_value(serde_json::json!({
+            "state": "exercise", "exercise": {
+                "type": kind, "identifier": 1, "word": "house", "translation": "dom"
+            }
+        }))
+        .unwrap();
+        let mut client = MockClient::default();
+
+        assert!(run(&mut client, &config(), step).is_err());
+        assert!(client.requests.is_empty());
+    }
+}
+
+#[test]
 fn acknowledged_new_word_cards_are_not_submitted_again() {
     for kind in ["new_teacher", "new_premium"] {
         for feedback in [None, Some(0), Some(1)] {

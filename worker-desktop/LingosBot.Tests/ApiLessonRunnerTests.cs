@@ -7,6 +7,14 @@ namespace LingosBotApp.Tests;
 
 public sealed class ApiLessonRunnerTests
 {
+    internal static string NewWordProps(string type, string promptField = "word") => $$"""
+        {"status":"ok","lessonId":17581846,"leaveUrl":"/learning/leave/dashboard",
+         "step":{"state":"exercise","progress":{"current":10,"total":20},
+          "exercise":{"type":"{{type}}","identifier":335171564,"{{promptField}}":"probiere eine Massage aus","translation":"wypróbuj masaż","context":""}
+         }
+        }
+        """;
+
     private static LearningStep Exercise(long id = 1, string prompt = "dom", string type = "flashcard") => new()
     {
         State = "exercise",
@@ -58,8 +66,10 @@ public sealed class ApiLessonRunnerTests
         var client = new FakeClient();
         client.Results.Enqueue(Result(Exercise(2)));
         client.Results.Enqueue(Result(new LearningStep { State = "finished" }));
+        var initial = Exercise();
+        initial.Exercise!.Word = "not the flashcard prompt";
 
-        Runner(client).Run(1, Props(Exercise()));
+        Runner(client).Run(1, Props(initial));
 
         Assert.Equal(new long[] { 1, 2 }, client.Requests.Select(r => r.Request.Identifier));
         Assert.All(client.Requests, r => Assert.Equal("house", r.Request.Answer));
@@ -104,16 +114,32 @@ public sealed class ApiLessonRunnerTests
     }
 
     [Theory]
-    [InlineData("new_teacher")]
-    [InlineData("new_premium")]
-    public void NewWordsAreAcknowledgedWithoutGuessingOrInjectingErrors(string type)
+    [InlineData("new_teacher", "word")]
+    [InlineData("new_premium", "word")]
+    [InlineData("new_teacher", "main")]
+    [InlineData("new_premium", "main")]
+    public void NewWordsAreLoggedAndAcknowledgedWithoutGuessingOrInjectingErrors(string type, string promptField)
     {
-        var client = new FakeClient();
-        client.Results.Enqueue(Result(new LearningStep { State = "finished" }, null));
+        var driver = DispatchProxy.Create<IWebDriver, ApiDriver>();
+        var proxy = (ApiDriver)(object)driver;
+        proxy.Props = NewWordProps(type, promptField);
+        var client = new LessonApiClient(driver, new AppConfig());
+        var messages = new List<string>();
+        var runner = new ApiLessonRunner(client, new AppConfig(),
+            _ => throw new Exception("Must not resolve translations"),
+            () => throw new Exception("Must not consider errors"),
+            _ => throw new Exception("Must not generate wrong answers"), messages.Add,
+            refreshDashboardOnCompletion: false);
 
-        Runner(client, errors: true).Run(1, Props(Exercise(type: type)));
+        runner.Run(1, client.TryRead()!);
 
-        Assert.Equal(string.Empty, Assert.Single(client.Requests).Request.Answer);
+        Assert.Equal(1, proxy.Posts);
+        Assert.Equal("https://lingos.pl/learning/answer/17581846", proxy.Arguments![0]);
+        using var body = JsonDocument.Parse((string)proxy.Arguments[1]!);
+        Assert.Equal(335171564, body.RootElement.GetProperty("identifier").GetInt64());
+        Assert.Equal(string.Empty, body.RootElement.GetProperty("answer").GetString());
+        Assert.False(body.RootElement.GetProperty("skip").GetBoolean());
+        Assert.Equal("[Lesson 1 · New word · Call 1] probiere eine Massage aus -> ", messages[0]);
     }
 
     [Fact]
@@ -142,6 +168,7 @@ public sealed class ApiLessonRunnerTests
     [Theory]
     [InlineData("exercise", "unknown", "dom")]
     [InlineData("exercise", "flashcard", "unknown")]
+    [InlineData("exercise", "flashcard", "")]
     [InlineData("exercise", "flashcard", " ")]
     [InlineData("unknown", "flashcard", "dom")]
     [InlineData("select_level", "flashcard", "dom")]
@@ -149,6 +176,7 @@ public sealed class ApiLessonRunnerTests
     {
         var client = new FakeClient();
         var step = Exercise(prompt: prompt, type: type);
+        step.Exercise!.Word = "dom";
         step.State = state;
 
         Assert.Throws<InvalidOperationException>(() => Runner(client).Run(1, Props(step)));

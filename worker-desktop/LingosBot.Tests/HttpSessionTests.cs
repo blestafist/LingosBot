@@ -44,6 +44,36 @@ public sealed class HttpSessionTests
     }
 
     [Theory]
+    [InlineData("new_teacher")]
+    [InlineData("new_premium")]
+    public void LogsAndAcknowledgesNewWordsFromInitialHtml(string type)
+    {
+        var handler = new StubHandler((request, count) =>
+        {
+            if (count == 1) return Response(Html(JsonSerializer.Deserialize<JsonElement>(ApiLessonRunnerTests.NewWordProps(type))));
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/learning/answer/17581846", request.RequestUri!.AbsolutePath);
+            using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            Assert.Equal(335171564, body.RootElement.GetProperty("identifier").GetInt64());
+            Assert.Equal(string.Empty, body.RootElement.GetProperty("answer").GetString());
+            Assert.False(body.RootElement.GetProperty("skip").GetBoolean());
+            return Response("{\"step\":{\"state\":\"finished\"}}", "application/json");
+        });
+        using var session = Session(handler);
+        session.Navigate("/learning/start/0");
+        var messages = new List<string>();
+
+        new ApiLessonRunner(session, Config,
+            _ => throw new Exception("Must not resolve translations"),
+            () => throw new Exception("Must not consider errors"),
+            _ => throw new Exception("Must not generate wrong answers"), messages.Add,
+            refreshDashboardOnCompletion: false).Run(1, session.TryRead()!);
+
+        Assert.Equal(2, handler.Calls);
+        Assert.Equal("[Lesson 1 · New word · Call 1] probiere eine Massage aus -> ", messages[0]);
+    }
+
+    [Theory]
     [InlineData("<html><form>Log in</form></html>")]
     [InlineData("<div id='other' data-props='{}'></div>")]
     [InlineData("<div id='app' data-props='null'></div>")]
@@ -248,7 +278,13 @@ public sealed class HttpSessionTests
         public int DashboardReads { get; private set; }
         public List<string> MethodsAndPaths { get; } = [];
 
-        private object Step() => new { state = "exercise", exercise = new { identifier = _word, type = _word == 2 ? "new_teacher" : "flashcard", main = "dom" } };
+        private object Step() => new
+        {
+            state = "exercise",
+            exercise = _word == 2
+                ? (object)new { identifier = _word, type = "new_teacher", word = "probiere eine Massage aus", translation = "wypróbuj masaż", context = "" }
+                : new { identifier = _word, type = "flashcard", main = "dom" }
+        };
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
@@ -315,6 +351,8 @@ public sealed class HttpSessionTests
                 Answers++;
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
                 Assert.Equal(_word, body.RootElement.GetProperty("identifier").GetInt32());
+                Assert.False(body.RootElement.GetProperty("skip").GetBoolean());
+                if (_word == 2) Assert.Equal(string.Empty, body.RootElement.GetProperty("answer").GetString());
                 var accepted = _word == 2 || body.RootElement.GetProperty("answer").GetString() == "house";
                 if (!accepted) WrongAnswers++;
                 if (accepted) _word++;

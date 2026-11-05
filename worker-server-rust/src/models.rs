@@ -1,5 +1,5 @@
-//! Typed learning API payloads. Required exercise/answer fields deliberately have
-//! no serde defaults: an incomplete response must never cause another POST.
+//! Typed learning API payloads. Exercise identifiers and answer fields are required;
+//! the lesson engine validates flashcard text before submitting an answer.
 
 use serde::{Deserialize, Deserializer, Serialize, de};
 
@@ -115,6 +115,8 @@ object_model! {
         #[serde(rename = "type")]
         pub kind: String,
         pub identifier: u64,
+        // New-word acknowledgements need no text; flashcards validate main before POST.
+        #[serde(default)]
         pub main: String,
     }
 }
