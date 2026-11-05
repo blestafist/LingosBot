@@ -1,6 +1,6 @@
 # Creating A Release
 
-Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../.github/workflows/ci-release.yml). One tag `v*` produces one draft containing the legacy .NET desktop archives, Rust worker binaries and Linux WebUI binaries. Commands below use **Bash on Linux**, from the repository root unless marked Fish.
+Releases are drafted automatically by [`.github/workflows/ci-release.yml`](../../.github/workflows/ci-release.yml). One tag `v*` produces one draft containing the legacy .NET desktop archives, Rust worker binaries and Linux WebUI binaries. Commands below use **Bash on Linux**, from the repository root unless marked Fish.
 
 ## What the workflow does
 
@@ -20,14 +20,14 @@ lingosbot-webui-linux-x64, lingosbot-webui-linux-arm64                 (+ .sha25
 
 - Desktop archives are self-contained single-file builds cross-compiled on Linux, each with exactly `LingosBot[.exe]` and `selenium-manager[.exe]` at the root. CI does not run them on Windows or macOS.
 - Rust binaries are static musl builds compiled natively on x86_64 and aarch64. Each passes ELF architecture/static-link checks (no `INTERP` or `NEEDED`), `--version`/`--help` smoke checks and `sha256sum -c`. None of these checks need a Lingos account.
-- WebUI binaries are static Go builds for Linux amd64 and arm64 with bundled frontend assets. Native checks verify ELF architecture/static linking, rejection of a missing encryption key and checksums; no server, Telegram bot or real lesson is started. Running WebUI also requires the matching Rust worker and trusted system CA certificates. See the [WebUI setup](../docker-webui/README.md).
+- WebUI binaries are static Go builds for Linux amd64 and arm64 with bundled frontend assets. Native checks verify ELF architecture/static linking, rejection of a missing encryption key and checksums; no server, Telegram bot or real lesson is started. Running WebUI also requires the matching Rust worker and trusted system CA certificates. See the [WebUI technical reference](../webui/reference.md).
 - On tag builds the tag version is stamped into the Rust binary (`v1.6.0` gives `lingosbot --version` = `lingosbot 1.6.0`) and verified; `Cargo.toml` in the repository stays unchanged. The tag must therefore be valid semver after the `v`, e.g. `v1.6.0` or `v1.6.0-beta.1`; otherwise the build fails.
 - The draft is created only if every test and build succeeded and the tagged commit is contained in `main`.
 - Tags containing `-alpha`, `-beta`, `-rc` or `-pre` are created as **pre-releases**.
 
 ## Prepare the PR and release notes
 
-Write notes in `Docs/releases/<tag>.md` and include them in the PR to `main`. For v2.0.0, the file is [`Docs/releases/v2.0.0.md`](releases/v2.0.0.md). The workflow uses that file as the draft description; if it is absent, it falls back to the full message of the tagged commit. The title is the tag name.
+Write notes in `Docs/releases/<tag>.md` and include them in the PR to `main`. For v2.0.0, the file is [`Docs/releases/v2.0.0.md`](../releases/v2.0.0.md). The workflow uses that file as the draft description; if it is absent, it falls back to the full message of the tagged commit. The title is the tag name.
 
 After the PR checks pass and it is merged, tag the reviewed commit on `main`. Merging a PR alone does **not** create a release or tag. For v2.0.0 (Fish):
 
@@ -45,7 +45,7 @@ The v2.0.0 draft assets were renamed without rebuilding binaries or moving the t
 
 ## Review and publish
 
-Open the draft in GitHub Releases, check the notes and all 16 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation is documented in the [Rust worker README](../worker-server-rust/README.md) and [WebUI README](../docker-webui/README.md).
+Open the draft in GitHub Releases, check the notes and all 16 assets, then publish (for a stable release mark it as latest). The workflow never publishes by itself. Installation is documented in the [Rust worker README](../worker/README.md) and [WebUI README](../webui/README.md).
 
 ## Manual fallback
 

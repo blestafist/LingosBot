@@ -1,6 +1,6 @@
 # Command-Line Interface
 
-This page covers the legacy .NET application in `worker-desktop/`; the independent Rust worker has a separate [CLI reference](../worker-server-rust/README.md).
+This page covers the legacy .NET application in `worker-desktop/`; the independent Rust worker has a separate [CLI reference](../worker/README.md).
 
 Run a downloaded release as `./LingosBot <options>` on Linux or macOS, or `.\LingosBot.exe <options>` in Windows PowerShell. When running from source at the repository root, use `dotnet run --project worker-desktop -- <options>`.
 
@@ -65,4 +65,4 @@ Shell command history and process lists can expose values passed to `--set_passw
 - `--scan_classes` signs in using the selected mode and saves `classLessonCounts`, then exits. Run-only mode, headless and browser overrides are not saved.
 - Unknown options and missing option values exit with an error.
 
-See [Basic.md](Basic.md) for the normal local workflow and [Advanced.md](Advanced.md) for the JSON configuration reference.
+See [Basic.md](basic.md) for the normal local workflow and [Advanced.md](advanced.md) for the JSON configuration reference.
