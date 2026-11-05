@@ -1,8 +1,8 @@
 # Advanced Configuration
 
-This page documents optional fields in `config.json`. Start with [Basic.md](Basic.md); most users only need credentials, `errorsPer100Words`, and `lessonCount`. The default mode is browser-free API.
+This page documents optional fields in `config.json`. Start with [Basic.md](basic.md); most users only need credentials, `errorsPer100Words`, and `lessonCount`. The default mode is browser-free API.
 
-This page covers the legacy .NET application in `worker-desktop/`. For the independent Rust HTTP worker, including binary installation and source builds, see its [README](../worker-server-rust/README.md); the CI and release workflow is [ci-release.yml](../.github/workflows/ci-release.yml).
+This page covers the legacy .NET application in `worker-desktop/`. For the independent Rust HTTP worker, including binary installation and source builds, see its [README](../worker/README.md); the CI and release workflow is [ci-release.yml](../../.github/workflows/ci-release.yml).
 
 ## Full Setting Reference
 
@@ -88,4 +88,4 @@ dotnet run -- --run_config
 dotnet run
 ```
 
-Source users can use the same options documented in [CLI.md](CLI.md).
+Source users can use the same options documented in [CLI.md](cli.md).

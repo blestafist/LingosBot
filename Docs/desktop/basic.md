@@ -127,7 +127,7 @@ Stable keys identify a class independently of its display title. Classes not lis
 }
 ```
 
-Use `0` for `errorsPer100Words` if the bot should never make intentional mistakes. See [Advanced.md](Advanced.md) for every optional setting and [CLI.md](CLI.md) for one-time command overrides.
+Use `0` for `errorsPer100Words` if the bot should never make intentional mistakes. See [Advanced.md](advanced.md) for every optional setting and [CLI.md](cli.md) for one-time command overrides.
 
 ## Common Problems
 

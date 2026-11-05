@@ -1,106 +1,106 @@
+<div align="center">
+
+<img src="docker-webui/internal/webui/web/static/icon.svg" width="96" alt="LingosBot logo">
+
 # LingosBot
 
-## WebUI (v2.0)
+**Automates vocabulary lessons on [lingos.pl](https://lingos.pl/): sign in, collect the class vocabulary, finish lessons and challenges.**
 
-A multiuser web workspace for the Rust worker: live run progress, vocabulary collection and Markdown/JSON downloads, per-user schedules, account administration and optional Telegram run notifications. The English interface supports responsive layouts and light/dark themes, with no external fonts or scripts.
+[![Release](https://img.shields.io/github/v/release/blestafist/LingosBot?sort=semver)](https://github.com/blestafist/LingosBot/releases/latest)
+[![CI](https://github.com/blestafist/LingosBot/actions/workflows/ci-release.yml/badge.svg)](https://github.com/blestafist/LingosBot/actions/workflows/ci-release.yml)
+![Go](https://img.shields.io/badge/WebUI-Go-00ADD8?logo=go&logoColor=white)
+![Rust](https://img.shields.io/badge/Worker-Rust-000000?logo=rust)
+![.NET](https://img.shields.io/badge/Desktop-.NET%2010-512BD4?logo=dotnet)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey)
 
-Download matching Linux WebUI and Rust worker binaries from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), or build from source. See [WebUI setup and migration](docker-webui/README.md), [v2.0.0 release notes](Docs/releases/v2.0.0.md) and [security/deployment limits](docker-webui/SECURITY-AUDIT.md). Desktop downloads remain available below.
+[Quick start](#quick-start) · [Components](#components) · [Documentation](Docs/README.md) · [Releases](https://github.com/blestafist/LingosBot/releases) · [Issues](https://github.com/blestafist/LingosBot/issues)
 
-## Rust HTTP worker
+</div>
 
-A standalone Linux CLI in [`worker-server-rust/`](worker-server-rust/README.md): authentication, vocabulary, classes, challenges and lessons over HTTP, without .NET, a browser, a database or WebUI. Tests live in `worker-server-rust/tests/`; the existing desktop application remains in `worker-desktop/`.
+<p align="center">
+  <img src="Docs/assets/screenshots/webui-dashboard.png" width="860" alt="WebUI dashboard with live run progress">
+</p>
 
-```bash
-cargo build --locked --release --manifest-path worker-server-rust/Cargo.toml
-./worker-server-rust/target/release/lingosbot --help
+> [!WARNING]
+> Automation may conflict with the lingos.pl terms of service. Use LingosBot only with an account you are allowed to automate, at your own risk.
+
+## Components
+
+|  | Component | What it is | Best for |
+| --- | --- | --- | --- |
+| 🌐 | **[WebUI](Docs/webui/README.md)** (Go) | Multiuser web panel: live run progress, per-user schedules, Telegram notifications, vocabulary export to Markdown/JSON, admin-approved registration. | A shared server for you, friends or a class |
+| ⚡ | **[Rust worker](Docs/worker/README.md)** | Standalone static Linux CLI (~3 MB, ~5 MB peak RSS). Pure HTTP, no browser, .NET or database. ~0.17 s per word. | Cron jobs, headless servers, powering the WebUI |
+| 🖥 | **[Desktop app](Docs/desktop/README.md)** (.NET, legacy) | Console app for Windows, macOS and Linux with API mode and an optional Selenium browser workflow. | Running locally on your PC |
+
+```mermaid
+flowchart LR
+    U([Browser / Telegram]) --> W[🌐 WebUI<br/>Go + SQLite]
+    W -- spawns, reads JSON events --> R[⚡ Rust worker]
+    C([cron / shell]) --> R
+    R -- HTTPS --> L[(lingos.pl)]
+    D[🖥 Desktop app<br/>.NET] -- HTTPS / Selenium --> L
 ```
 
-See the [worker guide](worker-server-rust/README.md) for prebuilt Linux musl binaries, safe credential input, configuration and the JSON/exit-code contract. Worker binaries ship in the same `v<version>` release as the desktop archives and WebUI binaries.
+## Quick start
 
-## Legacy desktop (.NET)
+> [!TIP]
+> Every component has a 🟢 **Getting started** guide in plain language and a 🔧 **Technical reference** for every flag and internal. See the [documentation index](Docs/README.md).
 
-The documentation below covers the existing C# application in `worker-desktop/`.
+All binaries are published together in each [`v*` release](https://github.com/blestafist/LingosBot/releases): desktop ZIP archives, static Linux worker binaries and Linux WebUI binaries (x64 and arm64), each with a `.sha256`.
 
-LingosBot is a .NET console application that automates lessons on [lingos.pl](https://lingos.pl/) through HTTP/API by default, with an optional Selenium browser workflow. It signs in, reads the vocabulary available in the selected class, and completes lessons using those collected translations.
+**WebUI** — download `lingosbot-webui-linux-<arch>` and `lingosbot-worker-linux-<arch>`, then follow the [WebUI guide](Docs/webui/README.md). Docker Compose is supported too.
 
-The bot can process every class listed in Lingos, assign a different lesson count to individual classes, choose an available challenge, and optionally make intentional mistakes.
-
-> Browser automation may conflict with lingos.pl terms of service. Use the project only with an account you are allowed to automate and at your own risk.
-
-## Quick Start
-
-Download the ZIP archive for your operating system from [GitHub Releases](https://github.com/blestafist/LingosBot/releases), extract the entire archive, and follow [Docs/Basic.md](Docs/Basic.md). A Lingos account is required; no browser, .NET or Git installation is needed for API mode in a prebuilt release. Keep the bundled `selenium-manager` directory if you want to use browser mode.
-
-## How A Run Works
-
-1. The bot signs in and reads the class list from Lingos.
-2. For each class, it opens the word sets and builds a translation lookup.
-3. It checks whether a challenge is already active; otherwise, it joins the available challenge with the highest point value.
-4. It completes the requested lessons for that class.
-5. If Lingos reports the daily lesson limit, the remaining lessons for that class are skipped.
-
-Run mode is set with `mode` in `config.json` (or `--mode`): `api` (default; login and lessons over HTTP, no browser) or `browser` (Selenium). Missing, null or blank `mode` means `api`, regardless of `headless`.
-
-Only `mode: "browser"` uses `headless`, `browser`, `browserBinaryPath`, browser timing settings and `useLessonApi`. With `headless: false`, the browser handles login, then closes and hands off to HTTP (unless `useLessonApi: false` forces UI). With `headless: true`, the browser stays open in the background, using API answers with UI fallback for missing initial data. In `api` mode all browser settings are ignored, including `useLessonApi: false`; API errors stop the run rather than launching a browser. Failed API submissions are not retried automatically.
-
-Migration: replace the removed `mode: "browser-headless"` with `mode: "browser", "headless": true`. Older files without `mode` now use API; explicitly set `mode: "browser"` to retain the browser workflow.
-
-When an active challenge is identified as **Perfekcjonizm**, intentional errors are disabled for that lesson. Matching is case-, whitespace-, punctuation-, and Polish-diacritic-tolerant: a `Perfekcjonizm` keyword in the title is sufficient for a title-only/omitted-description variant (including numbered variants); when challenge text includes an explicit error limit, it must be at most one error and include lesson wording. A keyword found only in a description must also have that lesson/max-one-error wording, while negated mentions and explicit maximum-two-or-more conditions are not matched. The configured `errorsPer100Words` rate is used unchanged for all other challenges and normal lessons.
-
-The HTTP workflow stops on unknown challenge states, unconfirmed class switches or challenge joins, and incomplete vocabulary instead of guessing. This is intentionally stricter than the legacy browser workflow.
-
-`lessonCount` is the default per-class count, applied independently to every discovered class. `classLessonCounts` contains optional overrides by stable class ID (or change URL for older classes without an ID); set an entry to `0` to skip that class. Classes without an entry still use `lessonCount`, and older title-keyed entries continue to work when the title uniquely identifies a discovered class. See [Docs/Basic.md](Docs/Basic.md#choose-which-classes-to-run).
-
-Run `./LingosBot --run_config` to configure the global lesson count interactively. The first prompt asks whether to configure classes separately; class discovery and per-class prompts run only after answering yes. Blank per-class prompts keep the current setting, while `default`, `fallback`, or `-` removes an override and restores the global fallback. Overrides for classes missing from discovery are retained.
-
-## Common Commands
+**Rust worker** — one binary, configured with a JSON file:
 
 ```bash
-# Run a downloaded Linux release.
-./LingosBot
-
-# Run a downloaded Windows release in PowerShell.
-.\LingosBot.exe
-
-# Default: no browser at all.
-./LingosBot --mode api
-
-# Optional headless browser workflow for one invocation.
-./LingosBot --mode browser --headless
-
-# Discover classes and save them to classLessonCounts.
-./LingosBot --scan_classes
+./lingosbot-worker-linux-x64 --help
 ```
 
-The exact command-line interface is documented in [Docs/CLI.md](Docs/CLI.md). When running from source at the repository root, prepend `dotnet run --project worker-desktop --` to the same arguments.
+See the [worker guide](Docs/worker/README.md) for configuration, safe credential input and the JSON/exit-code contract.
 
-## Troubleshooting
+**Desktop** — download the ZIP for your OS, extract it and follow [Basic setup](Docs/desktop/basic.md).
 
-- **The browser does not start:** verify that the selected browser is installed. If it lives outside the usual location, configure `browserBinaryPath`.
-- **Login fails:** check `credentials.email` and `credentials.password` in `config.json`.
-- **No classes or vocabulary are found:** Lingos may have changed its markup, or the account may not have access to the expected class and word sets.
-- **The bot stops at the daily limit:** this is expected. LingosBot skips the remaining lessons for that class.
+## Screenshots
 
-## Diagnostics And Privacy
+<table>
+  <tr>
+    <td width="50%"><img src="Docs/assets/screenshots/webui-library.png" alt="WebUI vocabulary library"></td>
+    <td width="50%"><img src="Docs/assets/screenshots/webui-dark.png" alt="WebUI in dark theme"></td>
+  </tr>
+  <tr>
+    <td align="center">Vocabulary library with Markdown/JSON export</td>
+    <td align="center">Dark theme</td>
+  </tr>
+  <tr>
+    <td><img src="Docs/assets/screenshots/webui-schedule.png" alt="WebUI schedule settings"></td>
+    <td align="center"><img src="Docs/assets/screenshots/webui-mobile.png" height="420" alt="WebUI on a phone"></td>
+  </tr>
+  <tr>
+    <td align="center">Per-user schedules</td>
+    <td align="center">Phone layout</td>
+  </tr>
+</table>
 
-The bot stores diagnostics below `diagnostics/` next to the application executable. Failed runs can write page HTML, a screenshot, the current URL, and exception details. Challenge checks also save the latest dashboard and challenge landing pages during normal runs.
+## Build from source
 
-These files may contain account, class, vocabulary, and page-session data. Inspect and redact them before sharing an issue, and delete them when they are no longer needed.
+```bash
+cargo build --locked --release --manifest-path worker-server-rust/Cargo.toml   # Rust worker
+(cd docker-webui && go build .)                                                # WebUI
+dotnet build worker-desktop                                                    # Desktop app
+```
 
-## Documentation
+Toolchains, tests and the release process are described in [Development](Docs/README.md#development).
 
-- [Basic setup](Docs/Basic.md): download a release, create `config.json`, and run the bot locally.
-- [Command-line interface](Docs/CLI.md): every command-line option and its precedence.
-- [Advanced configuration](Docs/Advanced.md): browser paths, timing values, safety caps, and source builds.
-- [Linux servers](Docs/Servers.md): headless setup and scheduled runs with systemd timers or cron.
-- [Creating a release](Docs/Releasing.md): prepare notes and a PR, then let CI build a draft from a release tag.
+## Repository layout
 
-## Development
-
-See [Docs/Advanced.md](Docs/Advanced.md#run-from-source) for the .NET SDK and source-build instructions.
-
-The repository includes focused tests for configuration, challenge matching, and lesson-state handling. See [performance checks](Docs/Performance.md) for optimization details and local measurements. `dev_pages/` contains saved Lingos pages used as selector references during development; they are not part of the application at runtime.
+```text
+docker-webui/         Go WebUI, Dockerfile and Compose file
+worker-server-rust/   Rust HTTP worker
+worker-desktop/       .NET desktop app (legacy)
+deploy/               Release download helper
+Docs/                 Documentation, release notes and screenshots
+```
 
 ## Support
 
-Report bugs and suggestions through the [issue tracker](https://github.com/blestafist/LingosBot/issues).
+Report bugs and suggestions through the [issue tracker](https://github.com/blestafist/LingosBot/issues). Before attaching diagnostics, read [Diagnostics and privacy](Docs/desktop/README.md#diagnostics-and-privacy): they may contain account data.
