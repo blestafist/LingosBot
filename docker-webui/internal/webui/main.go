@@ -177,6 +177,7 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/registration", x.registrationAPI)
+	mux.HandleFunc("/api/admin/registration/requests", x.registrationRequestsAPI)
 	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
 	mux.HandleFunc("/api/admin/telegram/", x.adminTelegramAPI)
 	mux.HandleFunc("/api/settings", x.settingsAPI)

@@ -356,7 +356,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .form-stack > .primary { margin-top: 14px; }
 .login-panel .footnote { margin-top: 24px; }
 .register-cta { width: 100%; min-height: 56px; margin-top: 16px; border-radius: 28px; font-size: 16px; }
-#users-list { display: grid; gap: 8px; padding: 0 28px 28px; }
+.registration-notice:has(a:not([hidden])) { margin-bottom: 24px; }
+#users-list, #requests-list { display: grid; gap: 8px; padding: 0 28px 28px; }
 .user-row { min-width: 0; padding: 20px; background: var(--subtle); border-radius: 12px; }
 .user-row:first-child { border-top-left-radius: 24px; border-top-right-radius: 24px; }
 .user-row:last-child { border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; }
@@ -364,6 +365,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-row-head > div { min-width: 0; flex: 1 1 160px; }
 .user-email { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .user-row small { display: block; color: var(--muted); }
+.user-telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px 16px; margin: 16px 0 0; font-size: 14px; }
+.user-telemetry dt { color: var(--muted); font-size: 12px; }
+.user-telemetry dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .user-row details { margin-top: 16px; border-radius: 20px; background: var(--surface); overflow: clip; }
 .user-row summary { padding: 12px 16px; min-height: 48px; }
 .user-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }

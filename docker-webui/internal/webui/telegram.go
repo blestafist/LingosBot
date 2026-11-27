@@ -11,7 +11,12 @@ import (
 )
 
 func initTelegramDB(db *sql.DB) error {
-	_, err := db.Exec(`
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 CREATE TABLE IF NOT EXISTS telegram_links (
  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
  chat_id INTEGER NOT NULL UNIQUE CHECK(chat_id>0), username TEXT NOT NULL, first_name TEXT NOT NULL,
@@ -52,19 +57,26 @@ BEGIN
  DELETE FROM telegram_tokens WHERE user_id=NEW.id;
  DELETE FROM telegram_outbox WHERE NEW.disabled=1 AND run_id IN (SELECT id FROM runs WHERE user_id=NEW.id);
 END;`)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := initTelegramRegistrationDB(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type telegramStatus struct {
-	Configured    bool   `json:"configured"`
-	BotUsername   string `json:"bot_username"`
-	Linked        bool   `json:"linked"`
-	Username      string `json:"username"`
-	FirstName     string `json:"first_name"`
-	ChatID        string `json:"chat_id"`
-	Notifications bool   `json:"notifications"`
-	LinkedAt      int64  `json:"linked_at"`
-	CodeExpiresAt int64  `json:"code_expires_at"`
+	Configured                bool   `json:"configured"`
+	BotUsername               string `json:"bot_username"`
+	Linked                    bool   `json:"linked"`
+	Username                  string `json:"username"`
+	FirstName                 string `json:"first_name"`
+	ChatID                    string `json:"chat_id"`
+	Notifications             bool   `json:"notifications"`
+	RegistrationNotifications bool   `json:"registration_notifications"`
+	LinkedAt                  int64  `json:"linked_at"`
+	CodeExpiresAt             int64  `json:"code_expires_at"`
 }
 
 func (x *app) telegramAPI(w http.ResponseWriter, r *http.Request) {
@@ -79,8 +91,9 @@ func (x *app) telegramAPI(w http.ResponseWriter, r *http.Request) {
 			state.BotUsername = x.telegram.botUsername()
 		}
 		var chatID int64
-		err := x.db.QueryRowContext(r.Context(), `SELECT chat_id,username,first_name,notifications,linked_at FROM telegram_links WHERE user_id=?`, u.ID).
-			Scan(&chatID, &state.Username, &state.FirstName, &state.Notifications, &state.LinkedAt)
+		err := x.db.QueryRowContext(r.Context(), `SELECT chat_id,username,first_name,notifications,registration_notifications AND u.admin=1 AND u.disabled=0,linked_at
+			FROM telegram_links l JOIN users u ON u.id=l.user_id WHERE l.user_id=?`, u.ID).
+			Scan(&chatID, &state.Username, &state.FirstName, &state.Notifications, &state.RegistrationNotifications, &state.LinkedAt)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			apiError(w, 500, "storage error")
 			return
@@ -97,16 +110,24 @@ func (x *app) telegramAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, state)
 	case http.MethodPatch:
 		var body struct {
-			Notifications *bool `json:"notifications"`
+			Notifications             *bool `json:"notifications"`
+			RegistrationNotifications *bool `json:"registration_notifications"`
 		}
 		if !decodeJSON(w, r, &body) {
 			return
 		}
-		if body.Notifications == nil {
-			apiError(w, 400, "Choose whether to receive run notifications.")
+		if body.Notifications == nil && body.RegistrationNotifications == nil {
+			apiError(w, 400, "Choose a Telegram notification preference.")
 			return
 		}
-		result, err := x.db.ExecContext(r.Context(), `UPDATE telegram_links SET notifications=? WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND disabled=0)`, *body.Notifications, u.ID, u.ID)
+		if body.RegistrationNotifications != nil && !u.Admin {
+			apiError(w, 403, "Only active administrators can manage registration notifications.")
+			return
+		}
+		result, err := x.db.ExecContext(r.Context(), `UPDATE telegram_links
+			SET notifications=coalesce(?,notifications),registration_notifications=coalesce(?,registration_notifications)
+			WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=telegram_links.user_id AND disabled=0 AND (admin=1 OR ?))`,
+			body.Notifications, body.RegistrationNotifications, u.ID, body.RegistrationNotifications == nil)
 		if err != nil {
 			apiError(w, 500, "storage error")
 			return

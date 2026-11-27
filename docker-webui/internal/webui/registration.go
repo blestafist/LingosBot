@@ -157,6 +157,9 @@ func (x *app) register(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			_, err = tx.Exec(`INSERT INTO users(id,email,password_hash,admin,disabled,pending,created_at) VALUES(?,?,?,0,?,?,?)`, id, email, hash, pending, pending, time.Now().Unix())
 		}
+		if err == nil && pending && x.telegram != nil {
+			err = queueTelegramRegistrationNotifications(tx, id)
+		}
 	}
 	if err == nil {
 		err = tx.Commit()

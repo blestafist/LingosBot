@@ -154,6 +154,7 @@ function initWorkspace() {
     telegram: null, telegramLink: null, telegramBusy: false, telegramRequest: null, telegramTimer: null, telegramError: null,
     adminTelegramRequest: null, adminTelegramBusy: false,
     registrationMode: null,
+    requestsFetch: null, requestsSignature: null,
   };
   let account = null;
   let overrideID = 0;
@@ -161,6 +162,7 @@ function initWorkspace() {
   let noticeTimer;
   const settingsForm = $('#settings-form');
   const telegramPanel = $('#telegram-panel');
+  const telegramRegistration = $('#telegram-registration-notifications');
   const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection', scrape_all: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
 
@@ -263,7 +265,7 @@ function initWorkspace() {
 
   function showPage(focus = false) {
     const id = location.hash.slice(1).split('?')[0];
-    const pageID = { lessons: 'dashboard', schedule: 'config', 'collect-words': 'library' }[id] || id;
+    const pageID = { lessons: 'dashboard', schedule: 'config', 'collect-words': 'library', requests: 'users' }[id] || id;
     const page = $$('[data-page]').find(item => item.id === pageID) || $('#dashboard');
     $$('[data-page]').forEach(item => { item.hidden = item !== page; });
     $$('[data-page-link]').forEach(link => {
@@ -273,11 +275,12 @@ function initWorkspace() {
     const heading = $('h1', page);
     document.title = `${heading.textContent} · Your workspace`;
     if (focus) {
-      const target = id === 'schedule' ? $('#schedule-heading') : heading;
+      const target = id === 'schedule' ? $('#schedule-heading') : id === 'requests' && page.id === 'users' ? $('#requests-heading') : heading;
       target.tabIndex = -1;
       target.focus({ preventScroll: true });
     }
     if (id === 'schedule') $('#schedule').scrollIntoView();
+    else if (id === 'requests' && page.id === 'users') $('#registration-requests').scrollIntoView();
     else if (focus) window.scrollTo(0, 0);
     if (['config', 'dashboard'].includes(page.id) && state.scheduleLoaded) loadSchedule(false);
     if (page.id === 'account' && !document.hidden) loadTelegram();
@@ -1082,6 +1085,11 @@ function initWorkspace() {
     $('#telegram-notification-row').hidden = !linked;
     if (!busy) $('#telegram-notifications').checked = linked && data.notifications === true;
     $('#telegram-notifications').disabled = busy || !linked;
+    if (telegramRegistration) {
+      $('#telegram-registration-row').hidden = !linked;
+      if (!busy) telegramRegistration.checked = linked && data.registration_notifications === true;
+      telegramRegistration.disabled = busy || !linked;
+    }
     $('#telegram-create').hidden = !ready || linked;
     $('#telegram-create').textContent = pending ? 'Create new code' : 'Create link code';
     $('#telegram-cancel').hidden = !pending;
@@ -1105,7 +1113,7 @@ function initWorkspace() {
       const focusConnection = connected && telegramPanel.contains(document.activeElement);
       state.telegram = data;
       if (!state.telegramError?.mutation) state.telegramError = null;
-      if (connected && state.telegramLink) message('#telegram-feedback', 'Telegram connected. Choose whether to enable run notifications below.', false);
+      if (connected && state.telegramLink) message('#telegram-feedback', 'Telegram connected. Choose which notifications to enable below.', false);
       renderTelegram();
       if (focusConnection) $('#telegram-notifications').focus({ preventScroll: true });
     } catch (error) {
@@ -1119,9 +1127,9 @@ function initWorkspace() {
       }
     }
   }
-  async function changeTelegram(method) {
+  async function changeTelegram(method, notificationControl, preference, label) {
     if (state.telegramBusy || !state.telegram) return;
-    const notifications = $('#telegram-notifications').checked;
+    const enabled = notificationControl?.checked;
     const wasLinked = state.telegram.linked;
     stopTelegramPolling();
     state.telegramBusy = true;
@@ -1131,7 +1139,7 @@ function initWorkspace() {
     if (method === 'POST') state.telegramLink = null;
     renderTelegram();
     try {
-      const data = await api(method === 'POST' ? '/api/telegram/link' : '/api/telegram', { method, ...(method === 'PATCH' ? { body: { notifications } } : {}) });
+      const data = await api(method === 'POST' ? '/api/telegram/link' : '/api/telegram', { method, ...(method === 'PATCH' ? { body: { [preference]: enabled } } : {}) });
       if (method === 'POST') {
         if (typeof data?.code !== 'string' || !/^[a-z0-9_-]{43}$/i.test(data.code) || !validTelegramBot(data.bot_username) || !Number.isFinite(data.expires_at) || data.expires_at * 1000 <= Date.now()) throw new Error('The server did not return a usable link code. Create a new code to try again.');
         state.telegramLink = data;
@@ -1140,12 +1148,12 @@ function initWorkspace() {
       } else {
         if (data?.ok !== true) throw new Error('The server did not confirm your change. Retry to refresh your Telegram connection.');
         if (method === 'PATCH') {
-          state.telegram = { ...state.telegram, notifications };
-          message('#telegram-feedback', `Run notifications ${notifications ? 'enabled' : 'disabled'}.`, false);
+          state.telegram = { ...state.telegram, [preference]: enabled };
+          message('#telegram-feedback', `${label} ${enabled ? 'enabled' : 'disabled'}.`, false);
         } else {
           state.telegramLink = null;
-          state.telegram = { ...state.telegram, linked: false, username: '', first_name: '', chat_id: '', notifications: false, linked_at: 0, code_expires_at: 0 };
-          message('#telegram-feedback', wasLinked ? 'Telegram disconnected. Run notifications and queued messages have been removed.' : 'Link cancelled. The code can no longer be used.', false);
+          state.telegram = { ...state.telegram, linked: false, username: '', first_name: '', chat_id: '', notifications: false, registration_notifications: false, linked_at: 0, code_expires_at: 0 };
+          message('#telegram-feedback', wasLinked ? 'Telegram disconnected. Notifications have stopped and queued messages have been removed.' : 'Link cancelled. The code can no longer be used.', false);
         }
       }
     } catch (error) {
@@ -1158,16 +1166,18 @@ function initWorkspace() {
         if (state.telegramError) $('#telegram-error').focus({ preventScroll: true });
         else if (method === 'POST') { $('#telegram-code').focus(); $('#telegram-code').select(); }
         else if (method === 'DELETE') ($('#telegram-create').hidden ? $('#telegram-heading') : $('#telegram-create')).focus({ preventScroll: true });
+        else if (!notificationControl?.disabled) notificationControl?.focus({ preventScroll: true });
       }
     }
   }
   $('#telegram-create')?.addEventListener('click', () => changeTelegram('POST'));
   $('#telegram-cancel')?.addEventListener('click', () => changeTelegram('DELETE'));
   $('#telegram-disconnect')?.addEventListener('click', async () => {
-    if (state.telegramBusy || !await confirmAction('Disconnect Telegram?', 'Run notifications will stop. Your link code and queued notifications will also be removed. You can connect again later.', 'Disconnect')) return;
+    if (state.telegramBusy || !await confirmAction('Disconnect Telegram?', 'Telegram notifications will stop. Your link code and queued notifications will also be removed. You can connect again later.', 'Disconnect')) return;
     changeTelegram('DELETE');
   });
-  $('#telegram-notifications')?.addEventListener('change', () => changeTelegram('PATCH'));
+  $('#telegram-notifications')?.addEventListener('change', event => changeTelegram('PATCH', event.currentTarget, 'notifications', 'Run notifications'));
+  telegramRegistration?.addEventListener('change', event => changeTelegram('PATCH', event.currentTarget, 'registration_notifications', 'Registration request notifications'));
   $('#telegram-refresh')?.addEventListener('click', () => { state.telegramError = null; loadTelegram(); });
   $('#telegram-copy')?.addEventListener('click', async () => {
     const link = state.telegramLink;
@@ -1337,7 +1347,7 @@ function initWorkspace() {
     finally { control.disabled = false; }
   }
   async function disconnectAdminTelegram(binding, row) {
-    if (state.adminTelegramBusy || state.adminTelegramRequest || !await confirmAction('Disconnect this Telegram account?', `${binding.email} will stop receiving run notifications. Their link code and queued notifications will also be removed. Only the user can reconnect and opt in again.`, 'Disconnect')) return;
+    if (state.adminTelegramBusy || state.adminTelegramRequest || !await confirmAction('Disconnect this Telegram account?', `${binding.email} will stop receiving Telegram notifications. Their link code and queued notifications will also be removed. Only the user can reconnect and opt in again.`, 'Disconnect')) return;
     const panel = $('#admin-telegram-panel');
     state.adminTelegramRequest?.abort();
     state.adminTelegramRequest = null;
@@ -1419,42 +1429,100 @@ function initWorkspace() {
     }
   }
   $('#refresh-admin-telegram')?.addEventListener('click', loadAdminTelegram);
+  async function loadRegistrationRequests(refresh = false) {
+    const container = $('#requests-list');
+    if (!container || (state.requestsFetch && !refresh)) return;
+    state.requestsFetch?.abort();
+    const request = new AbortController();
+    state.requestsFetch = request;
+    try {
+      const data = await api('/api/admin/registration/requests', { signal: request.signal });
+      if (state.requestsFetch !== request) return;
+      if (!Array.isArray(data?.requests)) throw new Error('The registration queue could not be read.');
+      const requests = data.requests;
+      const signature = JSON.stringify(requests);
+      if (signature === state.requestsSignature) return;
+      state.requestsSignature = signature;
+      const count = requests.length;
+      const countLabel = `${count} pending ${count === 1 ? 'request' : 'requests'}`;
+      status($('#requests-state'), count ? countLabel : 'All caught up', count ? '' : 'good');
+      const overview = $('#registration-overview');
+      overview.textContent = `Registration: ${countLabel}`;
+      overview.hidden = !count;
+      if (!count) { empty(container, 'No pending requests.', 'New requests appear here when registration requires approval.'); return; }
+      // Don't rebuild existing rows on a background refresh; preserve focus and in-flight actions.
+      const currentRows = new Map($$('[data-request-id]', container).map(row => [row.dataset.requestId, row]));
+      const pendingIDs = new Set(requests.map(user => String(user.id)));
+      for (const [id, row] of currentRows) {
+        if (!pendingIDs.has(id)) row.remove();
+      }
+      container.querySelector('.empty')?.remove();
+      for (const user of requests) {
+        if (currentRows.has(String(user.id))) continue;
+        const row = element('article', 'user-row');
+        row.dataset.requestId = user.id;
+        row.append(element('p', 'user-email', user.email), element('small', '', `Requested ${dateLabel(user.created_at)}`));
+        const controls = element('div', 'user-controls');
+        const approve = button('Approve account', () => resolveRequest(true), 'button tonal');
+        const reject = button('Reject request', () => resolveRequest(false), 'button danger');
+        async function resolveRequest(approved) {
+          if (!approved && !await confirmAction('Reject this request?', `The pending account for ${user.email} will be removed. They can request access again while registration allows it.`, 'Reject request')) return;
+          approve.disabled = reject.disabled = true;
+          const path = `/api/admin/users/${encodeURIComponent(user.id)}`;
+          try {
+            await api(approved ? path : `${path}?pending=1`, approved ? { method: 'PATCH', body: { approve: true } } : { method: 'DELETE' });
+            notify(approved ? 'Account approved.' : 'Registration request rejected.');
+            await loadUsers();
+            if (!$('#users').hidden) $('#requests-heading').focus({ preventScroll: true });
+          } catch (error) { notify(error.message, true); loadRegistrationRequests(true); }
+          finally { approve.disabled = reject.disabled = false; }
+        }
+        controls.append(approve, reject);
+        row.append(controls);
+        container.append(row);
+      }
+    } catch (error) {
+      if (state.requestsFetch !== request || error.name === 'AbortError') return;
+      state.requestsSignature = null;
+      $('#registration-overview').hidden = true;
+      status($('#requests-state'), 'Unavailable', 'bad');
+      empty(container, 'Requests unavailable', error.message, () => loadRegistrationRequests(true));
+    } finally {
+      if (state.requestsFetch === request) state.requestsFetch = null;
+    }
+  }
+  function userTelemetry(user) {
+    const run = user.last_lesson_run;
+    const list = element('dl', 'user-telemetry');
+    for (const [label, value] of [
+      ['Account created', dateLabel(user.created_at)],
+      ['Last lesson run', run ? `${dateLabel(run.created_at)} · ${run.source === 'schedule' ? 'Scheduled' : 'Manual'} · ${statusLabels[run.status] || run.status}` : 'No lesson runs yet'],
+      ['Last run finished', run?.finished_at ? dateLabel(run.finished_at) : '—'],
+      ['Next automatic run', !user.schedule_enabled ? 'Paused' : user.disabled ? 'Account disabled' : user.next_run ? dateLabel(user.next_run) : 'Not scheduled yet'],
+    ]) {
+      const item = element('div');
+      item.append(element('dt', '', label), element('dd', '', value));
+      list.append(item);
+    }
+    return list;
+  }
   async function loadUsers() {
     const container = $('#users-list');
     if (!container) return;
     loadAdminTelegram();
+    const requestsLoaded = loadRegistrationRequests(true);
     try {
       const data = await api('/api/admin/users');
       if (!Array.isArray(data?.users)) throw new Error('The user list could not be read.');
       container.replaceChildren();
-      if (!data.users.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
-      for (const user of data.users.sort((a, b) => Number(Boolean(b.pending)) - Number(Boolean(a.pending)))) {
+      const members = data.users.filter(user => !user.pending);
+      if (!members.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
+      for (const user of members) {
         const row = element('article', 'user-row');
         const head = element('div', 'user-row-head');
         const copy = element('div');
         copy.append(element('p', 'user-email', user.email), element('small', '', `${user.admin ? 'Administrator' : 'Member'}${String(user.id) === String(account?.id) ? ' · You' : ''}`));
-        const badge = element('span'); status(badge, user.pending ? 'Awaiting approval' : user.disabled ? 'Disabled' : 'Active', user.pending ? '' : user.disabled ? 'bad' : 'good'); head.append(copy, badge);
-        if (user.pending) {
-          const controls = element('div', 'user-controls');
-          const approve = button('Approve account', async () => {
-            if (await patchUser(user, { approve: true }, approve)) $('#refresh-users').focus({ preventScroll: true });
-          }, 'button tonal');
-          const reject = button('Reject request', async () => {
-            if (!await confirmAction('Reject this request?', `The pending account for ${user.email} will be removed. They can request access again while registration allows it.`, 'Reject request')) return;
-            reject.disabled = true;
-            try {
-              await api(`/api/admin/users/${encodeURIComponent(user.id)}?pending=1`, { method: 'DELETE' });
-              notify('Registration request rejected.');
-              await loadUsers();
-              $('#refresh-users').focus({ preventScroll: true });
-            } catch (error) { notify(error.message, true); }
-            finally { reject.disabled = false; }
-          }, 'button danger');
-          controls.append(approve, reject);
-          row.append(head, controls);
-          container.append(row);
-          continue;
-        }
+        const badge = element('span'); status(badge, user.disabled ? 'Disabled' : 'Active', user.disabled ? 'bad' : 'good'); head.append(copy, badge);
         const details = element('details'); details.append(element('summary', '', 'Manage access'));
         const controls = element('div', 'user-controls');
         const toggle = button(user.disabled ? 'Enable account' : 'Disable account', async () => {
@@ -1494,9 +1562,10 @@ function initWorkspace() {
             else notify('Password reset. Share the new password securely.');
           });
         });
-        details.append(form); row.append(head, details); container.append(row);
+        details.append(form); row.append(head, userTelemetry(user), details); container.append(row);
       }
     } catch (error) { empty(container, 'Users unavailable', error.message, loadUsers); }
+    finally { await requestsLoaded; }
   }
   $('#refresh-users')?.addEventListener('click', loadUsers);
   $('#create-user-form')?.addEventListener('submit', async event => {
@@ -1516,7 +1585,7 @@ function initWorkspace() {
     if (watchingRuns) return;
     watchingRuns = true;
     clearTimeout(state.watchTimer);
-    if (!document.hidden) await Promise.allSettled([loadRuns({ quiet: true }), loadSchedule(false)]);
+    if (!document.hidden) await Promise.allSettled([loadRuns({ quiet: true }), loadSchedule(false), loadRegistrationRequests()]);
     watchingRuns = false;
     state.watchTimer = setTimeout(watchRuns, 10000);
   }

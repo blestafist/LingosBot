@@ -77,6 +77,8 @@ This works only if the administrator has turned on the Telegram bot.
 1. Open **Account → Telegram** and press **Create link code**.
 2. Press **Open Telegram**, then press **Start** in the bot chat. (Or copy the code and send it to the bot.)
 3. Back in the WebUI, turn on **Lesson run notifications**. They are off until you do this.
+
+Administrators can also turn on **Registration request notifications** in **Account → Telegram**. Each administrator opts in separately. New requests in **Approval required** mode send a private alert without the applicant's email; review the request under **Users → Registration requests**.
 4. To stop, press **Disconnect**, or send `/stop` to the bot.
 
 You only get a short result after lesson runs finish. The bot cannot start or stop lessons.
@@ -117,7 +119,7 @@ The easiest way is Docker Compose. You need [Docker](https://docs.docker.com/get
    ```
 
 4. Open <http://127.0.0.1:8080> and sign in with `ADMIN_USER` and `ADMIN_PASSWORD`.
-5. Create accounts in **Users**, or choose a registration mode in **Workspace registration** on the Dashboard. Approve requests in **Users**.
+5. Create accounts in **Users**, or choose a mode under **Users → Workspace registration**. With **Approval required**, new requests appear on the administrator's Dashboard and in **Users → Registration requests**.
 
 > [!WARNING]
 > Generate `ENCRYPTION_KEY` **once** and keep it somewhere safe. Use the same key after every update and restart. If you lose it or change it, every saved Lingos password becomes unreadable and all users must enter them again.
