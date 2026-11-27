@@ -356,7 +356,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .form-stack > .primary { margin-top: 14px; }
 .login-panel .footnote { margin-top: 24px; }
 .register-cta { width: 100%; min-height: 56px; margin-top: 16px; border-radius: 28px; font-size: 16px; }
-#users-list { display: grid; gap: 8px; padding: 0 28px 28px; }
+.registration-notice:has(a:not([hidden])) { margin-bottom: 24px; }
+#users-list, #requests-list { display: grid; gap: 8px; padding: 0 28px 28px; }
 .user-row { min-width: 0; padding: 20px; background: var(--subtle); border-radius: 12px; }
 .user-row:first-child { border-top-left-radius: 24px; border-top-right-radius: 24px; }
 .user-row:last-child { border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; }

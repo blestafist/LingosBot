@@ -69,6 +69,7 @@
 
         <section id="dashboard" class="page" data-page aria-labelledby="dashboard-heading">
           <div class="page-heading"><div><h1 id="dashboard-heading" tabindex="-1">Dashboard</h1><p class="description">A little practice. Every day.</p></div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
+          {{if .User.Admin}}<div class="registration-notice" role="status"><a id="registration-overview" class="button tonal" href="#requests" hidden></a></div>{{end}}
           <div id="setup-card" class="setup-card" hidden><div><h2>Connect Lingos</h2><p>Save your Lingos login in Account to get started.</p></div><a class="button primary" href="#account">Connect Lingos <span aria-hidden="true">→</span></a></div>
           <div class="workspace-grid">
               <form id="quick-run-form" class="panel"><div class="panel-heading"><div class="panel-title"><span class="section-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z"/></svg></span><h2>Ready when you are.</h2></div></div><div class="fields plan-default"><label for="quick-lesson-count">Lessons per class<input id="quick-lesson-count" type="number" min="1" max="10000" step="1" value="1" required></label></div><div class="panel-footer"><p id="quick-run-hint">Loading config…</p><button id="run-lessons" class="button primary" type="submit" disabled>Run now <span aria-hidden="true">→</span></button></div></form>
@@ -181,6 +182,10 @@
         {{if .User.Admin}}
         <section id="users" class="page narrow-page" data-page hidden aria-labelledby="users-heading">
           <div class="page-heading"><div><h1 id="users-heading" tabindex="-1">Users</h1><p class="description">Keep workspace access intentional.</p></div><button id="refresh-users" class="button" type="button">Refresh</button></div>
+          <section id="registration-requests" class="panel" aria-labelledby="requests-heading">
+            <div class="panel-heading"><div><h2 id="requests-heading" tabindex="-1">Registration requests</h2><p>Approve or reject requests for workspace access.</p></div><span id="requests-state" class="status">Loading…</span></div>
+            <div id="requests-list"><p class="empty">Loading requests…</p></div>
+          </section>
           <form id="registration-form" class="panel" aria-labelledby="registration-heading">
             <div class="panel-heading"><div><h2 id="registration-heading">Workspace registration</h2><p>Choose how new members join. Existing accounts are unchanged.</p></div><span id="registration-state" class="status">Loading…</span></div>
             <p id="registration-error" class="message error" role="alert" hidden></p>

@@ -117,7 +117,7 @@ The easiest way is Docker Compose. You need [Docker](https://docs.docker.com/get
    ```
 
 4. Open <http://127.0.0.1:8080> and sign in with `ADMIN_USER` and `ADMIN_PASSWORD`.
-5. Create accounts in **Users**, or choose a registration mode in **Workspace registration** on the Dashboard. Approve requests in **Users**.
+5. Create accounts in **Users**, or choose a mode under **Users → Workspace registration**. With **Approval required**, new requests appear on the administrator's Dashboard and in **Users → Registration requests**.
 
 > [!WARNING]
 > Generate `ENCRYPTION_KEY` **once** and keep it somewhere safe. Use the same key after every update and restart. If you lose it or change it, every saved Lingos password becomes unreadable and all users must enter them again.
