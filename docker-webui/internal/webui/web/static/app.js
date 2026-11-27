@@ -162,6 +162,7 @@ function initWorkspace() {
   let noticeTimer;
   const settingsForm = $('#settings-form');
   const telegramPanel = $('#telegram-panel');
+  const telegramRegistration = $('#telegram-registration-notifications');
   const runLabels = { run: 'Lessons', classes: 'Class sync', scrape: 'Word collection', scrape_all: 'Word collection' };
   const statusLabels = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Stopped', interrupted: 'Interrupted' };
 
@@ -1084,6 +1085,11 @@ function initWorkspace() {
     $('#telegram-notification-row').hidden = !linked;
     if (!busy) $('#telegram-notifications').checked = linked && data.notifications === true;
     $('#telegram-notifications').disabled = busy || !linked;
+    if (telegramRegistration) {
+      $('#telegram-registration-row').hidden = !linked;
+      if (!busy) telegramRegistration.checked = linked && data.registration_notifications === true;
+      telegramRegistration.disabled = busy || !linked;
+    }
     $('#telegram-create').hidden = !ready || linked;
     $('#telegram-create').textContent = pending ? 'Create new code' : 'Create link code';
     $('#telegram-cancel').hidden = !pending;
@@ -1107,7 +1113,7 @@ function initWorkspace() {
       const focusConnection = connected && telegramPanel.contains(document.activeElement);
       state.telegram = data;
       if (!state.telegramError?.mutation) state.telegramError = null;
-      if (connected && state.telegramLink) message('#telegram-feedback', 'Telegram connected. Choose whether to enable run notifications below.', false);
+      if (connected && state.telegramLink) message('#telegram-feedback', 'Telegram connected. Choose which notifications to enable below.', false);
       renderTelegram();
       if (focusConnection) $('#telegram-notifications').focus({ preventScroll: true });
     } catch (error) {
@@ -1121,9 +1127,9 @@ function initWorkspace() {
       }
     }
   }
-  async function changeTelegram(method) {
+  async function changeTelegram(method, notificationControl, preference, label) {
     if (state.telegramBusy || !state.telegram) return;
-    const notifications = $('#telegram-notifications').checked;
+    const enabled = notificationControl?.checked;
     const wasLinked = state.telegram.linked;
     stopTelegramPolling();
     state.telegramBusy = true;
@@ -1133,7 +1139,7 @@ function initWorkspace() {
     if (method === 'POST') state.telegramLink = null;
     renderTelegram();
     try {
-      const data = await api(method === 'POST' ? '/api/telegram/link' : '/api/telegram', { method, ...(method === 'PATCH' ? { body: { notifications } } : {}) });
+      const data = await api(method === 'POST' ? '/api/telegram/link' : '/api/telegram', { method, ...(method === 'PATCH' ? { body: { [preference]: enabled } } : {}) });
       if (method === 'POST') {
         if (typeof data?.code !== 'string' || !/^[a-z0-9_-]{43}$/i.test(data.code) || !validTelegramBot(data.bot_username) || !Number.isFinite(data.expires_at) || data.expires_at * 1000 <= Date.now()) throw new Error('The server did not return a usable link code. Create a new code to try again.');
         state.telegramLink = data;
@@ -1142,12 +1148,12 @@ function initWorkspace() {
       } else {
         if (data?.ok !== true) throw new Error('The server did not confirm your change. Retry to refresh your Telegram connection.');
         if (method === 'PATCH') {
-          state.telegram = { ...state.telegram, notifications };
-          message('#telegram-feedback', `Run notifications ${notifications ? 'enabled' : 'disabled'}.`, false);
+          state.telegram = { ...state.telegram, [preference]: enabled };
+          message('#telegram-feedback', `${label} ${enabled ? 'enabled' : 'disabled'}.`, false);
         } else {
           state.telegramLink = null;
-          state.telegram = { ...state.telegram, linked: false, username: '', first_name: '', chat_id: '', notifications: false, linked_at: 0, code_expires_at: 0 };
-          message('#telegram-feedback', wasLinked ? 'Telegram disconnected. Run notifications and queued messages have been removed.' : 'Link cancelled. The code can no longer be used.', false);
+          state.telegram = { ...state.telegram, linked: false, username: '', first_name: '', chat_id: '', notifications: false, registration_notifications: false, linked_at: 0, code_expires_at: 0 };
+          message('#telegram-feedback', wasLinked ? 'Telegram disconnected. Notifications have stopped and queued messages have been removed.' : 'Link cancelled. The code can no longer be used.', false);
         }
       }
     } catch (error) {
@@ -1160,16 +1166,18 @@ function initWorkspace() {
         if (state.telegramError) $('#telegram-error').focus({ preventScroll: true });
         else if (method === 'POST') { $('#telegram-code').focus(); $('#telegram-code').select(); }
         else if (method === 'DELETE') ($('#telegram-create').hidden ? $('#telegram-heading') : $('#telegram-create')).focus({ preventScroll: true });
+        else if (!notificationControl?.disabled) notificationControl?.focus({ preventScroll: true });
       }
     }
   }
   $('#telegram-create')?.addEventListener('click', () => changeTelegram('POST'));
   $('#telegram-cancel')?.addEventListener('click', () => changeTelegram('DELETE'));
   $('#telegram-disconnect')?.addEventListener('click', async () => {
-    if (state.telegramBusy || !await confirmAction('Disconnect Telegram?', 'Run notifications will stop. Your link code and queued notifications will also be removed. You can connect again later.', 'Disconnect')) return;
+    if (state.telegramBusy || !await confirmAction('Disconnect Telegram?', 'Telegram notifications will stop. Your link code and queued notifications will also be removed. You can connect again later.', 'Disconnect')) return;
     changeTelegram('DELETE');
   });
-  $('#telegram-notifications')?.addEventListener('change', () => changeTelegram('PATCH'));
+  $('#telegram-notifications')?.addEventListener('change', event => changeTelegram('PATCH', event.currentTarget, 'notifications', 'Run notifications'));
+  telegramRegistration?.addEventListener('change', event => changeTelegram('PATCH', event.currentTarget, 'registration_notifications', 'Registration request notifications'));
   $('#telegram-refresh')?.addEventListener('click', () => { state.telegramError = null; loadTelegram(); });
   $('#telegram-copy')?.addEventListener('click', async () => {
     const link = state.telegramLink;
@@ -1339,7 +1347,7 @@ function initWorkspace() {
     finally { control.disabled = false; }
   }
   async function disconnectAdminTelegram(binding, row) {
-    if (state.adminTelegramBusy || state.adminTelegramRequest || !await confirmAction('Disconnect this Telegram account?', `${binding.email} will stop receiving run notifications. Their link code and queued notifications will also be removed. Only the user can reconnect and opt in again.`, 'Disconnect')) return;
+    if (state.adminTelegramBusy || state.adminTelegramRequest || !await confirmAction('Disconnect this Telegram account?', `${binding.email} will stop receiving Telegram notifications. Their link code and queued notifications will also be removed. Only the user can reconnect and opt in again.`, 'Disconnect')) return;
     const panel = $('#admin-telegram-panel');
     state.adminTelegramRequest?.abort();
     state.adminTelegramRequest = null;

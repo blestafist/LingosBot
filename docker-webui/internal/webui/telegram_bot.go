@@ -365,6 +365,14 @@ func telegramNotificationText(run RunRecord) string {
 	return text
 }
 
+func telegramNotificationRetryDelay(attempts int, apiErr *telegramAPIError) time.Duration {
+	delay := [...]time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour}[max(attempts, 0)]
+	if apiErr != nil {
+		delay = max(delay, apiErr.retryAfter)
+	}
+	return delay
+}
+
 func (x *app) deliverTelegramNotification(ctx context.Context) (bool, error) {
 	var run RunRecord
 	var chatID, linkedAt int64
@@ -417,10 +425,7 @@ func (x *app) deliverTelegramNotification(ctx context.Context) (bool, error) {
 	} else if attempts >= 4 {
 		_, err = x.db.ExecContext(ctx, `DELETE FROM telegram_outbox WHERE run_id=? AND chat_id=?`, run.ID, chatID)
 	} else {
-		delay := [...]time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour}[max(attempts, 0)]
-		if apiErr != nil {
-			delay = max(delay, apiErr.retryAfter)
-		}
+		delay := telegramNotificationRetryDelay(attempts, apiErr)
 		_, err = x.db.ExecContext(ctx, `UPDATE telegram_outbox SET attempts=attempts+1,next_attempt=? WHERE run_id=? AND chat_id=?`, time.Now().Add(delay).Unix(), run.ID, chatID)
 	}
 	if err != nil {
@@ -432,9 +437,15 @@ func (x *app) deliverTelegramNotification(ctx context.Context) (bool, error) {
 func (x *app) telegramNotificationLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	deliver := [...]func(context.Context) (bool, error){x.deliverTelegramNotification, x.deliverTelegramRegistrationNotification}
+	next := 0
 	for ctx.Err() == nil {
 		for range 10 {
-			processed, err := x.deliverTelegramNotification(ctx)
+			processed, err := deliver[next](ctx)
+			next = 1 - next
+			if !processed && err == nil {
+				processed, err = deliver[next](ctx)
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					return

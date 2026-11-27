@@ -77,6 +77,8 @@ This works only if the administrator has turned on the Telegram bot.
 1. Open **Account → Telegram** and press **Create link code**.
 2. Press **Open Telegram**, then press **Start** in the bot chat. (Or copy the code and send it to the bot.)
 3. Back in the WebUI, turn on **Lesson run notifications**. They are off until you do this.
+
+Administrators can also turn on **Registration request notifications** in **Account → Telegram**. Each administrator opts in separately. New requests in **Approval required** mode send a private alert without the applicant's email; review the request under **Users → Registration requests**.
 4. To stop, press **Disconnect**, or send `/stop` to the bot.
 
 You only get a short result after lesson runs finish. The bot cannot start or stop lessons.

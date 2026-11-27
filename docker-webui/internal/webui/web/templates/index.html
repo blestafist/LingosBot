@@ -152,7 +152,7 @@
             <div class="panel-footer"><button id="remove-credentials" class="button danger" type="button" disabled>Remove credentials</button><div class="actions"><button id="retry-credentials" class="button" type="button" hidden>Retry</button><button id="save-credentials" class="button primary" type="submit" disabled>Save credentials</button></div></div>
           </form>
           <section id="telegram-panel" class="panel" aria-labelledby="telegram-heading">
-            <div class="panel-heading"><div class="panel-title"><span class="section-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 3-7 18-4-7-7-4Z M10 14 21 3"/></svg></span><div><h2 id="telegram-heading" tabindex="-1">Telegram</h2><p>Connect your Telegram account for optional run notifications.</p></div></div><span id="telegram-state" class="status">Loading…</span></div>
+            <div class="panel-heading"><div class="panel-title"><span class="section-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m21 3-7 18-4-7-7-4Z M10 14 21 3"/></svg></span><div><h2 id="telegram-heading" tabindex="-1">Telegram</h2><p>Connect your Telegram account for optional notifications.</p></div></div><span id="telegram-state" class="status">Loading…</span></div>
             <p id="telegram-error" class="message error" role="alert" tabindex="-1" hidden></p>
             <div class="telegram-content inset">
               <p id="telegram-availability" class="muted" hidden></p>
@@ -168,6 +168,7 @@
               <div id="telegram-linked" hidden><p id="telegram-identity" class="activity-title"></p><p id="telegram-connected" class="footnote" hidden></p></div>
             </div>
             <label id="telegram-notification-row" class="check-row" hidden><input id="telegram-notifications" type="checkbox" aria-describedby="telegram-notification-hint" disabled><span><strong>Lesson run notifications</strong><small id="telegram-notification-hint">A short result after manual or scheduled lessons. No class sync, credential checks, word collection or progress updates. Optional; off by default.</small></span></label>
+            {{if .User.Admin}}<label id="telegram-registration-row" class="check-row" hidden><input id="telegram-registration-notifications" type="checkbox" aria-describedby="telegram-registration-hint" disabled><span><strong>Registration request notifications</strong><small id="telegram-registration-hint">Get a private message when a new request needs your approval. No applicant details are sent. Optional; off by default.</small></span></label>{{end}}
             <p id="telegram-feedback" class="telegram-feedback footnote" role="status" hidden></p>
             <div id="telegram-actions" class="panel-footer" hidden><div class="actions"><button id="telegram-create" class="button tonal" type="button" hidden>Create link code</button><button id="telegram-cancel" class="button" type="button" hidden>Cancel link</button><button id="telegram-disconnect" class="button danger" type="button" hidden>Disconnect</button><button id="telegram-refresh" class="button" type="button" hidden>Retry</button></div></div>
           </section>
