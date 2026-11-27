@@ -1419,6 +1419,21 @@ function initWorkspace() {
     }
   }
   $('#refresh-admin-telegram')?.addEventListener('click', loadAdminTelegram);
+  function userTelemetry(user) {
+    const run = user.last_lesson_run;
+    const list = element('dl', 'user-telemetry');
+    for (const [label, value] of [
+      ['Account created', dateLabel(user.created_at)],
+      ['Last lesson run', run ? `${dateLabel(run.created_at)} · ${run.source === 'schedule' ? 'Scheduled' : 'Manual'} · ${statusLabels[run.status] || run.status}` : 'No lesson runs yet'],
+      ['Last run finished', run?.finished_at ? dateLabel(run.finished_at) : '—'],
+      ['Next automatic run', !user.schedule_enabled ? 'Paused' : user.disabled ? 'Account disabled' : user.next_run ? dateLabel(user.next_run) : 'Not scheduled yet'],
+    ]) {
+      const item = element('div');
+      item.append(element('dt', '', label), element('dd', '', value));
+      list.append(item);
+    }
+    return list;
+  }
   async function loadUsers() {
     const container = $('#users-list');
     if (!container) return;
@@ -1494,7 +1509,7 @@ function initWorkspace() {
             else notify('Password reset. Share the new password securely.');
           });
         });
-        details.append(form); row.append(head, details); container.append(row);
+        details.append(form); row.append(head, userTelemetry(user), details); container.append(row);
       }
     } catch (error) { empty(container, 'Users unavailable', error.message, loadUsers); }
   }

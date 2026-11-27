@@ -312,26 +312,7 @@ func (x *app) adminUsersAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/api/admin/users" && r.Method == http.MethodGet {
-		rows, err := x.db.QueryContext(r.Context(), `SELECT id,email,admin,disabled,pending FROM users ORDER BY id`)
-		if err != nil {
-			apiError(w, http.StatusInternalServerError, "storage error")
-			return
-		}
-		defer rows.Close()
-		users := []User{}
-		for rows.Next() {
-			var u User
-			if err = rows.Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending); err != nil {
-				apiError(w, http.StatusInternalServerError, "storage error")
-				return
-			}
-			users = append(users, u)
-		}
-		if rows.Err() != nil {
-			apiError(w, http.StatusInternalServerError, "storage error")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"users": users})
+		x.listAdminUsers(w, r)
 		return
 	}
 	if r.Method != http.MethodPost && r.Method != http.MethodPatch && r.Method != http.MethodDelete {

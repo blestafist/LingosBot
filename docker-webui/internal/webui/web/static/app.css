@@ -364,6 +364,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-row-head > div { min-width: 0; flex: 1 1 160px; }
 .user-email { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .user-row small { display: block; color: var(--muted); }
+.user-telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px 16px; margin: 16px 0 0; font-size: 14px; }
+.user-telemetry dt { color: var(--muted); font-size: 12px; }
+.user-telemetry dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .user-row details { margin-top: 16px; border-radius: 20px; background: var(--surface); overflow: clip; }
 .user-row summary { padding: 12px 16px; min-height: 48px; }
 .user-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
