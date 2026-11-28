@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const sessionLifetime = 30 * 24 * time.Hour
+
 type User struct {
 	ID       int64  `json:"id"`
 	Email    string `json:"email"`
@@ -144,10 +146,11 @@ func (x *app) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec(`DELETE FROM user_sessions WHERE token IN (SELECT token FROM user_sessions WHERE expires<=? LIMIT 100)`, time.Now().Unix()); err == nil {
+	now := time.Now()
+	if _, err = tx.Exec(`DELETE FROM user_sessions WHERE token IN (SELECT token FROM user_sessions WHERE expires<=? LIMIT 100)`, now.Unix()); err == nil {
 		// Recheck the hash and disabled flag in the write transaction: password resets must win races with login.
 		var result sql.Result
-		result, err = tx.Exec(`INSERT INTO user_sessions(token,csrf,user_id,expires) SELECT ?,?,id,? FROM users WHERE id=? AND password_hash=? AND disabled=0`, tokenHash(token), csrf, time.Now().Add(12*time.Hour).Unix(), id, hash)
+		result, err = tx.Exec(`INSERT INTO user_sessions(token,csrf,user_id,expires) SELECT ?,?,id,? FROM users WHERE id=? AND password_hash=? AND disabled=0`, tokenHash(token), csrf, now.Add(sessionLifetime).Unix(), id, hash)
 		if err == nil {
 			var n int64
 			n, err = result.RowsAffected()
@@ -169,7 +172,7 @@ func (x *app) login(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, "storage error")
 		return
 	}
-	http.SetCookie(w, sessionCookie(token, 12*60*60))
+	http.SetCookie(w, sessionCookie(token, int(sessionLifetime/time.Second)))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
