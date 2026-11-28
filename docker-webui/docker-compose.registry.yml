@@ -1,0 +1,4 @@
+services:
+  webui:
+    build: !reset null
+    image: ghcr.io/blestafist/lingosbot-webui:${RELEASE_VERSION:?set RELEASE_VERSION to a container tag}

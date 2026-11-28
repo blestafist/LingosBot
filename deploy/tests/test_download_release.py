@@ -339,7 +339,7 @@ class DeploymentConfigTests(unittest.TestCase):
         self.assertEqual(dockerfile.count("ARG RELEASE_VERSION=latest"), 2)
         self.assertIn('env("RELEASE_VERSION", "latest")',
                       (ROOT / "docker-webui/internal/webui/worker_release.go").read_text())
-        self.assertIn('"$RELEASE_VERSION" "$TARGETARCH" /release', dockerfile)
+        self.assertIn('"$RELEASE_VERSION" "$TARGETARCH" "/release/$TARGETARCH"', dockerfile)
         final_stage = dockerfile.split("FROM alpine:3.22\n")[1]
         self.assertIn("USER webui", final_stage)
         self.assertIn("chown webui:webui /data", final_stage)
