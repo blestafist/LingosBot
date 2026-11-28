@@ -156,13 +156,19 @@ func TestAuthLoginAndSession(t *testing.T) {
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Origin", "https://example.com")
 	w := httptest.NewRecorder()
+	const wantLifetime = 30 * 24 * time.Hour
+	earliest := time.Now().Add(wantLifetime).Unix()
 	x.login(w, r)
+	latest := time.Now().Add(wantLifetime).Unix()
 	if w.Code != http.StatusSeeOther || len(w.Result().Cookies()) != 1 {
 		t.Fatalf("login: %d %s", w.Code, w.Body.String())
 	}
 	cookie := w.Result().Cookies()[0]
-	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || len(cookie.Value) != 43 {
+	if cookie.Name != "session" || cookie.Path != "/" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || len(cookie.Value) != 43 {
 		t.Fatalf("unsafe cookie: %#v", cookie)
+	}
+	if cookie.MaxAge != int(wantLifetime/time.Second) {
+		t.Fatalf("cookie max age: %d seconds, want %v", cookie.MaxAge, wantLifetime)
 	}
 	r = httptest.NewRequest(http.MethodGet, "/", nil)
 	r.AddCookie(cookie)
@@ -172,14 +178,41 @@ func TestAuthLoginAndSession(t *testing.T) {
 		t.Fatal("session did not identify user")
 	}
 	var stored string
-	if err := x.db.QueryRow(`SELECT token FROM user_sessions`).Scan(&stored); err != nil || stored == token || stored != tokenHash(token) {
+	var expires int64
+	if err := x.db.QueryRow(`SELECT token,expires FROM user_sessions`).Scan(&stored, &expires); err != nil {
+		t.Fatal(err)
+	}
+	if stored != tokenHash(token) {
 		t.Fatal("session token was not hashed")
+	}
+	if expires < earliest || expires > latest {
+		t.Fatalf("server expiry: %d, want between %d and %d", expires, earliest, latest)
 	}
 	if _, err := x.db.Exec(`UPDATE user_sessions SET expires=0`); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := x.user(r); ok {
 		t.Fatal("expired session accepted")
+	}
+}
+
+func TestAuthExistingSessionKeepsExpiry(t *testing.T) {
+	x := newAuthTestApp(t)
+	token, _ := authTestSession(t, x, 1)
+	var expires int64
+	if err := x.db.QueryRow(`SELECT expires FROM user_sessions WHERE token=?`, tokenHash(token)).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	w := authTestRequest(x.accountAPI, http.MethodGet, "/api/account", "", token, "")
+	if w.Code != http.StatusOK || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("existing session should be accepted without issuing a new cookie: %d %s", w.Code, w.Body.String())
+	}
+	var after int64
+	if err := x.db.QueryRow(`SELECT expires FROM user_sessions WHERE token=?`, tokenHash(token)).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != expires {
+		t.Fatalf("existing session expiry changed from %d to %d", expires, after)
 	}
 }
 
@@ -242,6 +275,9 @@ func TestAuthCSRF(t *testing.T) {
 	w := authTestRequest(x.logout, "POST", "/logout", "", token, csrf)
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("logout: %d", w.Code)
+	}
+	if cookies := w.Result().Cookies(); len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].Path != "/" || cookies[0].MaxAge >= 0 {
+		t.Fatalf("logout did not clear the session cookie: %v", cookies)
 	}
 	if w = authTestRequest(x.accountAPI, "GET", "/api/account", "", token, ""); w.Code != http.StatusUnauthorized {
 		t.Fatal("logout did not revoke session")

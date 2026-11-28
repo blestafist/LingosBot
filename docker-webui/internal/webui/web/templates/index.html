@@ -68,7 +68,7 @@
         <div id="notice" class="message" role="status" tabindex="-1" hidden></div>
 
         <section id="dashboard" class="page" data-page aria-labelledby="dashboard-heading">
-          <div class="page-heading"><div><h1 id="dashboard-heading" tabindex="-1">Dashboard</h1><p class="description">A little practice. Every day.</p></div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
+          <div class="page-heading"><div><h1 id="dashboard-heading" tabindex="-1">Dashboard</h1><p class="description">A little practice. Every day.</p>{{if .User.Admin}}<p class="footnote"><span class="status" id="worker-version" role="status">Worker version: Loading…</span></p>{{end}}</div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
           {{if .User.Admin}}<div class="registration-notice" role="status"><a id="registration-overview" class="button tonal" href="#requests" hidden></a></div>{{end}}
           <div id="setup-card" class="setup-card" hidden><div><h2>Connect Lingos</h2><p>Save your Lingos login in Account to get started.</p></div><a class="button primary" href="#account">Connect Lingos <span aria-hidden="true">→</span></a></div>
           <div class="workspace-grid">
@@ -196,6 +196,12 @@
               <label><input type="radio" name="registration-mode" value="open"><span><strong>Open registration</strong><small>Anyone can create an account and sign in immediately.</small></span></label>
             </fieldset>
             <div class="panel-footer"><p>Pending requests still need approval after a mode change. Email addresses are not verified.</p><div class="actions"><button id="retry-registration" class="button" type="button" hidden>Retry</button><button id="save-registration" class="button primary" type="submit" disabled>Save mode</button></div></div>
+          </form>
+          <form id="instance-settings-form" class="panel" aria-labelledby="instance-settings-heading">
+            <div class="panel-heading"><div><h2 id="instance-settings-heading">Instance settings</h2><p>Control whether administrators can view activity across the workspace.</p></div><span id="telemetry-state" class="status" role="status">Loading…</span></div>
+            <label class="check-row"><input id="telemetry-enabled" type="checkbox" disabled><span>Enable user telemetry</span></label>
+            <p id="instance-settings-error" class="message error" role="alert" hidden></p>
+            <div class="panel-footer"><p>Turning this off removes activity details from the admin panel and API. It does not delete users’ own history or stop scheduled lessons.</p><button id="save-instance-settings" class="button primary" type="submit" disabled>Save settings</button></div>
           </form>
           <section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section>
           <section id="admin-telegram-panel" class="panel" aria-labelledby="admin-telegram-heading">

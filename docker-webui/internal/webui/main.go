@@ -26,6 +26,7 @@ type app struct {
 	db              *sql.DB
 	aead            cipher.AEAD
 	worker          string
+	workerVersion   string
 	admin, password string
 	workerMu        sync.Mutex
 	runMu           sync.Mutex
@@ -127,6 +128,7 @@ func serve() error {
 	if _, err := db.Exec(`UPDATE runs SET status='interrupted',summary='The server stopped during this run. Check Lingos before retrying.',finished_at=? WHERE status='running'`, time.Now().Unix()); err != nil {
 		return err
 	}
+	x.workerVersion = probeWorkerVersion(ctx, worker)
 	server := &http.Server{Addr: env("LISTEN", "127.0.0.1:8080"), Handler: x.secure(x.routes()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	scheduleDone := make(chan struct{})
 	go func() {
@@ -176,10 +178,13 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/telegram/link", x.telegramLinkAPI)
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
+	mux.HandleFunc("GET /api/admin/users/{id}/telemetry", x.adminUserTelemetryAPI)
+	mux.HandleFunc("PUT /api/admin/instance-settings", x.instanceSettingsAPI)
 	mux.HandleFunc("/api/admin/registration", x.registrationAPI)
 	mux.HandleFunc("/api/admin/registration/requests", x.registrationRequestsAPI)
 	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
 	mux.HandleFunc("/api/admin/telegram/", x.adminTelegramAPI)
+	mux.HandleFunc("GET /api/admin/worker-status", x.workerStatusAPI)
 	mux.HandleFunc("/api/settings", x.settingsAPI)
 	mux.HandleFunc("/api/schedule", x.scheduleAPI)
 	mux.HandleFunc("/api/schedule/skip", x.skipScheduleAPI)

@@ -93,7 +93,7 @@ Click the moon/sun button in the top corner. The page follows your device settin
 
 ## Part B: I want to host it
 
-The easiest way is Docker Compose. You need [Docker](https://docs.docker.com/get-docker/) and a copy of this repository.
+The easiest way is [Docker Compose](https://docs.docker.com/get-docker/) (v2.24.4 or later) and a copy of this repository. GitHub Actions publishes ready-to-run `linux/amd64` and `linux/arm64` images in [GitHub Packages](https://github.com/blestafist/LingosBot/pkgs/container/lingosbot-webui). Use a specific version; there is no `latest` image tag.
 
 1. Generate an encryption key **once**:
 
@@ -108,14 +108,17 @@ The easiest way is Docker Compose. You need [Docker](https://docs.docker.com/get
    ADMIN_PASSWORD=choose-a-long-unique-password
    ENCRYPTION_KEY=paste-the-key-from-step-1
    COOKIE_SECURE=0
+   RELEASE_VERSION=v2.2.1
    ```
 
    Use `COOKIE_SECURE=0` only when you open the site at `http://127.0.0.1`. Behind HTTPS, use `1`.
 
-3. From the repository root, start it:
+3. From the repository root, download and start it:
 
    ```sh
-   docker compose -f docker-webui/docker-compose.yml up --build
+   cd docker-webui
+   docker compose -f docker-compose.yml -f docker-compose.registry.yml pull webui
+   docker compose -f docker-compose.yml -f docker-compose.registry.yml up -d --no-build --pull never webui
    ```
 
 4. Open <http://127.0.0.1:8080> and sign in with `ADMIN_USER` and `ADMIN_PASSWORD`.
@@ -123,6 +126,29 @@ The easiest way is Docker Compose. You need [Docker](https://docs.docker.com/get
 
 > [!WARNING]
 > Generate `ENCRYPTION_KEY` **once** and keep it somewhere safe. Use the same key after every update and restart. If you lose it or change it, every saved Lingos password becomes unreadable and all users must enter them again.
+
+### Update or roll back a running server
+
+1. Work in the **existing** Compose project directory. Keep its project name, `.env`, encryption key, port mapping and `/data` volume. If migrating from a local image, add `docker-compose.registry.yml` alongside your existing `docker-compose.yml` without overwriting local settings. Include any other overrides you normally use in the commands below. Keep the currently running image for rollback.
+2. Back up SQLite with an online backup (`sqlite3 .backup` or another SQLite backup tool) and back up `.env` and the Compose files privately. Do not copy the live database file on its own; it uses WAL. Check that the backup opens and passes `PRAGMA quick_check`.
+3. Pull the new image before stopping anything. If the package is private, use `docker login ghcr.io` with a GitHub account that has package access and a personal access token (classic) with `read:packages`. Use `--password-stdin`; don't put the token in `.env`.
+
+   ```sh
+   RELEASE_VERSION=v2.2.1 docker compose -f docker-compose.yml -f docker-compose.registry.yml pull webui
+   ```
+
+4. Wait for the active task to finish and choose a time without imminent scheduled runs. Avoid starting new tasks while switching. Set `RELEASE_VERSION=v2.2.1` in `.env`, then recreate only WebUI:
+
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.registry.yml up -d --no-deps --no-build --pull never webui
+   docker compose -f docker-compose.yml -f docker-compose.registry.yml ps webui
+   curl --fail --silent --show-error -o /dev/null http://127.0.0.1:8080/
+   ```
+
+   Use your actual local port in `curl`. Check the account list and **Worker version** on the admin Dashboard. A single instance will be briefly unavailable during the switch.
+5. If checks fail, restore the previous `RELEASE_VERSION` and run the same `up` command with the previous image already downloaded. If migrating from a local build, use the original Compose files and local image instead. Do not run `down -v`. Restore SQLite from backup only if required and with WebUI stopped; that discards changes made after the backup.
+
+The original `docker compose -f docker-webui/docker-compose.yml up -d --build` remains available for building from **published GitHub Release** assets instead of using Packages.
 
 ## Common problems
 

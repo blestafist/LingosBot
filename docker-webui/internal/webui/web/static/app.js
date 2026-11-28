@@ -154,6 +154,7 @@ function initWorkspace() {
     telegram: null, telegramLink: null, telegramBusy: false, telegramRequest: null, telegramTimer: null, telegramError: null,
     adminTelegramRequest: null, adminTelegramBusy: false,
     registrationMode: null,
+    telemetryEnabled: null, telemetrySaving: false, usersFetch: null,
     requestsFetch: null, requestsSignature: null,
   };
   let account = null;
@@ -194,6 +195,15 @@ function initWorkspace() {
     if (text && data === null) throw new Error('The server returned an unreadable response. Refresh and try again.');
     return data;
   }
+
+  async function loadWorkerVersion() {
+    const label = $('#worker-version');
+    if (!label) return;
+    let version;
+    try { version = (await api('/api/admin/worker-status'))?.version; } catch { /* Use Unknown when unavailable. */ }
+    label.textContent = `Worker version: ${version || 'Unknown'}`;
+  }
+  void loadWorkerVersion();
 
   function message(target, text, error = true) {
     const node = typeof target === 'string' ? $(target) : target;
@@ -288,6 +298,7 @@ function initWorkspace() {
     if (page.id === 'users') loadUsers();
   }
   window.addEventListener('hashchange', () => showPage(true));
+  const accountLoaded = loadAccount();
   showPage();
 
   function overrideRows() {
@@ -1491,29 +1502,106 @@ function initWorkspace() {
       if (state.requestsFetch === request) state.requestsFetch = null;
     }
   }
-  function userTelemetry(user) {
-    const run = user.last_lesson_run;
+  function telemetryList(fields) {
     const list = element('dl', 'user-telemetry');
-    for (const [label, value] of [
-      ['Account created', dateLabel(user.created_at)],
-      ['Last lesson run', run ? `${dateLabel(run.created_at)} · ${run.source === 'schedule' ? 'Scheduled' : 'Manual'} · ${statusLabels[run.status] || run.status}` : 'No lesson runs yet'],
-      ['Last run finished', run?.finished_at ? dateLabel(run.finished_at) : '—'],
-      ['Next automatic run', !user.schedule_enabled ? 'Paused' : user.disabled ? 'Account disabled' : user.next_run ? dateLabel(user.next_run) : 'Not scheduled yet'],
-    ]) {
+    for (const [label, value] of fields) {
       const item = element('div');
       item.append(element('dt', '', label), element('dd', '', value));
       list.append(item);
     }
     return list;
   }
+  function renderUserTelemetry(panel, user, data) {
+    const run = data.last_lesson_run, lesson = data.last_lesson, plan = data.plan;
+    panel.replaceChildren(element('h3', '', 'Activity'), telemetryList([
+      ['Account created', dateLabel(data.created_at)],
+      ['Last lesson run', run ? `${dateLabel(run.created_at)} · ${run.source === 'schedule' ? 'Scheduled' : 'Manual'} · ${statusLabels[run.status] || run.status}` : 'No lesson runs yet'],
+      ['Last run finished', run?.finished_at ? dateLabel(run.finished_at) : '—'],
+      ['Last completed lesson', lesson ? `${lesson.class_title} · #${lesson.lesson} · ${lesson.words_learned.toLocaleString()} words` : 'No completed lesson recorded'],
+      ['Next automatic run', user.disabled ? 'Account disabled' : !data.schedule_enabled ? 'Paused' : data.next_run ? dateLabel(data.next_run) : 'Not scheduled yet'],
+      ['Lessons completed', data.lessons_completed.toLocaleString()],
+      ['Words learned', data.words_learned.toLocaleString()],
+    ]), element('p', 'footnote', 'Totals are from successful LingosBot runs, not lifetime Lingos statistics or unique words.'));
+    panel.append(element('h3', '', 'Classes'));
+    if (data.classes?.length) {
+      const classes = element('ul', 'telemetry-classes');
+      for (const name of data.classes) classes.append(element('li', '', name));
+      panel.append(classes);
+    } else {
+      panel.append(element('p', 'footnote', data.classes ? 'No classes found at the last sync.' : 'Classes have not been synced.'));
+    }
+    panel.append(element('h3', '', 'Lesson plan'));
+    panel.append(plan ? telemetryList([
+      ['Default lessons per class', plan.lessonCount], ['Class overrides', plan.classOverrides],
+      ['Prompt safety cap', plan.lessonPromptSafetyCap], ['Errors per 100 words', plan.errorsPer100Words],
+      ['Answer delay', `${plan.answerDelayMinMs}–${plan.answerDelayMaxMs} ms`],
+      ['Request timeout', `${plan.requestTimeoutSeconds} s`], ['Max run time (saved)', `${plan.maxRunSeconds} s`],
+    ]) : element('p', 'footnote', 'Lesson plan unavailable.'));
+  }
+  function userTelemetry(user) {
+    const details = element('details', 'user-activity');
+    const content = element('div', 'user-activity-content');
+    details.append(element('summary', '', 'Activity & lesson plan'), content);
+    let pending;
+    async function load() {
+      pending?.abort();
+      content.replaceChildren();
+      if (!details.open || !details.isConnected) return;
+      const request = pending = new AbortController();
+      const loading = element('p', 'footnote', 'Loading activity…');
+      loading.setAttribute('role', 'status');
+      content.append(loading);
+      try {
+        const data = await api(`/api/admin/users/${encodeURIComponent(user.id)}/telemetry`, { signal: request.signal });
+        if (!request.signal.aborted && details.open && details.isConnected) renderUserTelemetry(content, user, data);
+      } catch (error) {
+        if (!request.signal.aborted && details.open && details.isConnected) empty(content, 'Activity unavailable', error.message, load);
+      }
+    }
+    details.addEventListener('toggle', load);
+    return details;
+  }
+  function updateTelemetryControls() {
+    const checkbox = $('#telemetry-enabled');
+    checkbox.disabled = state.telemetryEnabled === null || state.telemetrySaving;
+    const dirty = !checkbox.disabled && checkbox.checked !== state.telemetryEnabled;
+    const label = state.telemetrySaving ? 'Saving…' : checkbox.disabled ? 'Unavailable' : dirty ? 'Unsaved changes' : state.telemetryEnabled ? 'Enabled' : 'Disabled';
+    status($('#telemetry-state'), label, !dirty && state.telemetryEnabled ? 'good' : '');
+    $('#save-instance-settings').disabled = !dirty;
+  }
+  $('#telemetry-enabled')?.addEventListener('change', updateTelemetryControls);
+  $('#instance-settings-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const enabled = $('#telemetry-enabled').checked;
+    if (state.telemetrySaving || state.telemetryEnabled === null || state.telemetryEnabled === enabled) return;
+    state.telemetrySaving = true;
+    await withForm(event.currentTarget, '#instance-settings-error', async () => {
+      try {
+        await api('/api/admin/instance-settings', { method: 'PUT', body: { telemetry_enabled: enabled } });
+        notify(enabled ? 'User telemetry enabled.' : 'User telemetry disabled.');
+      } finally {
+        // A lost response may still have changed the saved policy. Discard stale activity before reloading.
+        $$('.user-activity').forEach(details => details.remove());
+        await loadUsers();
+      }
+    });
+    state.telemetrySaving = false;
+    updateTelemetryControls();
+  });
   async function loadUsers() {
     const container = $('#users-list');
     if (!container) return;
+    state.usersFetch?.abort();
+    const request = state.usersFetch = new AbortController();
     loadAdminTelegram();
     const requestsLoaded = loadRegistrationRequests(true);
     try {
-      const data = await api('/api/admin/users');
-      if (!Array.isArray(data?.users)) throw new Error('The user list could not be read.');
+      const data = await api('/api/admin/users', { signal: request.signal });
+      await accountLoaded;
+      if (request.signal.aborted) return;
+      if (!Array.isArray(data?.users) || typeof data.telemetry_enabled !== 'boolean') throw new Error('The user list could not be read.');
+      $('#telemetry-enabled').checked = state.telemetryEnabled = data.telemetry_enabled;
+      updateTelemetryControls();
       container.replaceChildren();
       const members = data.users.filter(user => !user.pending);
       if (!members.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
@@ -1562,9 +1650,17 @@ function initWorkspace() {
             else notify('Password reset. Share the new password securely.');
           });
         });
-        details.append(form); row.append(head, userTelemetry(user), details); container.append(row);
+        details.append(form);
+        row.append(head);
+        if (state.telemetryEnabled) row.append(userTelemetry(user));
+        row.append(details); container.append(row);
       }
-    } catch (error) { empty(container, 'Users unavailable', error.message, loadUsers); }
+    } catch (error) {
+      if (request.signal.aborted) return;
+      state.telemetryEnabled = null;
+      updateTelemetryControls();
+      empty(container, 'Users unavailable', error.message, loadUsers);
+    }
     finally { await requestsLoaded; }
   }
   $('#refresh-users')?.addEventListener('click', loadUsers);
@@ -1598,5 +1694,5 @@ function initWorkspace() {
     if (!document.hidden && !$('#account').hidden) loadTelegram();
     else stopTelegramPolling();
   });
-  Promise.allSettled([loadSettings(), loadClasses().then(loadLatestResult), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadAccount().then(loadUsers), loadRegistration()]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
+  Promise.allSettled([loadSettings(), loadClasses().then(loadLatestResult), loadCredentials(), loadLibrary(), loadSchedule(), loadRuns({ initial: true }), loadRegistrationRequests(), loadRegistration()]).then(() => { state.watchTimer = setTimeout(watchRuns, 10000); });
 }

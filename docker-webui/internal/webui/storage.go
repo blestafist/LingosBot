@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS auth_limits (key TEXT PRIMARY KEY, attempts INTEGER N
 CREATE INDEX IF NOT EXISTS auth_limits_expiry ON auth_limits(expires);
 CREATE TABLE IF NOT EXISTS registration_policy (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL CHECK(mode IN ('admin_only','approval','open')));
 INSERT OR IGNORE INTO registration_policy(id,mode) VALUES(1,'admin_only');
+CREATE TABLE IF NOT EXISTS instance_settings (id INTEGER PRIMARY KEY CHECK(id=1), telemetry_enabled INTEGER NOT NULL CHECK(telemetry_enabled IN (0,1)));
+INSERT OR IGNORE INTO instance_settings(id,telemetry_enabled) VALUES(1,1);
 `)
 	if err != nil {
 		return err
