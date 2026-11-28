@@ -108,7 +108,7 @@ The easiest way is [Docker Compose](https://docs.docker.com/get-docker/) (v2.24.
    ADMIN_PASSWORD=choose-a-long-unique-password
    ENCRYPTION_KEY=paste-the-key-from-step-1
    COOKIE_SECURE=0
-   RELEASE_VERSION=v2.2.1
+   RELEASE_VERSION=v2.2.2
    ```
 
    Use `COOKIE_SECURE=0` only when you open the site at `http://127.0.0.1`. Behind HTTPS, use `1`.
@@ -134,10 +134,10 @@ The easiest way is [Docker Compose](https://docs.docker.com/get-docker/) (v2.24.
 3. Pull the new image before stopping anything. If the package is private, use `docker login ghcr.io` with a GitHub account that has package access and a personal access token (classic) with `read:packages`. Use `--password-stdin`; don't put the token in `.env`.
 
    ```sh
-   RELEASE_VERSION=v2.2.1 docker compose -f docker-compose.yml -f docker-compose.registry.yml pull webui
+   RELEASE_VERSION=v2.2.2 docker compose -f docker-compose.yml -f docker-compose.registry.yml pull webui
    ```
 
-4. Wait for the active task to finish and choose a time without imminent scheduled runs. Avoid starting new tasks while switching. Set `RELEASE_VERSION=v2.2.1` in `.env`, then recreate only WebUI:
+4. Wait for the active task to finish and choose a time without imminent scheduled runs. Avoid starting new tasks while switching. Set `RELEASE_VERSION=v2.2.2` in `.env`, then recreate only WebUI:
 
    ```sh
    docker compose -f docker-compose.yml -f docker-compose.registry.yml up -d --no-deps --no-build --pull never webui
@@ -149,6 +149,10 @@ The easiest way is [Docker Compose](https://docs.docker.com/get-docker/) (v2.24.
 5. If checks fail, restore the previous `RELEASE_VERSION` and run the same `up` command with the previous image already downloaded. If migrating from a local build, use the original Compose files and local image instead. Do not run `down -v`. Restore SQLite from backup only if required and with WebUI stopped; that discards changes made after the backup.
 
 The original `docker compose -f docker-webui/docker-compose.yml up -d --build` remains available for building from **published GitHub Release** assets instead of using Packages.
+
+### Enable admin telemetry
+
+Admin telemetry is off by default. Set `ADMIN_TELEMETRY=1` in `docker-webui/.env` and recreate WebUI with the same Compose files you use for updates. For custom Compose files, pass `ADMIN_TELEMETRY` through the service's `environment:` section as well. To hide the activity panels and block their API again, set it to `0` and recreate. There is no switch in WebUI; the old instance setting does not carry over.
 
 ## Common problems
 

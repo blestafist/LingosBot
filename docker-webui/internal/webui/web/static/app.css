@@ -365,14 +365,23 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-row-head > div { min-width: 0; flex: 1 1 160px; }
 .user-email { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .user-row small { display: block; color: var(--muted); }
-.user-telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px 16px; margin: 0; font-size: 14px; }
-.user-telemetry dt { color: var(--muted); font-size: 12px; }
-.user-telemetry dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .user-row details { margin-top: 16px; border-radius: 20px; background: var(--surface); overflow: clip; }
 .user-row summary { padding: 12px 16px; min-height: 48px; }
 .user-activity-content { display: grid; gap: 12px; padding: 0 16px 16px; }
-.user-activity-content h3 { font-size: 15px; margin: 8px 0 0; }
-.telemetry-classes { display: grid; gap: 4px; margin: 0; padding-inline-start: 20px; font-size: 14px; overflow-wrap: anywhere; }
+.user-activity-content h3 { font-size: 15px; margin: 4px 0 0; }
+.telemetry-totals, .telemetry-facts { margin: 0; font-size: 14px; }
+.telemetry-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.telemetry-totals > div { display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--subtle); }
+.telemetry-totals dt, .telemetry-facts dt { color: var(--muted); }
+.telemetry-totals dt { font-size: 12px; }
+.telemetry-totals dd { margin: 0; font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.telemetry-facts > div, .telemetry-classes li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; align-items: baseline; padding-block: 6px; }
+.telemetry-facts dd { margin: 0; text-align: end; overflow-wrap: anywhere; }
+.telemetry-classes { list-style: none; margin: 0; padding: 4px 12px; border-radius: 12px; background: var(--subtle); font-size: 14px; }
+.telemetry-classes li { grid-template-columns: minmax(0, 1fr) auto; }
+.telemetry-class-name { overflow-wrap: anywhere; }
+.telemetry-class-count { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.telemetry-class-count.overridden { color: var(--ink); font-weight: 650; }
 .user-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
 .user-reset { display: grid; gap: 10px; max-width: 400px; margin-top: 16px; padding: 0 16px 16px; }
 .user-row > .user-controls { padding: 20px 0 0; }

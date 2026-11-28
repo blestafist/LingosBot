@@ -10,6 +10,7 @@ services:
       args:
         RELEASE_VERSION: ${RELEASE_VERSION:-latest} # v... | latest | latest-prerelease
     environment:
+      ADMIN_TELEMETRY: ${ADMIN_TELEMETRY:-0}
       # Go manages only the persistent worker at startup; WebUI updates need --build.
       RELEASE_VERSION: ${RELEASE_VERSION:-latest}
       LISTEN: :8080
