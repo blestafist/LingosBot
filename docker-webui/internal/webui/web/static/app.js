@@ -154,7 +154,7 @@ function initWorkspace() {
     telegram: null, telegramLink: null, telegramBusy: false, telegramRequest: null, telegramTimer: null, telegramError: null,
     adminTelegramRequest: null, adminTelegramBusy: false,
     registrationMode: null,
-    telemetryEnabled: null, telemetrySaving: false, usersFetch: null,
+    usersFetch: null,
     requestsFetch: null, requestsSignature: null,
   };
   let account = null;
@@ -1561,33 +1561,6 @@ function initWorkspace() {
     details.addEventListener('toggle', load);
     return details;
   }
-  function updateTelemetryControls() {
-    const checkbox = $('#telemetry-enabled');
-    checkbox.disabled = state.telemetryEnabled === null || state.telemetrySaving;
-    const dirty = !checkbox.disabled && checkbox.checked !== state.telemetryEnabled;
-    const label = state.telemetrySaving ? 'Saving…' : checkbox.disabled ? 'Unavailable' : dirty ? 'Unsaved changes' : state.telemetryEnabled ? 'Enabled' : 'Disabled';
-    status($('#telemetry-state'), label, !dirty && state.telemetryEnabled ? 'good' : '');
-    $('#save-instance-settings').disabled = !dirty;
-  }
-  $('#telemetry-enabled')?.addEventListener('change', updateTelemetryControls);
-  $('#instance-settings-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const enabled = $('#telemetry-enabled').checked;
-    if (state.telemetrySaving || state.telemetryEnabled === null || state.telemetryEnabled === enabled) return;
-    state.telemetrySaving = true;
-    await withForm(event.currentTarget, '#instance-settings-error', async () => {
-      try {
-        await api('/api/admin/instance-settings', { method: 'PUT', body: { telemetry_enabled: enabled } });
-        notify(enabled ? 'User telemetry enabled.' : 'User telemetry disabled.');
-      } finally {
-        // A lost response may still have changed the saved policy. Discard stale activity before reloading.
-        $$('.user-activity').forEach(details => details.remove());
-        await loadUsers();
-      }
-    });
-    state.telemetrySaving = false;
-    updateTelemetryControls();
-  });
   async function loadUsers() {
     const container = $('#users-list');
     if (!container) return;
@@ -1600,8 +1573,6 @@ function initWorkspace() {
       await accountLoaded;
       if (request.signal.aborted) return;
       if (!Array.isArray(data?.users) || typeof data.telemetry_enabled !== 'boolean') throw new Error('The user list could not be read.');
-      $('#telemetry-enabled').checked = state.telemetryEnabled = data.telemetry_enabled;
-      updateTelemetryControls();
       container.replaceChildren();
       const members = data.users.filter(user => !user.pending);
       if (!members.length) { empty(container, 'No users found.', 'Use the form below to add a user.'); return; }
@@ -1652,13 +1623,11 @@ function initWorkspace() {
         });
         details.append(form);
         row.append(head);
-        if (state.telemetryEnabled) row.append(userTelemetry(user));
+        if (data.telemetry_enabled) row.append(userTelemetry(user));
         row.append(details); container.append(row);
       }
     } catch (error) {
       if (request.signal.aborted) return;
-      state.telemetryEnabled = null;
-      updateTelemetryControls();
       empty(container, 'Users unavailable', error.message, loadUsers);
     }
     finally { await requestsLoaded; }

@@ -9,50 +9,9 @@ import (
 	"strconv"
 )
 
-type instanceSettings struct {
-	TelemetryEnabled bool `json:"telemetry_enabled"`
-}
-
-func (x *app) instanceSettingsAPI(w http.ResponseWriter, r *http.Request) {
-	actor, ok := x.apiUser(w, r)
-	if !ok {
-		return
-	}
-	if !actor.Admin {
-		apiError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-	var body struct {
-		TelemetryEnabled *bool `json:"telemetry_enabled"`
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.TelemetryEnabled == nil {
-		apiError(w, http.StatusBadRequest, "telemetry_enabled must be a boolean")
-		return
-	}
-	var settings instanceSettings
-	err := x.db.QueryRowContext(r.Context(), `UPDATE instance_settings SET telemetry_enabled=?
-		WHERE id=1 AND EXISTS(SELECT 1 FROM users WHERE id=? AND admin=1 AND disabled=0)
-		RETURNING telemetry_enabled`, *body.TelemetryEnabled, actor.ID).Scan(&settings.TelemetryEnabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		apiError(w, http.StatusForbidden, "forbidden")
-	} else if err != nil {
-		apiError(w, http.StatusInternalServerError, "storage error")
-	} else {
-		writeJSON(w, http.StatusOK, settings)
-	}
-}
-
 func (x *app) listAdminUsers(w http.ResponseWriter, r *http.Request) {
-	var result struct {
-		instanceSettings
-		Users []User `json:"users"`
-	}
-	result.Users = []User{}
-	rows, err := x.db.QueryContext(r.Context(), `SELECT u.id,u.email,u.admin,u.disabled,u.pending,s.telemetry_enabled
-		FROM users u CROSS JOIN instance_settings s WHERE s.id=1 ORDER BY u.id`)
+	users := []User{}
+	rows, err := x.db.QueryContext(r.Context(), `SELECT id,email,admin,disabled,pending FROM users ORDER BY id`)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
 		return
@@ -60,17 +19,17 @@ func (x *app) listAdminUsers(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending, &result.TelemetryEnabled); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Admin, &u.Disabled, &u.Pending); err != nil {
 			apiError(w, http.StatusInternalServerError, "storage error")
 			return
 		}
-		result.Users = append(result.Users, u)
+		users = append(users, u)
 	}
 	if rows.Err() != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]any{"users": users, "telemetry_enabled": x.telemetryEnabled})
 }
 
 type adminLessonRun struct {
@@ -120,6 +79,10 @@ func (x *app) adminUserTelemetryAPI(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	if !x.telemetryEnabled {
+		apiError(w, http.StatusForbidden, "User telemetry is disabled.")
+		return
+	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
 		apiError(w, http.StatusNotFound, "user not found")
@@ -132,15 +95,14 @@ func (x *app) adminUserTelemetryAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	var enabled bool
-	err = tx.QueryRowContext(ctx, `SELECT telemetry_enabled FROM instance_settings s JOIN users u
-		ON u.id=? AND u.admin=1 AND u.disabled=0 WHERE s.id=1`, actor.ID).Scan(&enabled)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var activeAdmin bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND admin=1 AND disabled=0)`, actor.ID).Scan(&activeAdmin)
+	if err != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
 		return
 	}
-	if !enabled {
-		apiError(w, http.StatusForbidden, "User telemetry is disabled or no longer available.")
+	if !activeAdmin {
+		apiError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 	var data adminTelemetry

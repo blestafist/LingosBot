@@ -313,6 +313,8 @@ class DeploymentConfigTests(unittest.TestCase):
                    "ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
             if version is not None:
                 env["RELEASE_VERSION"] = version
+            if version == "v2.0.1":
+                env["ADMIN_TELEMETRY"] = "1"
             result = subprocess.run(
                 [shutil.which("docker"), "compose", "--env-file", "/dev/null", "-f",
                  str(ROOT / "docker-webui/docker-compose.yml"), "config", "--format", "json"],
@@ -324,6 +326,7 @@ class DeploymentConfigTests(unittest.TestCase):
                 self.assertIs(service["build"]["no_cache"], True)
                 self.assertEqual(service["build"]["args"]["RELEASE_VERSION"], version or "latest")
                 self.assertEqual(service["environment"]["RELEASE_VERSION"], version or "latest")
+                self.assertEqual(service["environment"]["ADMIN_TELEMETRY"], env.get("ADMIN_TELEMETRY", "0"))
                 self.assertEqual(service["environment"]["ENCRYPTION_KEY"], env["ENCRYPTION_KEY"])
                 self.assertEqual(service["environment"]["COOKIE_SECURE"], "1")
                 self.assertEqual(service["environment"]["WORKER_BASE_URL"], "https://lingos.pl")

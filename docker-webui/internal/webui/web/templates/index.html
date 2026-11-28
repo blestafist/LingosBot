@@ -197,12 +197,6 @@
             </fieldset>
             <div class="panel-footer"><p>Pending requests still need approval after a mode change. Email addresses are not verified.</p><div class="actions"><button id="retry-registration" class="button" type="button" hidden>Retry</button><button id="save-registration" class="button primary" type="submit" disabled>Save mode</button></div></div>
           </form>
-          <form id="instance-settings-form" class="panel" aria-labelledby="instance-settings-heading">
-            <div class="panel-heading"><div><h2 id="instance-settings-heading">Instance settings</h2><p>Control whether administrators can view activity across the workspace.</p></div><span id="telemetry-state" class="status" role="status">Loading…</span></div>
-            <label class="check-row"><input id="telemetry-enabled" type="checkbox" disabled><span>Enable user telemetry</span></label>
-            <p id="instance-settings-error" class="message error" role="alert" hidden></p>
-            <div class="panel-footer"><p>Turning this off removes activity details from the admin panel and API. It does not delete users’ own history or stop scheduled lessons.</p><button id="save-instance-settings" class="button primary" type="submit" disabled>Save settings</button></div>
-          </form>
           <section class="panel"><div class="panel-heading"><div><h2>Workspace members</h2><p>Each user has their own credentials, plan, library and runs.</p></div></div><div id="users-list"><p class="empty">Loading users…</p></div></section>
           <section id="admin-telegram-panel" class="panel" aria-labelledby="admin-telegram-heading">
             <div class="panel-heading"><div><h2 id="admin-telegram-heading">Telegram connections</h2><p>All connected accounts, including disabled users. Only users can opt in to notifications.</p></div><button id="refresh-admin-telegram" class="button" type="button">Refresh connections</button></div>

@@ -11,6 +11,7 @@ import (
 
 func TestAdminUserTelemetry(t *testing.T) {
 	x := integrationApp(t)
+	x.telemetryEnabled = true
 	member := authTestUser(t, x, "member@example.com", false)
 	disabled := authTestUser(t, x, "disabled@example.com", false)
 	pending := authTestUser(t, x, "pending@example.com", false)
@@ -47,10 +48,9 @@ func TestAdminUserTelemetry(t *testing.T) {
 	}
 	handler := x.routes().ServeHTTP
 	adminToken, adminCSRF := authTestSession(t, x, 1)
-	memberToken, memberCSRF := authTestSession(t, x, member)
+	memberToken, _ := authTestSession(t, x, member)
 	list := "/api/admin/users"
 	path := func(id int64) string { return fmt.Sprintf("%s/%d/telemetry", list, id) }
-	setting := "/api/admin/instance-settings"
 	for _, check := range []struct {
 		method, path, body, token, csrf string
 		status                          int
@@ -60,9 +60,7 @@ func TestAdminUserTelemetry(t *testing.T) {
 		{"GET", path(member), "", "", "", 401},
 		{"GET", path(member), "", memberToken, "", 403},
 		{"GET", path(pending), "", adminToken, "", 404},
-		{"PUT", setting, `{"telemetry_enabled":false}`, memberToken, memberCSRF, 403},
-		{"PUT", setting, `{"telemetry_enabled":false}`, adminToken, "", 403},
-		{"PUT", setting, `{}`, adminToken, adminCSRF, 400},
+		{"PUT", "/api/admin/instance-settings", `{"telemetry_enabled":false}`, adminToken, adminCSRF, 404},
 	} {
 		if w := authTestRequest(handler, check.method, check.path, check.body, check.token, check.csrf); w.Code != check.status {
 			t.Fatalf("%s %s: got %d, want %d: %s", check.method, check.path, w.Code, check.status, w.Body.String())
@@ -114,23 +112,23 @@ func TestAdminUserTelemetry(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &data) != nil || data.NextRun != 0 || data.Classes != nil || data.LastLesson != nil || data.Plan == nil || data.Plan.LessonCount != 1 {
 		t.Fatalf("unexpected telemetry for disabled user: %d %s", w.Code, w.Body.String())
 	}
-	w = authTestRequest(handler, "PUT", setting, `{"telemetry_enabled":false}`, adminToken, adminCSRF)
-	if w.Code != http.StatusOK {
-		t.Fatalf("disable telemetry: %d %s", w.Code, w.Body.String())
-	}
-	if err := initDB(x.db); err != nil {
-		t.Fatal(err)
-	}
+	x.telemetryEnabled = false
 	checkList(false)
 	if w := authTestRequest(handler, "GET", path(member), "", adminToken, ""); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "Spanish") {
 		t.Fatalf("disabled telemetry exposed: %d %s", w.Code, w.Body.String())
 	}
-	w = authTestRequest(handler, "PUT", setting, `{"telemetry_enabled":true}`, adminToken, adminCSRF)
-	if w.Code != http.StatusOK {
-		t.Fatalf("enable telemetry: %d %s", w.Code, w.Body.String())
-	}
-	checkList(true)
-	if w := authTestRequest(handler, "GET", path(member), "", adminToken, ""); w.Code != http.StatusOK {
-		t.Fatalf("telemetry unavailable after re-enable: %d %s", w.Code, w.Body.String())
+}
+
+func TestAdminTelemetryEnv(t *testing.T) {
+	for _, tc := range []struct {
+		value         string
+		want, invalid bool
+	}{
+		{"", false, false}, {"0", false, false}, {"1", true, false}, {"true", true, false}, {"false", false, false}, {"typo", false, true},
+	} {
+		t.Setenv("ADMIN_TELEMETRY", tc.value)
+		if got, err := adminTelemetryEnabled(); got != tc.want || (err != nil) != tc.invalid {
+			t.Errorf("ADMIN_TELEMETRY=%q: got %v, %v", tc.value, got, err)
+		}
 	}
 }

@@ -150,6 +150,10 @@ The easiest way is [Docker Compose](https://docs.docker.com/get-docker/) (v2.24.
 
 The original `docker compose -f docker-webui/docker-compose.yml up -d --build` remains available for building from **published GitHub Release** assets instead of using Packages.
 
+### Enable admin telemetry
+
+Admin telemetry is off by default. Set `ADMIN_TELEMETRY=1` in `docker-webui/.env` and recreate WebUI with the same Compose files you use for updates. For custom Compose files, pass `ADMIN_TELEMETRY` through the service's `environment:` section as well. To hide the activity panels and block their API again, set it to `0` and recreate. There is no switch in WebUI; the old instance setting does not carry over.
+
 ## Common problems
 
 - **"Sign-in failed."** Check the email and password. If you just requested an account, an administrator must approve it first.

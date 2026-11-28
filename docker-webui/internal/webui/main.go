@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -23,17 +24,18 @@ import (
 )
 
 type app struct {
-	db              *sql.DB
-	aead            cipher.AEAD
-	worker          string
-	workerVersion   string
-	admin, password string
-	workerMu        sync.Mutex
-	runMu           sync.Mutex
-	cancels         map[int64]context.CancelFunc
-	workers         sync.WaitGroup
-	ctx             context.Context
-	telegram        *telegramBot
+	db               *sql.DB
+	aead             cipher.AEAD
+	worker           string
+	workerVersion    string
+	telemetryEnabled bool
+	admin, password  string
+	workerMu         sync.Mutex
+	runMu            sync.Mutex
+	cancels          map[int64]context.CancelFunc
+	workers          sync.WaitGroup
+	ctx              context.Context
+	telegram         *telegramBot
 }
 
 func Run() {
@@ -44,6 +46,10 @@ func Run() {
 
 func serve() error {
 	if _, err := workerExecutionLimit(); err != nil {
+		return err
+	}
+	telemetryEnabled, err := adminTelemetryEnabled()
+	if err != nil {
 		return err
 	}
 	raw, err := base64.StdEncoding.DecodeString(os.Getenv("ENCRYPTION_KEY"))
@@ -106,7 +112,7 @@ func serve() error {
 	if err := initDB(db); err != nil {
 		return err
 	}
-	x := &app{db: db, aead: a, worker: worker, admin: os.Getenv("ADMIN_USER"), password: os.Getenv("ADMIN_PASSWORD"), ctx: ctx}
+	x := &app{db: db, aead: a, worker: worker, telemetryEnabled: telemetryEnabled, admin: os.Getenv("ADMIN_USER"), password: os.Getenv("ADMIN_PASSWORD"), ctx: ctx}
 	if err := x.bootstrapAdmin(); err != nil {
 		return err
 	}
@@ -179,7 +185,6 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
 	mux.HandleFunc("GET /api/admin/users/{id}/telemetry", x.adminUserTelemetryAPI)
-	mux.HandleFunc("PUT /api/admin/instance-settings", x.instanceSettingsAPI)
 	mux.HandleFunc("/api/admin/registration", x.registrationAPI)
 	mux.HandleFunc("/api/admin/registration/requests", x.registrationRequestsAPI)
 	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
@@ -203,6 +208,13 @@ func env(k, d string) string {
 		return v
 	}
 	return d
+}
+func adminTelemetryEnabled() (bool, error) {
+	enabled, err := strconv.ParseBool(env("ADMIN_TELEMETRY", "0"))
+	if err != nil {
+		return false, errors.New("ADMIN_TELEMETRY must be a boolean (0, 1, false or true)")
+	}
+	return enabled, nil
 }
 
 func (x *app) home(w http.ResponseWriter, r *http.Request) {
