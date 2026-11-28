@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func (x *app) listAdminUsers(w http.ResponseWriter, r *http.Request) {
@@ -32,39 +33,30 @@ func (x *app) listAdminUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"users": users, "telemetry_enabled": x.telemetryEnabled})
 }
 
-type adminLessonRun struct {
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-	CreatedAt  int64  `json:"created_at"`
-	FinishedAt int64  `json:"finished_at"`
-}
-
 type adminLesson struct {
 	Class string `json:"class_title"`
 	Index int64  `json:"lesson"`
 	Words int64  `json:"words_learned"`
 }
 
-// Only named lesson-plan values leave the instance. Override names are user-entered
-// text and do not belong in telemetry, nor do endpoints or any other saved config.
 type adminLessonPlan struct {
-	LessonCount           int `json:"lessonCount"`
-	LessonPromptSafetyCap int `json:"lessonPromptSafetyCap"`
-	ErrorsPer100Words     int `json:"errorsPer100Words"`
-	AnswerDelayMinMs      int `json:"answerDelayMinMs"`
-	AnswerDelayMaxMs      int `json:"answerDelayMaxMs"`
-	RequestTimeoutSeconds int `json:"requestTimeoutSeconds"`
-	MaxRunSeconds         int `json:"maxRunSeconds"`
-	ClassOverrides        int `json:"classOverrides"`
+	LessonCount        int `json:"lessonCount"`
+	ErrorsPer100Words  int `json:"errorsPer100Words"`
+	UnmatchedOverrides int `json:"unmatchedOverrides"`
+}
+
+type adminClass struct {
+	Title    string `json:"title"`
+	Override *int   `json:"override"`
 }
 
 type adminTelemetry struct {
-	CreatedAt        int64            `json:"created_at"`
-	LastLessonRun    *adminLessonRun  `json:"last_lesson_run"`
+	LastRunAt        int64            `json:"last_run_at"`
+	LastRunStatus    string           `json:"last_run_status"`
 	LastLesson       *adminLesson     `json:"last_lesson"`
 	ScheduleEnabled  bool             `json:"schedule_enabled"`
 	NextRun          int64            `json:"next_run"`
-	Classes          []string         `json:"classes"`
+	Classes          []adminClass     `json:"classes"`
 	LessonsCompleted int64            `json:"lessons_completed"`
 	WordsLearned     int64            `json:"words_learned"`
 	Plan             *adminLessonPlan `json:"plan"`
@@ -106,16 +98,14 @@ func (x *app) adminUserTelemetryAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data adminTelemetry
-	var run adminLessonRun
 	var classes, config sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT u.created_at,
-		COALESCE(r.source,''),COALESCE(r.status,''),COALESCE(r.created_at,0),COALESCE(r.finished_at,0),
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(r.status,''),COALESCE(r.created_at,0),
 		COALESCE(s.enabled,0),CASE WHEN s.enabled=1 AND u.disabled=0 THEN s.next_run ELSE 0 END,c.data,p.config
 		FROM users u
 		LEFT JOIN runs r ON r.id=(SELECT id FROM runs WHERE user_id=u.id AND mode='run' ORDER BY id DESC LIMIT 1)
 		LEFT JOIN user_schedules s ON s.user_id=u.id LEFT JOIN class_cache c ON c.user_id=u.id
 		LEFT JOIN user_settings p ON p.user_id=u.id WHERE u.id=? AND u.pending=0`, id).
-		Scan(&data.CreatedAt, &run.Source, &run.Status, &run.CreatedAt, &run.FinishedAt,
+		Scan(&data.LastRunStatus, &data.LastRunAt,
 			&data.ScheduleEnabled, &data.NextRun, &classes, &config)
 	if errors.Is(err, sql.ErrNoRows) {
 		apiError(w, http.StatusNotFound, "user not found")
@@ -125,25 +115,17 @@ func (x *app) adminUserTelemetryAPI(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusInternalServerError, "storage error")
 		return
 	}
-	if run.Status != "" {
-		data.LastLessonRun = &run
-	}
+	var cached []cachedClass
 	if classes.Valid {
-		if cached, err := parseCachedClasses(json.RawMessage(classes.String)); err == nil {
-			data.Classes = make([]string, 0, len(cached))
-			for _, class := range cached {
-				data.Classes = append(data.Classes, class.Title)
-			}
-		}
+		cached, _ = parseCachedClasses(json.RawMessage(classes.String))
 	}
 	plan := defaultSettings()
 	if !config.Valid || json.Unmarshal([]byte(config.String), &plan) == nil {
-		data.Plan = &adminLessonPlan{
-			LessonCount: plan.LessonCount, LessonPromptSafetyCap: plan.LessonPromptSafetyCap,
-			ErrorsPer100Words: plan.ErrorsPer100Words, AnswerDelayMinMs: plan.AnswerDelayMinMs,
-			AnswerDelayMaxMs: plan.AnswerDelayMaxMs, RequestTimeoutSeconds: plan.RequestTimeoutSeconds,
-			MaxRunSeconds: plan.MaxRunSeconds, ClassOverrides: len(plan.ClassLessonCounts),
-		}
+		var unmatched int
+		data.Classes, unmatched = adminClassOverrides(cached, plan.ClassLessonCounts)
+		data.Plan = &adminLessonPlan{plan.LessonCount, plan.ErrorsPer100Words, unmatched}
+	} else {
+		data.Classes, _ = adminClassOverrides(cached, nil)
 	}
 	if err := data.readLessonTelemetry(ctx, tx, id); err != nil {
 		apiError(w, http.StatusInternalServerError, "storage error")
@@ -154,6 +136,40 @@ func (x *app) adminUserTelemetryAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
+}
+
+func adminClassOverrides(classes []cachedClass, overrides map[string]int) ([]adminClass, int) {
+	if classes == nil {
+		return nil, len(overrides)
+	}
+	// Like the worker, prefer a stable ID; a title only applies when unique.
+	counts := make(map[string]int, len(overrides))
+	for key, count := range overrides {
+		counts[strings.ToLower(key)] = count
+	}
+	titles := make(map[string]int, len(classes))
+	for _, class := range classes {
+		titles[strings.ToLower(class.Title)]++
+	}
+	matched := make(map[string]bool)
+	result := make([]adminClass, 0, len(classes))
+	for _, class := range classes {
+		entry := adminClass{Title: class.Title}
+		key := "group:" + class.GroupID
+		count, ok := counts[key]
+		if !ok {
+			key = strings.ToLower(class.Title)
+			if titles[key] == 1 {
+				count, ok = counts[key]
+			}
+		}
+		if ok {
+			entry.Override = &count
+			matched[key] = true
+		}
+		result = append(result, entry)
+	}
+	return result, len(overrides) - len(matched)
 }
 
 func (t *adminTelemetry) readLessonTelemetry(ctx context.Context, tx *sql.Tx, userID int64) error {

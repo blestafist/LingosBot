@@ -38,8 +38,8 @@ func TestAdminUserTelemetry(t *testing.T) {
 			(3,1,'{"type":"result","success":true,"lessons_completed":50,"words_learned":50}'),
 			(4,1,'{"type":"result","success":true,"lessons_completed":60,"words_learned":60}'),
 			(5,1,'{"type":"result","success":true,"lessons_completed":70,"words_learned":70}')`, nil},
-		{`INSERT INTO class_cache(user_id,data) VALUES(?, '[{"title":"Polish","group_id":"7","secret":"private class data"},{"title":"Spanish","group_id":"8"}]')`, []any{member}},
-		{`INSERT INTO user_settings(user_id,config) VALUES(?, '{"lessonCount":2,"baseUrl":"https://private.example","classLessonCounts":{"private override":3},"credentials":{"email":"private config"}}')`, []any{member}},
+		{`INSERT INTO class_cache(user_id,data) VALUES(?, '[{"title":"Polish","group_id":"7","secret":"private class data"},{"title":"Spanish","group_id":"8"},{"title":"English","group_id":"9"}]')`, []any{member}},
+		{`INSERT INTO user_settings(user_id,config) VALUES(?, '{"lessonCount":2,"errorsPer100Words":4,"baseUrl":"https://private.example","classLessonCounts":{"private override":3,"GROUP:7":0,"spanish":5},"credentials":{"email":"private config"}}')`, []any{member}},
 		{`INSERT INTO user_credentials(user_id,email,password) VALUES(?, 'hidden@lingos.example', X'ABCD')`, []any{member}},
 	} {
 		if _, err := x.db.Exec(statement.query, statement.args...); err != nil {
@@ -92,17 +92,19 @@ func TestAdminUserTelemetry(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &data) != nil {
 		t.Fatalf("telemetry unavailable: %d %s", w.Code, w.Body.String())
 	}
-	if data.CreatedAt <= 0 || !data.ScheduleEnabled || data.NextRun != 500 || data.LessonsCompleted != 3 || data.WordsLearned != 16 ||
-		!reflect.DeepEqual(data.Classes, []string{"Polish", "Spanish"}) || data.Plan == nil || data.Plan.LessonCount != 2 || data.Plan.ClassOverrides != 1 {
+	zero, five := 0, 5
+	if !data.ScheduleEnabled || data.NextRun != 500 || data.LessonsCompleted != 3 || data.WordsLearned != 16 ||
+		!reflect.DeepEqual(data.Classes, []adminClass{{"Polish", &zero}, {"Spanish", &five}, {"English", nil}}) ||
+		data.Plan == nil || *data.Plan != (adminLessonPlan{LessonCount: 2, ErrorsPer100Words: 4, UnmatchedOverrides: 1}) {
 		t.Fatalf("unexpected telemetry: %+v", data)
 	}
-	if want := (adminLessonRun{"manual", "failed", 300, 320}); data.LastLessonRun == nil || *data.LastLessonRun != want {
-		t.Fatalf("unexpected latest run: %+v", data.LastLessonRun)
+	if data.LastRunAt != 300 || data.LastRunStatus != "failed" {
+		t.Fatalf("unexpected latest run: %d %s", data.LastRunAt, data.LastRunStatus)
 	}
 	if want := (adminLesson{"Spanish", 2, 8}); data.LastLesson == nil || *data.LastLesson != want {
 		t.Fatalf("unexpected last completed lesson: %+v", data.LastLesson)
 	}
-	for _, private := range []string{"private", "hidden@lingos.example", "summary", "password", "group_id", "baseUrl", "studentDashboardUrl", "classLessonCounts"} {
+	for _, private := range []string{"private", "hidden@lingos.example", "summary", "password", "group_id", "baseUrl", "studentDashboardUrl", "classLessonCounts", "created_at", "finished_at", "requestTimeoutSeconds", "lessonPromptSafetyCap", "maxRunSeconds", "answerDelay"} {
 		if strings.Contains(w.Body.String(), private) {
 			t.Errorf("telemetry contains %q: %s", private, w.Body.String())
 		}
@@ -116,6 +118,16 @@ func TestAdminUserTelemetry(t *testing.T) {
 	checkList(false)
 	if w := authTestRequest(handler, "GET", path(member), "", adminToken, ""); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "Spanish") {
 		t.Fatalf("disabled telemetry exposed: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminClassOverrides(t *testing.T) {
+	classes := []cachedClass{{Title: "Polish", GroupID: "1"}, {Title: "POLISH", GroupID: "2"}, {Title: "English", GroupID: "3"}}
+	got, unmatched := adminClassOverrides(classes, map[string]int{"polish": 9, "group:2": 0, "english": 10, "group:3": 2})
+	zero, two := 0, 2
+	want := []adminClass{{"Polish", nil}, {"POLISH", &zero}, {"English", &two}}
+	if !reflect.DeepEqual(got, want) || unmatched != 2 {
+		t.Fatalf("classes=%+v unmatched=%d; want %+v, 2", got, unmatched, want)
 	}
 }
 

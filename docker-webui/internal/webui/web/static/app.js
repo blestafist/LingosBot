@@ -1502,8 +1502,8 @@ function initWorkspace() {
       if (state.requestsFetch === request) state.requestsFetch = null;
     }
   }
-  function telemetryList(fields) {
-    const list = element('dl', 'user-telemetry');
+  function telemetryList(fields, className) {
+    const list = element('dl', className);
     for (const [label, value] of fields) {
       const item = element('div');
       item.append(element('dt', '', label), element('dd', '', value));
@@ -1512,31 +1512,32 @@ function initWorkspace() {
     return list;
   }
   function renderUserTelemetry(panel, user, data) {
-    const run = data.last_lesson_run, lesson = data.last_lesson, plan = data.plan;
-    panel.replaceChildren(element('h3', '', 'Activity'), telemetryList([
-      ['Account created', dateLabel(data.created_at)],
-      ['Last lesson run', run ? `${dateLabel(run.created_at)} · ${run.source === 'schedule' ? 'Scheduled' : 'Manual'} · ${statusLabels[run.status] || run.status}` : 'No lesson runs yet'],
-      ['Last run finished', run?.finished_at ? dateLabel(run.finished_at) : '—'],
-      ['Last completed lesson', lesson ? `${lesson.class_title} · #${lesson.lesson} · ${lesson.words_learned.toLocaleString()} words` : 'No completed lesson recorded'],
-      ['Next automatic run', user.disabled ? 'Account disabled' : !data.schedule_enabled ? 'Paused' : data.next_run ? dateLabel(data.next_run) : 'Not scheduled yet'],
+    const lesson = data.last_lesson, plan = data.plan;
+    panel.replaceChildren(telemetryList([
       ['Lessons completed', data.lessons_completed.toLocaleString()],
       ['Words learned', data.words_learned.toLocaleString()],
-    ]), element('p', 'footnote', 'Totals are from successful LingosBot runs, not lifetime Lingos statistics or unique words.'));
-    panel.append(element('h3', '', 'Classes'));
-    if (data.classes?.length) {
-      const classes = element('ul', 'telemetry-classes');
-      for (const name of data.classes) classes.append(element('li', '', name));
-      panel.append(classes);
-    } else {
-      panel.append(element('p', 'footnote', data.classes ? 'No classes found at the last sync.' : 'Classes have not been synced.'));
-    }
+    ], 'telemetry-totals'), element('p', 'footnote', 'Totals from successful LingosBot runs.'), telemetryList([
+      ['Latest run', data.last_run_at ? `${dateLabel(data.last_run_at)} · ${statusLabels[data.last_run_status] || data.last_run_status}` : 'No runs yet'],
+      ['Latest completed lesson', lesson ? `${lesson.class_title} · #${lesson.lesson} · ${lesson.words_learned.toLocaleString()} words` : 'None recorded'],
+      ['Next automatic run', user.disabled ? 'Account disabled' : !data.schedule_enabled ? 'Paused' : data.next_run ? dateLabel(data.next_run) : 'Not scheduled yet'],
+    ], 'telemetry-facts'));
     panel.append(element('h3', '', 'Lesson plan'));
     panel.append(plan ? telemetryList([
-      ['Default lessons per class', plan.lessonCount], ['Class overrides', plan.classOverrides],
-      ['Prompt safety cap', plan.lessonPromptSafetyCap], ['Errors per 100 words', plan.errorsPer100Words],
-      ['Answer delay', `${plan.answerDelayMinMs}–${plan.answerDelayMaxMs} ms`],
-      ['Request timeout', `${plan.requestTimeoutSeconds} s`], ['Max run time (saved)', `${plan.maxRunSeconds} s`],
-    ]) : element('p', 'footnote', 'Lesson plan unavailable.'));
+      ['Default lessons per class', plan.lessonCount], ['Errors per 100 words', plan.errorsPer100Words],
+    ], 'telemetry-facts') : element('p', 'footnote', 'Lesson plan unavailable.'));
+    if (data.classes?.length) {
+      const classes = element('ul', 'telemetry-classes');
+      for (const { title, override } of data.classes) {
+        const row = element('li');
+        const label = override === 0 ? '0 · Skipped' : override != null ? `${override} · Override` : plan ? `${plan.lessonCount} · Default` : 'Unavailable';
+        row.append(element('span', 'telemetry-class-name', title), element('span', `telemetry-class-count${override == null ? '' : ' overridden'}`, label));
+        classes.append(row);
+      }
+      panel.append(classes);
+    } else {
+      panel.append(element('p', 'footnote', data.classes ? 'No synced classes found.' : 'Classes have not been synced.'));
+    }
+    if (plan?.unmatchedOverrides) panel.append(element('p', 'footnote', `Saved overrides not shown: ${plan.unmatchedOverrides}. Only overrides matched to synced classes are listed.`));
   }
   function userTelemetry(user) {
     const details = element('details', 'user-activity');
