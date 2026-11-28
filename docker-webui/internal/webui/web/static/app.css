@@ -365,11 +365,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-row-head > div { min-width: 0; flex: 1 1 160px; }
 .user-email { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .user-row small { display: block; color: var(--muted); }
-.user-telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px 16px; margin: 16px 0 0; font-size: 14px; }
+.user-telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px 16px; margin: 0; font-size: 14px; }
 .user-telemetry dt { color: var(--muted); font-size: 12px; }
 .user-telemetry dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .user-row details { margin-top: 16px; border-radius: 20px; background: var(--surface); overflow: clip; }
 .user-row summary { padding: 12px 16px; min-height: 48px; }
+.user-activity-content { display: grid; gap: 12px; padding: 0 16px 16px; }
+.user-activity-content h3 { font-size: 15px; margin: 8px 0 0; }
+.telemetry-classes { display: grid; gap: 4px; margin: 0; padding-inline-start: 20px; font-size: 14px; overflow-wrap: anywhere; }
 .user-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
 .user-reset { display: grid; gap: 10px; max-width: 400px; margin-top: 16px; padding: 0 16px 16px; }
 .user-row > .user-controls { padding: 20px 0 0; }

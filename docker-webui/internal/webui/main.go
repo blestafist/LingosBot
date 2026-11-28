@@ -178,6 +178,8 @@ func (x *app) routes() http.Handler {
 	mux.HandleFunc("/api/telegram/link", x.telegramLinkAPI)
 	mux.HandleFunc("/api/admin/users", x.adminUsersAPI)
 	mux.HandleFunc("/api/admin/users/", x.adminUsersAPI)
+	mux.HandleFunc("GET /api/admin/users/{id}/telemetry", x.adminUserTelemetryAPI)
+	mux.HandleFunc("PUT /api/admin/instance-settings", x.instanceSettingsAPI)
 	mux.HandleFunc("/api/admin/registration", x.registrationAPI)
 	mux.HandleFunc("/api/admin/registration/requests", x.registrationRequestsAPI)
 	mux.HandleFunc("/api/admin/telegram", x.adminTelegramAPI)
