@@ -68,7 +68,7 @@
         <div id="notice" class="message" role="status" tabindex="-1" hidden></div>
 
         <section id="dashboard" class="page" data-page aria-labelledby="dashboard-heading">
-          <div class="page-heading"><div><h1 id="dashboard-heading" tabindex="-1">Dashboard</h1><p class="description">A little practice. Every day.</p></div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
+          <div class="page-heading"><div><h1 id="dashboard-heading" tabindex="-1">Dashboard</h1><p class="description">A little practice. Every day.</p>{{if .User.Admin}}<p class="footnote"><span class="status" id="worker-version" role="status">Worker version: Loading…</span></p>{{end}}</div><a class="status" id="credentials-overview" href="#account">Checking credentials…</a></div>
           {{if .User.Admin}}<div class="registration-notice" role="status"><a id="registration-overview" class="button tonal" href="#requests" hidden></a></div>{{end}}
           <div id="setup-card" class="setup-card" hidden><div><h2>Connect Lingos</h2><p>Save your Lingos login in Account to get started.</p></div><a class="button primary" href="#account">Connect Lingos <span aria-hidden="true">→</span></a></div>
           <div class="workspace-grid">

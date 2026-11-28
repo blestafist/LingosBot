@@ -195,6 +195,15 @@ function initWorkspace() {
     return data;
   }
 
+  async function loadWorkerVersion() {
+    const label = $('#worker-version');
+    if (!label) return;
+    let version;
+    try { version = (await api('/api/admin/worker-status'))?.version; } catch { /* Use Unknown when unavailable. */ }
+    label.textContent = `Worker version: ${version || 'Unknown'}`;
+  }
+  void loadWorkerVersion();
+
   function message(target, text, error = true) {
     const node = typeof target === 'string' ? $(target) : target;
     node.textContent = text || '';
